@@ -6,8 +6,11 @@ OpenAI-compatible HTTP endpoint, mirroring `benchmark/bfcl_v4/`.
 
 ## Why this shape
 
-Trida is a `trust_remote_code` block-diffusion arch that vLLM/sglang can't serve, but it fits on one
-GPU. We serve it with the **shared stack** in `benchmark/serving/`: N per-GPU replicas of
+This track predates `inference/`: it was built when stock vLLM/sglang could not load a
+`trust_remote_code` block-diffusion arch, so it serves the model directly on one GPU. `inference/` now
+serves this architecture on both backends and is the path to use for anything new; the shim is kept
+because the published numbers were produced with it. We serve it with the **shared stack** in
+`benchmark/serving/`: N per-GPU replicas of
 `serve_trida_openai.py` behind `router.py` (round-robin + failover). FunctionChat talks OpenAI
 **`/v1/chat/completions`** with `tools`; Trida ships no chat template, so the server builds a
 Qwen-style ChatML prompt and parses `<tool_call>` blocks into OpenAI `tool_calls` server-side.

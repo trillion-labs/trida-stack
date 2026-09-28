@@ -106,4 +106,3 @@ previous specs against exact AR logits (greedy accept), and the GDN state is com
 per-step intermediate-state ring with no copy-back. Since 2026-09-10 the step is presented to
 vLLM as a spec-decode batch (bonus token + 2N−2 drafts) so FULL cuda graphs capture the whole
 forward.
-

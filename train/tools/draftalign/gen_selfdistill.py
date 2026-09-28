@@ -71,7 +71,7 @@ async def process(sess, sems, row, rr):
         try:
             text, finish, gen_ids = await gen_turn(sess, sems[port], port, prompt_ids)
         except Exception as e:  # noqa: BLE001
-            stats["errors"] += 1; stats.setdefault("error_samples", []); 
+            stats["errors"] += 1; stats.setdefault("error_samples", []);
             if len(stats["error_samples"]) < 5: stats["error_samples"].append(str(e)[:160])
             return None
         if finish == "length":

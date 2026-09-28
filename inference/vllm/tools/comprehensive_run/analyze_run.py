@@ -112,7 +112,7 @@ for d in sorted(glob.glob(os.path.join(RUN, "*/"))):
         recs = [json.loads(l) for f in tr for l in open(f) if l.strip()]
         tok = sum(r["tokens"] for r in recs); fw = sum(r["decode_fwd"] for r in recs)
         if fw:
-            prev = tpf.get(name); 
+            prev = tpf.get(name);
             if prev and "n_req" in prev:
                 tok += prev["tokens"]; fw += prev["decode_fwd"]; nreq = prev["n_req"] + len(recs); pfw = prev["prefill_fwd"] + sum(r["prefill_fwd"] for r in recs)
             else:

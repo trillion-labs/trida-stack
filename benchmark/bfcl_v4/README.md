@@ -6,8 +6,11 @@ on `trillionlabs/Trida-7B-Preview`.
 ## Why this shape
 
 BFCL drives local models through an **OpenAI-compatible `/v1/completions`** endpoint (its `OSSHandler`
-normally spins up vLLM/sglang). Trida is a custom `trust_remote_code` block-diffusion arch that
-vLLM/sglang can't serve, but it fits on **one GPU (~15.5 GB bf16)**. So we:
+normally spins up vLLM/sglang). This track predates the serving work in `inference/`: it was built when
+stock vLLM/sglang could not load a `trust_remote_code` block-diffusion arch, and it serves the model
+directly with `model.generate(...)` on **one GPU (~15.5 GB bf16)** instead. `inference/` now serves this
+architecture on both backends (vLLM plugin, SGLang recipe) and is the path to use for anything new; the
+shim below is kept because the published BFCL numbers were produced with it. So we:
 
 1. Serve Trida with a tiny OpenAI shim (`serve_trida_openai.py`) that calls `model.generate(...)`.
 2. Run **one replica per GPU** (data-parallel) behind a round-robin `router.py` (throughput).

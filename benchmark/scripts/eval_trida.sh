@@ -1,4 +1,8 @@
 #!/bin/bash
+# NOTE: not runnable from a clean checkout. This script drives lm-eval through eval_dinfer.py,
+# part of the vendored dInfer harness that is not published in this repository. Kept as a record of
+# how the single-turn numbers were produced; serve from inference/ and use lm-evaluation-harness
+# directly for a runnable path.
 source $SHARED/miniconda3/etc/profile.d/conda.sh
 conda activate dinfer
 

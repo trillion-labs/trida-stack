@@ -1,4 +1,8 @@
 #!/bin/bash
+# NOTE: not runnable from a clean checkout. This script drives lm-eval through eval_dinfer.py,
+# part of the vendored dInfer harness that is not published in this repository. Kept as a record of
+# how the single-turn numbers were produced; serve from inference/ and use lm-evaluation-harness
+# directly for a runnable path.
 # Run Trida eval with vLLM (CPU build) on Mac: single process, gloo backend.
 # Requires vLLM installed for CPU (e.g. from vllm_source with uv as in README).
 # Usage: from dInfer/evaluations/, run: ./eval_trida_vllm_cpu.sh

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """OpenAI-compatible server for Trida-7B (block-diffusion), shared across benchmarks.
 
-Trida is a custom `trust_remote_code` architecture that vLLM/sglang can't serve, but the 7.76B
-model fits on a single GPU, so we load it via `AutoModelForCausalLM.from_pretrained(...)` and run
-its block-diffusion `model.generate(...)`. Exposes:
+Written before the serving stack in `inference/` existed, when stock vLLM/sglang could not load a
+`trust_remote_code` block-diffusion arch. The 7.76B model fits on a single GPU, so this loads it via
+`AutoModelForCausalLM.from_pretrained(...)` and runs its block-diffusion `model.generate(...)`.
+`inference/` now serves this architecture on both backends; this shim is kept because the published
+benchmark numbers were produced with it. Exposes:
 
     GET  /v1/models             -> {"data": [{"id": <model>, "object": "model"}]}
     POST /v1/completions         {"model","prompt","max_tokens","temperature","top_p","stop"}

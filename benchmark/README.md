@@ -20,9 +20,13 @@ benchmark/
 
 ### Default model
 
-The tool-use benches default to the public
-**[trillionlabs/Trida-7B-Preview](https://huggingface.co/trillionlabs/Trida-7B-Preview)** checkpoint
-(loaded with `trust_remote_code`, transformers 4.x). Point them at another checkpoint with
+The tool-use benches default to
+**[trillionlabs/Trida-7B-Preview](https://huggingface.co/trillionlabs/Trida-7B-Preview)** (public,
+loaded with `trust_remote_code`, transformers 4.x) — the checkpoint the published numbers in this
+directory were measured on. That is a different model from the one the rest of the repo documents:
+`inference/` and the root README use
+**[trillionlabs/Trida2.0-4B](https://huggingface.co/trillionlabs/Trida2.0-4B)**, the current
+two-stream reference checkpoint. Point any bench at another checkpoint with
 `MODEL=<hf-id-or-local-path>`.
 
 ### Tool-use / agent benchmarks (OpenAI-served)
@@ -61,12 +65,19 @@ repo (`tasks/gsm8k-trida.yaml`). **Scaffold** = integration stub, not yet runnab
 
 ## Running the lm-eval benchmarks
 
-The Slurm/driver scripts and the vendored dInfer harness that previously wrapped these runs are not
-part of this branch. The repo still ships the Trida lm-eval task at `tasks/gsm8k-trida.yaml`; run it
+The Slurm driver scripts and the vendored dInfer harness that once wrapped these runs are not
+published here. The repo still ships the Trida lm-eval task at `tasks/gsm8k-trida.yaml`; run it
 with a separately-installed
 [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) pointed at a served
 Trida endpoint (see `inference/` for serving). Only GSM8K has a Trida task scripted here; the other
 single-turn benchmarks use lm-evaluation-harness's own task definitions.
+
+## `scripts/` — not runnable here
+
+`scripts/eval_trida*.sh` drive lm-eval through `eval_dinfer.py`, part of the vendored dInfer harness
+that is not published in this repository, so these three scripts cannot run from a clean checkout.
+They are kept as a record of how the single-turn numbers were produced. For a runnable path, serve a
+checkpoint from `inference/` and point a separately-installed lm-evaluation-harness at it.
 
 ## Agentic tracks
 
