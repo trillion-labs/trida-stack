@@ -2,6 +2,10 @@
 #SBATCH --job-name=nccl-probe
 #SBATCH --nodes=2 --ntasks-per-node=1 --gres=gpu:8 --cpus-per-task=32 --mem=200G --exclusive --time=00:15:00
 #SBATCH --output=$SCRATCH/models/scratch/slurm/%x-%j.out
+# NOTE: published as a worked example, not as a runnable entry point. This script ran on our
+# SLURM cluster and sources a private driver tree ($SCRATCH/scripts/lib/) that is not part of this
+# repository; paths and partition names are ours. Read it for the methodology behind the numbers in
+# the docs, and adapt rather than run. See the README in this directory.
 # Which cross-node transport does NCCL get with memlock unlimited? (RoCE mlx5_0/1 works in ib_write_bw at 11 GB/s/card)
 ulimit -l unlimited; echo "memlock=$(ulimit -l)"
 P=$SCRATCH/scripts/lib/draftalign/nccl_probe.sh

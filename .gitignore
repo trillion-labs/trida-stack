@@ -58,6 +58,9 @@ scripts/diffusion_eval/*.jsonl
 
 # Slurm launch scripts are cluster-specific; keep them local, not in the remote.
 *.sbatch
+# ...except the job scripts published as worked examples (see the READMEs in those dirs).
+!train/tools/**/*.sbatch
+!inference/vllm/tools/**/*.sbatch
 
 # benchmark/ run artifacts (results, scores, logs) — outputs, not source
 benchmark/bfcl_v4/result/

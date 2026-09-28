@@ -1,4 +1,8 @@
 #!/bin/bash
+# NOTE: published as a worked example, not as a runnable entry point. This script ran on our
+# SLURM cluster and sources a private driver tree ($SCRATCH/scripts/lib/) that is not part of this
+# repository; paths and partition names are ours. Read it for the methodology behind the numbers in
+# the docs, and adapt rather than run. See the README in this directory.
 # Chain the draft-align experiment in Slurm: [gen job] -> main train (300 steps, ckpt 150/300) -> evals -> control train -> evals.
 # usage: autopilot_submit.sh <gen_job_id>
 set -u

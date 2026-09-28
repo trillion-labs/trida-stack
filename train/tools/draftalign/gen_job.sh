@@ -1,4 +1,8 @@
 #!/bin/bash
+# NOTE: published as a worked example, not as a runnable entry point. This script ran on our
+# SLURM cluster and sources a private driver tree ($SCRATCH/scripts/lib/) that is not part of this
+# repository; paths and partition names are ours. Read it for the methodology behind the numbers in
+# the docs, and adapt rather than run. See the README in this directory.
 # Two-node Slurm job body (srun one task per node): 8 stock vLLM AR replicas of step_18000 per node + gen_selfdistill.py
 # on this node's half. env: OUT_DIR COUNT_PER_NODE(20000) STRIDE(17) MAXTOK(16384)
 set -u

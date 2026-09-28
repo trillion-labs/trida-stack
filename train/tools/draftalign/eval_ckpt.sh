@@ -1,4 +1,8 @@
 #!/bin/bash
+# NOTE: published as a worked example, not as a runnable entry point. This script ran on our
+# SLURM cluster and sources a private driver tree ($SCRATCH/scripts/lib/) that is not part of this
+# repository; paths and partition names are ours. Read it for the methodology behind the numbers in
+# the docs, and adapt rather than run. See the README in this directory.
 # Per-checkpoint eval (one-node Slurm job each, queued): vLLM self-spec N=4 and N=8 (30 GSM8K items, traces -> tok/fwd +
 # accept histogram) and vLLM AR greedy (30 items) for the lossless guard vs step_18000. usage: eval_ckpt.sh <ckpt_dir> <tag>
 set -u

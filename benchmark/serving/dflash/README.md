@@ -14,3 +14,12 @@ the same GPUs and protocol as our self-spec sweeps, on both engines.
 Targets differ (stock Qwen3.5-4B for DFlash, trida for self-spec), so compare each method's speedup over its own AR
 on the same engine, plus absolute tok/s side by side. Block ladder: 4 / 8 / 16 (DFlash) and N = 4 / 8 / 16 / 32 (self-spec).
 Box paths: models `luke/models/dflash/`, envs `luke/env/{vllm-uv27,sglang-dflash}`, results `luke/runs/2026-09-11_dflash/`.
+
+## A note on these scripts
+
+These are the actual SLURM scripts behind the measurements quoted in the docs, published so the
+methodology is inspectable rather than asserted. They are **not runnable from a clean checkout**:
+they source a private driver tree (`$SCRATCH/scripts/lib/`) that is not part of this repository,
+and they assume our partition names, node counts and filesystem layout.
+
+Read them for what was run and how it was measured; adapt rather than execute.

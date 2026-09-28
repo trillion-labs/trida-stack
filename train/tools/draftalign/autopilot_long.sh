@@ -1,4 +1,8 @@
 #!/bin/bash
+# NOTE: published as a worked example, not as a runnable entry point. This script ran on our
+# SLURM cluster and sources a private driver tree ($SCRATCH/scripts/lib/) that is not part of this
+# repository; paths and partition names are ours. Read it for the methodology behind the numbers in
+# the docs, and adapt rather than run. See the README in this directory.
 # Long draft-align run on autopilot (user 2026-09-10: "drafter direction; if you need more steps, go for it; loop engineer it").
 # Chain: gen (already running, $GEN) -> dataset v2 (v1 shards + part2) -> train 1000 steps (2 nodes, round-1 speed
 # defaults, IB) -> per-checkpoint evals (vLLM self-spec N=4/8 + AR guard) -> offline per-slot diagnostic on 500/1000.

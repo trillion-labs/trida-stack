@@ -1,4 +1,8 @@
 #!/bin/bash
+# NOTE: published as a worked example, not as a runnable entry point. This script ran on our
+# SLURM cluster and sources a private driver tree ($SCRATCH/scripts/lib/) that is not part of this
+# repository; paths and partition names are ours. Read it for the methodology behind the numbers in
+# the docs, and adapt rather than run. See the README in this directory.
 # Concurrency sweep: 1 replica each of vllm-bd4, vllm-causal, sglang-bd4, sglang-causal on 4 GPUs;
 # fixed-output GSM8K bench (repo bench_gsm8k_fixed_output.py) at C in CONCS, LIMIT prompts each.
 set -u

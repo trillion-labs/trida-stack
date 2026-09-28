@@ -1,4 +1,8 @@
 #!/bin/bash
+# NOTE: published as a worked example, not as a runnable entry point. This script ran on our
+# SLURM cluster and sources a private driver tree ($SCRATCH/scripts/lib/) that is not part of this
+# repository; paths and partition names are ours. Read it for the methodology behind the numbers in
+# the docs, and adapt rather than run. See the README in this directory.
 # One-node Slurm job: several servers (one per GPU) of one engine, then the fixed-output GSM8K sweep against each.
 # env: RUN_DIR JOB ENGINE=vllm|sglang CFGS="name mode block;name mode block;..." CONCS("1 4 8 16") LIMIT(64) MAXTOK(512)
 #      MAXSEQS(16) SMOKE=1 -> LIMIT=10, CONCS="1", print 2 sample outputs

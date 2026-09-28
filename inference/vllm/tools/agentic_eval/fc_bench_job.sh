@@ -1,4 +1,8 @@
 #!/bin/bash
+# NOTE: published as a worked example, not as a runnable entry point. This script ran on our
+# SLURM cluster and sources a private driver tree ($SCRATCH/scripts/lib/) that is not part of this
+# repository; paths and partition names are ours. Read it for the methodology behind the numbers in
+# the docs, and adapt rather than run. See the README in this directory.
 # One-node micro-benchmark: 4 servers (AR, AR+prefix-cache, self-spec N=4, self-spec N=4+prefix-cache) on GPUs 0-3,
 # each replaying the same recorded FunctionChat singlecall requests sequentially. env: RUN_DIR NREQ(40) SRC CODE_DIR
 set -u
