@@ -1,0 +1,6 @@
+block_size: 4
+mask_id: 151669   # mask token id of the served checkpoint (model-specific)
+threshold: 0.9
+temperature: 0.1
+top_k: 0
+top_p: 1.0

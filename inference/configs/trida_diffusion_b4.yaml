@@ -1,0 +1,9 @@
+variant: hybrid_diffusion_shift
+block_size: 3
+gen_block_size: 1
+mask_id: 248077   # mask token id of the served checkpoint (model-specific)
+causal_prefill: true
+threshold: 0.95
+temperature: 1.0
+top_k: 20
+top_p: 0.95

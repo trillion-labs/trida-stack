@@ -1,0 +1,21 @@
+# Core runtime dependencies for trida-stack (training + inference/eval CLIs).
+# Read by pyproject.toml ([tool.setuptools.dynamic]); keep comments on their own lines.
+#
+# torch: install the CUDA 12.8 build to match your driver, e.g.
+#   uv pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
+# The two-stream training kernels are fetched separately (PolyForm-NC, not bundled);
+# see train/block_gated_delta_rule/README.md.
+torch==2.11.0
+numpy
+datasets
+huggingface_hub
+python-dotenv
+wandb
+# transformers 4.x only: the released Trida checkpoints' remote code breaks on 5.x.
+transformers>=4.57,<5
+accelerate
+sentencepiece
+tiktoken
+fsspec
+# vLLM / SGLang serving backends are optional and installed separately (see inference/).
+# lm-evaluation-harness is an optional extra: pip install ".[eval]".

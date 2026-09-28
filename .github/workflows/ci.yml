@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      # Pinned to match .pre-commit-config.yaml; rule set lives in pyproject [tool.ruff.lint].
+      - name: Install ruff
+        run: pip install ruff==0.9.10
+      - name: ruff check
+        run: ruff check .
+      # `ruff format --check` is not enforced yet (existing files predate the formatter).
+
+  test:
+    name: CPU tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      # CPU-only: install a CPU torch wheel and pytest, and register the package
+      # without its heavy CUDA-pinned deps (requirements.txt targets a GPU cluster).
+      # The CPU-safe tests below only need `torch` (CPU) and the local `serve`
+      # module; a GPU is not required.
+      - name: Install CPU deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install pytest
+          pip install -e . --no-deps
+      - name: Run CPU-safe tests
+        run: |
+          pytest -q \
+            inference/test_smoke.py \
+            inference/vllm/vllm_native_diffusion/test_two_stream_cpu.py

@@ -1,0 +1,8 @@
+block_size: 32
+mask_id: 156895   # mask token id of the served checkpoint (model-specific)
+threshold: 0.5
+edit_threshold: 0.0
+max_post_edit_steps: 16
+temperature: 0.1
+top_k: 0
+top_p: 1.0

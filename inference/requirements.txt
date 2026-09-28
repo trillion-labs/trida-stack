@@ -1,0 +1,12 @@
+# nano-inference client/eval deps (the serving backend — diffusion-serving SGLang —
+# is installed separately; point SGLANG_PYTHON at its interpreter).
+
+# serve.py / chat.py / eval.py (gsm8k, mmlu_pro)
+requests
+datasets
+
+# eval_ifeval.py only — Google Research IFEval scorer (vendored in ifeval_lib/, Apache-2.0)
+absl-py
+immutabledict
+langdetect
+nltk        # needs the 'punkt' tokenizer: python -c "import nltk; nltk.download('punkt')"

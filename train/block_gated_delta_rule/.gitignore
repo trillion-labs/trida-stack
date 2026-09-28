@@ -1,0 +1,3 @@
+# PolyForm-NC kernels are FETCHED (fetch_kernels.sh), never committed. See README.md.
+*.py
+__pycache__/

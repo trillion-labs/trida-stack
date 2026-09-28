@@ -1,0 +1,31 @@
+SGLang diffusion backend recipe
+Copyright 2026 Trillion Labs
+
+This directory does NOT vendor the SGLang backend. It provides a patch and a
+recipe to build it from public upstream sources. Each component below retains
+its own license; consult the upstream repositories for full terms.
+
+------------------------------------------------------------------------------
+Base project — HybridDiffusion
+  yuchen-zhu-zyc/HybridDiffusion @ commit 6ca547a ("Initial public release")
+  https://github.com/yuchen-zhu-zyc/HybridDiffusion
+  Licensed under the PolyForm Noncommercial License 1.0.0 (both the repository
+  root and the eval/ serving stack ship this license).
+  https://polyformproject.org/licenses/noncommercial/1.0.0
+
+  HybridDiffusion's eval/ serving stack is itself a modified fork of:
+
+    SGLang
+    https://github.com/sgl-project/sglang
+    Licensed under the Apache License, Version 2.0.
+------------------------------------------------------------------------------
+Patch — two_stream_diffusion.patch
+  Adds the two-stream Gated DeltaNet block-end readout and block-diffusion
+  decode algorithms that serve a Qwen3.5 two-stream checkpoint, as a diff
+  against the HybridDiffusion base commit above. Pure code; no model weights.
+------------------------------------------------------------------------------
+
+Because the HybridDiffusion base is distributed under the PolyForm Noncommercial
+License 1.0.0, the resulting patched backend inherits that license's
+noncommercial-use restriction. Use of this recipe is subject to the upstream
+license terms.

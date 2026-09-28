@@ -1,0 +1,581 @@
+{
+ "run": "$SCRATCH/runs/fulleval_20260910",
+ "gsm8k": {
+  "causal": {
+   "correct": 1032,
+   "total": 1319,
+   "acc": 0.7824109173616376,
+   "tokens": 2916954,
+   "wall_s": 1349.3793468475342,
+   "tok_s_16gpu": 2161.7004935007244
+  },
+  "selfspec-n4": {
+   "correct": 1026,
+   "total": 1319,
+   "acc": 0.7778620166793025,
+   "tokens": 2878869,
+   "wall_s": 914.1722893714905,
+   "tok_s_16gpu": 3149.1536480276304
+  },
+  "selfspec-n8": {
+   "correct": 1016,
+   "total": 1319,
+   "acc": 0.7702805155420773,
+   "tokens": 2876777,
+   "wall_s": 874.9300651550293,
+   "tok_s_16gpu": 3288.00793865766
+  },
+  "selfspec-n32": {
+   "correct": 1024,
+   "total": 1319,
+   "acc": 0.7763457164518575,
+   "tokens": 2879942,
+   "wall_s": 1237.4472284317017,
+   "tok_s_16gpu": 2327.325104319754
+  }
+ },
+ "fc": {
+  "causal": {
+   "singlecall_score": {
+    "exact total": 100,
+    "exact pass cnt": 95,
+    "exact pass rate": 0.95,
+    "4_random total": 100,
+    "4_random pass cnt": 93,
+    "4_random pass rate": 0.93,
+    "4_close total": 100,
+    "4_close pass cnt": 90,
+    "4_close pass rate": 0.9,
+    "8_random total": 100,
+    "8_random pass cnt": 94,
+    "8_random pass rate": 0.94,
+    "8_close total": 100,
+    "8_close pass cnt": 89,
+    "8_close pass rate": 0.89,
+    "total_cnt": 500,
+    "total_pass_cnt": 461,
+    "total_pass_rate": 0.922
+   },
+   "dialog_score": {
+    "call pass cnt": 63,
+    "call pass rate": 0.9,
+    "completion pass cnt": 66,
+    "completion pass rate": 0.9295774647887324,
+    "slot pass cnt": 31,
+    "slot pass rate": 0.8611111111111112,
+    "relevance pass cnt": 21,
+    "relevance pass rate": 0.9130434782608695,
+    "total_pass_cnt": 181,
+    "total_cnt": 200,
+    "avg(micro)": 0.905
+   },
+   "calldecision_score": {
+    "CALL pass cnt": 99,
+    "CALL pass rate": 0.99,
+    "REJECT pass cnt": 94,
+    "REJECT pass rate": 0.94,
+    "SLOT-all pass cnt": 97,
+    "SLOT-all pass rate": 0.97,
+    "SLOT-some pass cnt": 284,
+    "SLOT-some pass rate": 0.9281045751633987,
+    "total_pass_cnt": 574,
+    "total_cnt": 606,
+    "total_pass_rate": 0.9471947194719472
+   }
+  },
+  "selfspec-n4": {
+   "singlecall_score": {
+    "exact total": 100,
+    "exact pass cnt": 96,
+    "exact pass rate": 0.96,
+    "4_random total": 100,
+    "4_random pass cnt": 93,
+    "4_random pass rate": 0.93,
+    "4_close total": 100,
+    "4_close pass cnt": 89,
+    "4_close pass rate": 0.89,
+    "8_random total": 100,
+    "8_random pass cnt": 94,
+    "8_random pass rate": 0.94,
+    "8_close total": 100,
+    "8_close pass cnt": 88,
+    "8_close pass rate": 0.88,
+    "total_cnt": 500,
+    "total_pass_cnt": 460,
+    "total_pass_rate": 0.92
+   },
+   "dialog_score": {
+    "call pass cnt": 63,
+    "call pass rate": 0.9,
+    "completion pass cnt": 67,
+    "completion pass rate": 0.9436619718309859,
+    "slot pass cnt": 31,
+    "slot pass rate": 0.8611111111111112,
+    "relevance pass cnt": 20,
+    "relevance pass rate": 0.8695652173913043,
+    "total_pass_cnt": 181,
+    "total_cnt": 200,
+    "avg(micro)": 0.905
+   },
+   "calldecision_score": {
+    "CALL pass cnt": 99,
+    "CALL pass rate": 0.99,
+    "REJECT pass cnt": 93,
+    "REJECT pass rate": 0.93,
+    "SLOT-all pass cnt": 98,
+    "SLOT-all pass rate": 0.98,
+    "SLOT-some pass cnt": 280,
+    "SLOT-some pass rate": 0.9150326797385621,
+    "total_pass_cnt": 570,
+    "total_cnt": 606,
+    "total_pass_rate": 0.9405940594059405
+   }
+  },
+  "selfspec-n8": {
+   "singlecall_score": {
+    "exact total": 100,
+    "exact pass cnt": 96,
+    "exact pass rate": 0.96,
+    "4_random total": 100,
+    "4_random pass cnt": 93,
+    "4_random pass rate": 0.93,
+    "4_close total": 100,
+    "4_close pass cnt": 88,
+    "4_close pass rate": 0.88,
+    "8_random total": 100,
+    "8_random pass cnt": 94,
+    "8_random pass rate": 0.94,
+    "8_close total": 100,
+    "8_close pass cnt": 88,
+    "8_close pass rate": 0.88,
+    "total_cnt": 500,
+    "total_pass_cnt": 459,
+    "total_pass_rate": 0.918
+   },
+   "dialog_score": {
+    "call pass cnt": 64,
+    "call pass rate": 0.9142857142857143,
+    "completion pass cnt": 65,
+    "completion pass rate": 0.9154929577464789,
+    "slot pass cnt": 30,
+    "slot pass rate": 0.8333333333333334,
+    "relevance pass cnt": 20,
+    "relevance pass rate": 0.8695652173913043,
+    "total_pass_cnt": 179,
+    "total_cnt": 200,
+    "avg(micro)": 0.895
+   },
+   "calldecision_score": {
+    "CALL pass cnt": 99,
+    "CALL pass rate": 0.99,
+    "REJECT pass cnt": 95,
+    "REJECT pass rate": 0.95,
+    "SLOT-all pass cnt": 98,
+    "SLOT-all pass rate": 0.98,
+    "SLOT-some pass cnt": 281,
+    "SLOT-some pass rate": 0.9183006535947712,
+    "total_pass_cnt": 573,
+    "total_cnt": 606,
+    "total_pass_rate": 0.9455445544554455
+   }
+  },
+  "selfspec-n32": {
+   "singlecall_score": {
+    "exact total": 100,
+    "exact pass cnt": 96,
+    "exact pass rate": 0.96,
+    "4_random total": 100,
+    "4_random pass cnt": 91,
+    "4_random pass rate": 0.91,
+    "4_close total": 100,
+    "4_close pass cnt": 86,
+    "4_close pass rate": 0.86,
+    "8_random total": 100,
+    "8_random pass cnt": 94,
+    "8_random pass rate": 0.94,
+    "8_close total": 100,
+    "8_close pass cnt": 87,
+    "8_close pass rate": 0.87,
+    "total_cnt": 500,
+    "total_pass_cnt": 454,
+    "total_pass_rate": 0.908
+   },
+   "dialog_score": {
+    "call pass cnt": 63,
+    "call pass rate": 0.9,
+    "completion pass cnt": 65,
+    "completion pass rate": 0.9154929577464789,
+    "slot pass cnt": 28,
+    "slot pass rate": 0.7777777777777778,
+    "relevance pass cnt": 21,
+    "relevance pass rate": 0.9130434782608695,
+    "total_pass_cnt": 177,
+    "total_cnt": 200,
+    "avg(micro)": 0.885
+   },
+   "calldecision_score": {
+    "CALL pass cnt": 99,
+    "CALL pass rate": 0.99,
+    "REJECT pass cnt": 96,
+    "REJECT pass rate": 0.96,
+    "SLOT-all pass cnt": 97,
+    "SLOT-all pass rate": 0.97,
+    "SLOT-some pass cnt": 279,
+    "SLOT-some pass rate": 0.9117647058823529,
+    "total_pass_cnt": 571,
+    "total_cnt": 606,
+    "total_pass_rate": 0.9422442244224423
+   }
+  }
+ },
+ "koab": {
+  "causal": {
+   "levels": {
+    "L1": {
+     "Total_Tasks": 11.0,
+     "Evaluated_Tasks": 11.0,
+     "Avg_Exec_Time": 17.19,
+     "Avg_Tokens": 5976.64,
+     "Avg_TPS": 347.73,
+     "EPR_CVR": 0.9091,
+     "RRR": 1.0,
+     "SR": 0.8182,
+     "pass@k": 1.0
+    },
+    "L2": {
+     "Total_Tasks": 15.0,
+     "Evaluated_Tasks": 15.0,
+     "Avg_Exec_Time": 14.33,
+     "Avg_Tokens": 5984.73,
+     "Avg_TPS": 417.74,
+     "EPR_CVR": 0.9333,
+     "RRR": 0.9333,
+     "SR": 0.8667,
+     "pass@k": 0.9333
+    },
+    "L3": {
+     "Total_Tasks": 10.0,
+     "Evaluated_Tasks": 10.0,
+     "Avg_Exec_Time": 76.71,
+     "Avg_Tokens": 30061.6,
+     "Avg_TPS": 391.91,
+     "EPR_CVR": 0.55,
+     "RRR": 0.9,
+     "SR": 0.3,
+     "pass@k": 0.9
+    },
+    "L4": {
+     "Total_Tasks": 10.0,
+     "Evaluated_Tasks": 10.0,
+     "Avg_Exec_Time": 30.03,
+     "Avg_Tokens": 20347.2,
+     "Avg_TPS": 677.46,
+     "EPR_CVR": 0.4758,
+     "RRR": 0.8,
+     "SR": 0.5,
+     "pass@k": 0.8
+    },
+    "L5": {
+     "Total_Tasks": 20.0,
+     "Evaluated_Tasks": 20.0,
+     "Avg_Exec_Time": 38.92,
+     "Avg_Tokens": 19932.65,
+     "Avg_TPS": 512.09,
+     "EPR_CVR": 0.0763,
+     "RRR": 0.9,
+     "SR": 0.25,
+     "pass@k": 0.9
+    },
+    "L6": {
+     "Total_Tasks": 15.0,
+     "Evaluated_Tasks": 15.0,
+     "Avg_Exec_Time": 9.03,
+     "Avg_Tokens": 3802.73,
+     "Avg_TPS": 421.04,
+     "EPR_CVR": 0.1333,
+     "RRR": 1.0,
+     "SR": 0.8,
+     "pass@k": 1.0
+    },
+    "L7": {
+     "Total_Tasks": 10.0,
+     "Evaluated_Tasks": 10.0,
+     "Avg_Exec_Time": 10.34,
+     "Avg_Tokens": 7501.7,
+     "Avg_TPS": 725.23,
+     "EPR_CVR": 0.2,
+     "RRR": 1.0,
+     "SR": 0.6,
+     "pass@k": 1.0
+    }
+   },
+   "sr_weighted": 0.5824252747252747,
+   "sr_mean": 0.5907,
+   "tasks": 91.0,
+   "tps_mean": 499.02857142857147,
+   "api_timeouts": 0,
+   "context_exceeded": 56
+  },
+  "selfspec-n4": {
+   "levels": {
+    "L1": {
+     "Total_Tasks": 11.0,
+     "Evaluated_Tasks": 11.0,
+     "Avg_Exec_Time": 20.55,
+     "Avg_Tokens": 8977.18,
+     "Avg_TPS": 436.92,
+     "EPR_CVR": 0.9091,
+     "RRR": 1.0,
+     "SR": 0.7273,
+     "pass@k": 1.0
+    },
+    "L2": {
+     "Total_Tasks": 15.0,
+     "Evaluated_Tasks": 15.0,
+     "Avg_Exec_Time": 6.94,
+     "Avg_Tokens": 6965.4,
+     "Avg_TPS": 1004.37,
+     "EPR_CVR": 0.9333,
+     "RRR": 0.9333,
+     "SR": 0.8667,
+     "pass@k": 0.9333
+    },
+    "L3": {
+     "Total_Tasks": 10.0,
+     "Evaluated_Tasks": 10.0,
+     "Avg_Exec_Time": 29.5,
+     "Avg_Tokens": 24822.1,
+     "Avg_TPS": 841.49,
+     "EPR_CVR": 0.45,
+     "RRR": 0.9,
+     "SR": 0.4,
+     "pass@k": 0.9
+    },
+    "L4": {
+     "Total_Tasks": 10.0,
+     "Evaluated_Tasks": 10.0,
+     "Avg_Exec_Time": 13.47,
+     "Avg_Tokens": 16614.3,
+     "Avg_TPS": 1233.6,
+     "EPR_CVR": 0.3841,
+     "RRR": 0.7,
+     "SR": 0.4,
+     "pass@k": 0.7
+    },
+    "L5": {
+     "Total_Tasks": 20.0,
+     "Evaluated_Tasks": 20.0,
+     "Avg_Exec_Time": 20.03,
+     "Avg_Tokens": 15620.05,
+     "Avg_TPS": 779.87,
+     "EPR_CVR": 0.0651,
+     "RRR": 0.85,
+     "SR": 0.35,
+     "pass@k": 0.85
+    },
+    "L6": {
+     "Total_Tasks": 15.0,
+     "Evaluated_Tasks": 15.0,
+     "Avg_Exec_Time": 2.28,
+     "Avg_Tokens": 3364.0,
+     "Avg_TPS": 1478.39,
+     "EPR_CVR": 0.2,
+     "RRR": 1.0,
+     "SR": 0.9333,
+     "pass@k": 1.0
+    },
+    "L7": {
+     "Total_Tasks": 10.0,
+     "Evaluated_Tasks": 10.0,
+     "Avg_Exec_Time": 5.67,
+     "Avg_Tokens": 7040.7,
+     "Avg_TPS": 1241.94,
+     "EPR_CVR": 0.2,
+     "RRR": 1.0,
+     "SR": 0.6,
+     "pass@k": 1.0
+    }
+   },
+   "sr_weighted": 0.6153879120879121,
+   "sr_mean": 0.6110428571428572,
+   "tasks": 91.0,
+   "tps_mean": 1002.3685714285714,
+   "api_timeouts": 0,
+   "context_exceeded": 64
+  },
+  "selfspec-n8": {
+   "levels": {
+    "L1": {
+     "Total_Tasks": 11.0,
+     "Evaluated_Tasks": 11.0,
+     "Avg_Exec_Time": 13.36,
+     "Avg_Tokens": 7599.64,
+     "Avg_TPS": 568.9,
+     "EPR_CVR": 0.9091,
+     "RRR": 1.0,
+     "SR": 0.8182,
+     "pass@k": 1.0
+    },
+    "L2": {
+     "Total_Tasks": 15.0,
+     "Evaluated_Tasks": 15.0,
+     "Avg_Exec_Time": 5.94,
+     "Avg_Tokens": 5995.87,
+     "Avg_TPS": 1008.59,
+     "EPR_CVR": 0.9333,
+     "RRR": 0.9333,
+     "SR": 0.9333,
+     "pass@k": 0.9333
+    },
+    "L3": {
+     "Total_Tasks": 10.0,
+     "Evaluated_Tasks": 10.0,
+     "Avg_Exec_Time": 24.52,
+     "Avg_Tokens": 25936.2,
+     "Avg_TPS": 1057.64,
+     "EPR_CVR": 0.45,
+     "RRR": 0.9,
+     "SR": 0.4,
+     "pass@k": 0.9
+    },
+    "L4": {
+     "Total_Tasks": 10.0,
+     "Evaluated_Tasks": 10.0,
+     "Avg_Exec_Time": 8.8,
+     "Avg_Tokens": 18019.4,
+     "Avg_TPS": 2048.72,
+     "EPR_CVR": 0.3805,
+     "RRR": 0.7,
+     "SR": 0.4,
+     "pass@k": 0.7
+    },
+    "L5": {
+     "Total_Tasks": 20.0,
+     "Evaluated_Tasks": 20.0,
+     "Avg_Exec_Time": 14.65,
+     "Avg_Tokens": 15724.6,
+     "Avg_TPS": 1073.05,
+     "EPR_CVR": 0.073,
+     "RRR": 0.85,
+     "SR": 0.35,
+     "pass@k": 0.85
+    },
+    "L6": {
+     "Total_Tasks": 15.0,
+     "Evaluated_Tasks": 15.0,
+     "Avg_Exec_Time": 3.76,
+     "Avg_Tokens": 4244.6,
+     "Avg_TPS": 1130.31,
+     "EPR_CVR": 0.2,
+     "RRR": 1.0,
+     "SR": 0.7333,
+     "pass@k": 1.0
+    },
+    "L7": {
+     "Total_Tasks": 10.0,
+     "Evaluated_Tasks": 10.0,
+     "Avg_Exec_Time": 5.05,
+     "Avg_Tokens": 6939.1,
+     "Avg_TPS": 1374.61,
+     "EPR_CVR": 0.2,
+     "RRR": 1.0,
+     "SR": 0.7,
+     "pass@k": 1.0
+    }
+   },
+   "sr_weighted": 0.6153758241758241,
+   "sr_mean": 0.6192571428571428,
+   "tasks": 91.0,
+   "tps_mean": 1180.26,
+   "api_timeouts": 0,
+   "context_exceeded": 72
+  },
+  "selfspec-n32": {
+   "levels": {
+    "L1": {
+     "Total_Tasks": 11.0,
+     "Evaluated_Tasks": 11.0,
+     "Avg_Exec_Time": 23.39,
+     "Avg_Tokens": 9065.73,
+     "Avg_TPS": 387.59,
+     "EPR_CVR": 0.9091,
+     "RRR": 1.0,
+     "SR": 0.6364,
+     "pass@k": 1.0
+    },
+    "L2": {
+     "Total_Tasks": 15.0,
+     "Evaluated_Tasks": 15.0,
+     "Avg_Exec_Time": 8.79,
+     "Avg_Tokens": 5803.53,
+     "Avg_TPS": 660.17,
+     "EPR_CVR": 0.9333,
+     "RRR": 0.9333,
+     "SR": 0.8,
+     "pass@k": 0.9333
+    },
+    "L3": {
+     "Total_Tasks": 10.0,
+     "Evaluated_Tasks": 10.0,
+     "Avg_Exec_Time": 46.72,
+     "Avg_Tokens": 33942.7,
+     "Avg_TPS": 726.44,
+     "EPR_CVR": 0.45,
+     "RRR": 0.9,
+     "SR": 0.2,
+     "pass@k": 0.9
+    },
+    "L4": {
+     "Total_Tasks": 10.0,
+     "Evaluated_Tasks": 10.0,
+     "Avg_Exec_Time": 21.41,
+     "Avg_Tokens": 21716.8,
+     "Avg_TPS": 1014.39,
+     "EPR_CVR": 0.5091,
+     "RRR": 0.8,
+     "SR": 0.4,
+     "pass@k": 0.8
+    },
+    "L5": {
+     "Total_Tasks": 20.0,
+     "Evaluated_Tasks": 20.0,
+     "Avg_Exec_Time": 51.25,
+     "Avg_Tokens": 18377.8,
+     "Avg_TPS": 358.56,
+     "EPR_CVR": 0.0614,
+     "RRR": 0.85,
+     "SR": 0.25,
+     "pass@k": 0.85
+    },
+    "L6": {
+     "Total_Tasks": 15.0,
+     "Evaluated_Tasks": 15.0,
+     "Avg_Exec_Time": 3.7,
+     "Avg_Tokens": 3379.93,
+     "Avg_TPS": 914.52,
+     "EPR_CVR": 0.2,
+     "RRR": 1.0,
+     "SR": 0.9333,
+     "pass@k": 1.0
+    },
+    "L7": {
+     "Total_Tasks": 10.0,
+     "Evaluated_Tasks": 10.0,
+     "Avg_Exec_Time": 7.59,
+     "Avg_Tokens": 6911.7,
+     "Avg_TPS": 910.4,
+     "EPR_CVR": 0.2,
+     "RRR": 1.0,
+     "SR": 0.6,
+     "pass@k": 1.0
+    }
+   },
+   "sr_weighted": 0.5494494505494506,
+   "sr_mean": 0.5456714285714286,
+   "tasks": 91.0,
+   "tps_mean": 710.2957142857142,
+   "api_timeouts": 4,
+   "context_exceeded": 56
+  }
+ }
+}

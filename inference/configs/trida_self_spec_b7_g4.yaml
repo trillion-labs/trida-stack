@@ -1,0 +1,10 @@
+variant: bd_bidir_shift
+block_size: 7
+gen_block_size: 4
+mask_id: 248077   # mask token id of the served checkpoint (model-specific)
+causal_prefill: true
+temperature: 1.0
+top_k: 50
+top_p: 0.95
+use_spec_verify: true
+draft_mode: strict_truncated

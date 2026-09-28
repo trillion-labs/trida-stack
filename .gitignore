@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+.venv-bfcl/
+.venv-serve/
+venv/
+
+# Caches / envs
+.uv-cache/
+.ruff_cache/
+.pytest_cache/
+.hf_cache/
+.DS_Store
+**/.DS_Store
+
+# Secrets (HF token etc.) — never commit
+.env
+.env.*
+!.env.example
+
+# Training run artifacts
+wandb/
+slurm/*.out
+slurm/gpu/
+
+# BFCL eval outputs / server logs / runtime locks
+# shared serving-pool runtime logs
+# FunctionChat-Bench + Ko-AgentBench runtime outputs
+
+# Shared serving pool + per-benchmark runtime outputs (server replica logs, results, reports)
+
+# Outputs / results / checkpoints / data (downloaded or produced on demand)
+outputs/
+output/
+output_models/
+checkpoints/
+evals_results/
+results/
+*.tar.gz
+benchmarking/swe_bench/predictions*.jsonl
+# build cache / eval outputs / stray logs (added during qwen3.5 bd work)
+.triton_cache/
+eval_*/
+slurm/*.log
+scripts/**/__pycache__/
+scripts/diffusion_eval/*.jsonl
+*.bak
+
+.gstack/
+
+# generated dashboards / trace artifacts (outputs, not source)
+/trida_*.html
+
+# vendored external clone for evaluation (has its own .git; not ours to track)
+
+# Slurm launch scripts are cluster-specific; keep them local, not in the remote.
+*.sbatch
+
+# benchmark/ run artifacts (results, scores, logs) — outputs, not source
+benchmark/bfcl_v4/result/
+benchmark/bfcl_v4/score/
+benchmark/bfcl_v4/.file_locks/
+benchmark/**/*.log
+benchmark/tau2/results/
+benchmark/ko_agentbench/reports/
+benchmark/ko_agentbench/logs/
+benchmark/functionchat/output/
+benchmark/**/predictions*.jsonl
+
+# PolyForm-NC-derived kernel port — obtained via recipe, not committed
+inference/vllm/vllm_native_diffusion/block_causal_readout.py
+build/
+dist/

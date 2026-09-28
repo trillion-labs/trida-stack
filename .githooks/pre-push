@@ -1,0 +1,37 @@
+#!/bin/sh
+# Push guard: this clone is the INTERNAL repository. The public mirror is published
+# deliberately (see CONTRIBUTING), never by pushing from here — a stale `origin` left
+# over from the rename would otherwise publish internal work.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+#
+# git calls this as: pre-push <remote-name> <remote-url>
+remote_url="$2"
+
+case "$remote_url" in
+  *trida-stack-internal*) exit 0 ;;   # the internal repo: always fine
+  "") exit 0 ;;                       # no URL (e.g. some tooling): don't block
+esac
+
+if [ "${TRIDA_ALLOW_PUBLIC_PUSH:-0}" = "1" ]; then
+  echo "pre-push: TRIDA_ALLOW_PUBLIC_PUSH=1 set — allowing push to $remote_url" >&2
+  exit 0
+fi
+
+cat >&2 <<MSG
+
+  pre-push: refusing to push to
+      $remote_url
+
+  This clone is trida-stack-internal. Pushing here to any other remote is almost
+  always a stale 'origin' from the repository rename, which would publish internal
+  work to a public repository.
+
+      git remote -v                       # check where you are pointing
+      git remote set-url origin https://github.com/trillion-labs/trida-stack-internal.git
+
+  If this push really is intended:
+      TRIDA_ALLOW_PUBLIC_PUSH=1 git push ...
+
+MSG
+exit 1

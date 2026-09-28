@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trida-stack"
+version = "0.1.0"
+description = "Training and serving stack for Trida two-stream block-diffusion language models"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Trillion Labs" }]
+keywords = ["diffusion-language-model", "block-diffusion", "llm", "training", "inference"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dynamic = ["dependencies"]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "pre-commit"]
+eval = ["lm-eval>=0.4.8"]
+
+[project.urls]
+Homepage = "https://github.com/trillion-labs/trida-stack"
+Repository = "https://github.com/trillion-labs/trida-stack"
+Issues = "https://github.com/trillion-labs/trida-stack/issues"
+
+[tool.setuptools]
+# First-party packages only. The PolyForm-NC two-stream kernels are NOT bundled (fetched by
+# train/block_gated_delta_rule/fetch_kernels.sh); vLLM / SGLang backends are installed separately.
+packages = ["train", "train.data", "inference", "inference.ifeval_lib"]
+
+[tool.setuptools.package-data]
+inference = ["configs/*.yaml"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.pytest.ini_options]
+# inference/ is a package, but its CLIs/tests use sibling imports (e.g. `import serve`).
+pythonpath = ["inference"]
+# CPU-only tests (no GPU, no network). The vLLM test additionally needs torch.
+testpaths = [
+  "inference/test_smoke.py",
+  "inference/vllm/vllm_native_diffusion/test_two_stream_cpu.py",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+# Deliberately narrow for the initial release: catch real bugs (syntax errors, invalid
+# comparisons, misplaced statements, undefined names) without failing on the existing
+# style backlog. Widen this (and enable `ruff format --check` in CI) in follow-ups.
+select = ["E9", "F63", "F7", "F82"]
+
+# Ad-hoc cluster diagnostics and sweep drivers, kept in the repo as worked examples of how the
+# measurements in the docs were produced. They are not importable library code and are not linted
+# to library standards.
+[tool.ruff.lint.per-file-ignores]
+"train/tools/**" = ["F821"]
+"inference/vllm/tools/**" = ["F821"]

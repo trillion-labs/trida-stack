@@ -1,0 +1,5 @@
+# SWE-bench agentic benchmark — dependencies (NOT installed by this scaffold).
+# The swebench harness is MIT-licensed; task instances are mixed-license (see README.md).
+swebench>=3.0.0
+datasets>=2.19.0
+# Evaluation runs untrusted repo code/tests — use Docker isolation (the harness expects it).

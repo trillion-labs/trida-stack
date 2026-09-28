@@ -1,0 +1,24 @@
+# Pre-commit hooks for trida-stack.
+# Install: pip install pre-commit && pre-commit install
+# Run on everything: pre-commit run --all-files
+#
+# ruff config (target-version, line-length) lives in pyproject.toml [tool.ruff].
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.10
+    hooks:
+      # Linter (with autofix). Rule set lives in pyproject.toml [tool.ruff.lint].
+      - id: ruff
+        args: [--fix]
+      # Formatter disabled for now: existing files predate it, and running it on a touched
+      # file would reformat the whole file. Re-enable together with `ruff format --check` in CI.
+      # - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: detect-private-key

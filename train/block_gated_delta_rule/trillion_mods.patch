@@ -1,0 +1,116 @@
+--- a/chunk_fla_style_wy.py	2026-08-24 20:59:34.616706236 +0900
++++ b/chunk_fla_style_wy.py	2026-09-01 09:52:09.286969295 +0900
+@@ -54,15 +54,17 @@
+     the current clean-prefix state as initial state, while advancing the clean
+     prefix state after each block.
+     """
+-    i_cbh = tl.program_id(0)
+-    i_v = tl.program_id(1)
++    # int64 program id + metadata: pointer offsets here scale with chunk-count*H*K*V and cross 2**31
++    # for long packed sequences (~L>=16k), wrapping negative in int32 -> illegal memory access.
++    i_cbh = tl.program_id(0).to(tl.int64)
++    i_v = tl.program_id(1).to(tl.int64)
+ 
+     if IS_VARLEN:
+         i_gc = i_cbh // H
+         i_h = i_cbh % H
+-        bos = tl.load(chunk_bos + i_gc).to(tl.int32)
+-        chunk_start = tl.load(chunk_start_arr + i_gc).to(tl.int32)
+-        T = tl.load(chunk_T_arr + i_gc).to(tl.int32)
++        bos = tl.load(chunk_bos + i_gc).to(tl.int64)
++        chunk_start = tl.load(chunk_start_arr + i_gc).to(tl.int64)
++        T = tl.load(chunk_T_arr + i_gc).to(tl.int64)
+         ckpt_flat = i_gc
+     else:
+         i_chunk = i_cbh // (B * H)
+@@ -311,14 +313,18 @@
+     varlen analogue of dense strided checkpoints, but it does not require
+     document starts to be aligned to ``CKPT_STRIDE * BLOCK_SIZE``.
+     """
+-    i_cbh = tl.program_id(0)
+-    i_v = tl.program_id(1)
++    # int64 program id: the h_ckpts store offset ((i_gc*NCK+seg)*H+i_h)*(K*V) reaches
++    # total_nc*NCK*H*K*V, which crosses 2**31 for long packed sequences (~L>=16k). Computing it in
++    # int32 wraps negative -> out-of-bounds store -> "illegal memory access". Promote the base index
++    # (and the per-chunk metadata) to int64 so ALL downstream pointer arithmetic is 64-bit.
++    i_cbh = tl.program_id(0).to(tl.int64)
++    i_v = tl.program_id(1).to(tl.int64)
+     i_gc = i_cbh // H
+     i_h = i_cbh % H
+ 
+-    bos = tl.load(chunk_bos + i_gc).to(tl.int32)
+-    chunk_start = tl.load(chunk_start_arr + i_gc).to(tl.int32)
+-    T = tl.load(chunk_T_arr + i_gc).to(tl.int32)
++    bos = tl.load(chunk_bos + i_gc).to(tl.int64)
++    chunk_start = tl.load(chunk_start_arr + i_gc).to(tl.int64)
++    T = tl.load(chunk_T_arr + i_gc).to(tl.int64)
+ 
+     o_k = tl.arange(0, K)
+     o_v = i_v * BV + tl.arange(0, BV)
+@@ -453,15 +459,17 @@
+     resulting gradient with respect to that initial state is exactly the cross
+     gradient that must be routed through the clean-prefix transition.
+     """
+-    i_cbh = tl.program_id(0)
+-    i_v = tl.program_id(1)
++    # int64 program id + metadata: pointer offsets here scale with chunk-count*H*K*V and cross 2**31
++    # for long packed sequences (~L>=16k), wrapping negative in int32 -> illegal memory access.
++    i_cbh = tl.program_id(0).to(tl.int64)
++    i_v = tl.program_id(1).to(tl.int64)
+ 
+     if IS_VARLEN:
+         i_gc = i_cbh // H
+         i_h = i_cbh % H
+-        bos = tl.load(chunk_bos + i_gc).to(tl.int32)
+-        chunk_start = tl.load(chunk_start_arr + i_gc).to(tl.int32)
+-        T = tl.load(chunk_T_arr + i_gc).to(tl.int32)
++        bos = tl.load(chunk_bos + i_gc).to(tl.int64)
++        chunk_start = tl.load(chunk_start_arr + i_gc).to(tl.int64)
++        T = tl.load(chunk_T_arr + i_gc).to(tl.int64)
+         ckpt_flat = i_gc
+         is_doc_first_chunk = chunk_start == 0
+     else:
+--- a/convolution.py	2026-08-24 20:59:34.628876609 +0900
++++ b/convolution.py	2026-09-18 20:03:47.403221600 +0900
+@@ -47,6 +47,12 @@
+     """Block-train packed docs may end partial, but doc starts must align."""
+     if cu_seqlens is None or block_size <= 1:
+         return
++    # This check costs a host sync (`.item()`) per conv call, i.e. per GDN layer per forward AND per
++    # checkpoint recompute (profile 2026-09-10: the syncs sat under BlockTrainConvFunctionBackward and
++    # kept the CPU from running ahead of the GPU). The collator guarantees block-aligned doc starts, so
++    # the check is opt-in: TRIDA_BLOCK_CONV_CHECK=1 (default 1 until validated; set 0 for speed).
++    if os.environ.get("TRIDA_BLOCK_CONV_CHECK", "1") == "0":
++        return
+     starts = cu_seqlens[:-1]
+     if starts.numel() == 0:
+         return
+--- a/fused_recurrent_state.py	2026-08-24 20:59:34.638933001 +0900
++++ b/fused_recurrent_state.py	2026-09-01 09:52:09.316208243 +0900
+@@ -948,7 +948,7 @@
+       3. Compute per-token gradients using WY backward machinery
+     """
+     from .chunk_bwd_dqkwg import chunk_bwd_dqkwg
+-    from torchtitan.models.qwen3_5.model.block_gated_delta_rule.chunk_scaled_dot_kkt import chunk_scaled_dot_kkt_fwd
++    from .chunk_scaled_dot_kkt import chunk_scaled_dot_kkt_fwd
+     from .wy_fast import recompute_w_u_fwd
+     from .chunk_delta_h import chunk_gated_delta_rule_fwd_h
+     from .cumsum import chunk_local_cumsum
+@@ -1062,7 +1062,7 @@
+     @staticmethod
+     def forward(ctx, k, v, g, beta, h0, block_size, chunk_size,
+                 h_chunks_ext, cu_seqlens):
+-        from torchtitan.models.qwen3_5.model.block_gated_delta_rule.chunk_scaled_dot_kkt import chunk_scaled_dot_kkt_fwd
++        from .chunk_scaled_dot_kkt import chunk_scaled_dot_kkt_fwd
+         from .wy_fast import recompute_w_u_fwd
+         from .chunk_delta_h import chunk_gated_delta_rule_fwd_h
+         from .cumsum import chunk_local_cumsum
+@@ -1117,7 +1117,7 @@
+     @staticmethod
+     def backward(ctx, dh_blocks):
+         dh_blocks = dh_blocks.contiguous()
+-        from torchtitan.models.qwen3_5.model.block_gated_delta_rule.chunk_scaled_dot_kkt import chunk_scaled_dot_kkt_fwd
++        from .chunk_scaled_dot_kkt import chunk_scaled_dot_kkt_fwd
+         from .wy_fast import recompute_w_u_fwd
+         from .chunk_delta_h import chunk_gated_delta_rule_fwd_h
+         from .cumsum import chunk_local_cumsum

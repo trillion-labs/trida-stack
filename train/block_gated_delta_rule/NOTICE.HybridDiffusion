@@ -1,0 +1,38 @@
+HybridDiffusion training code is developed from TorchTitan. HybridDiffusion-authored portions are
+subject to the repository License; TorchTitan-derived portions retain their
+upstream terms reproduced in LICENSE.
+
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+Individual third-party components and dependencies remain subject to their own
+copyright notices and licenses.
+
+Flash Linear Attention (FLA)
+----------------------------
+
+Portions of torchtitan/models/qwen3_5/model/block_gated_delta_rule are copied
+or modified from Flash Linear Attention and are distributed under the
+following MIT License. HybridDiffusion-specific modifications are copyright (c) 2026
+Yuchen Zhu; the original FLA notice is preserved below.
+
+MIT License
+
+Copyright (c) 2023-2026 Songlin Yang, Yu Zhang, Zhiyuan Li
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

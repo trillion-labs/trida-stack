@@ -1,0 +1,13 @@
+nano-inference
+Copyright 2026 Trillion Labs
+
+This folder bundles third-party open-source software; each component retains its
+original license.
+
+------------------------------------------------------------------------------
+ifeval_lib/  —  IFEval (Instruction-Following Eval)
+  Copyright 2020 The Google Research Authors.
+  Licensed under the Apache License, Version 2.0.
+  https://github.com/google-research/google-research/tree/master/instruction_following_eval
+  Used unmodified (aside from packaging) to score the `eval_ifeval.py` benchmark.
+------------------------------------------------------------------------------

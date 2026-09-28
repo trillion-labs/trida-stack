@@ -1,0 +1,4 @@
+# Terminal-Bench (Hard) agentic benchmark — dependencies (NOT installed by this scaffold).
+# Harness is open-source (verify Apache-2.0); tasks run untrusted software in Docker.
+terminal-bench
+# Requires a working Docker installation on the host.

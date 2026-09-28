@@ -1,0 +1,14 @@
+{"date":"2026-09-10","train_job":3726,"steps":100,"data":"4,162 self-distilled agentic conversations (11,553 turns; step_18000 AR greedy targets, regenerated turn by turn)",
+ "recipe":"canvas suffix masks per bd-8 block (m in 1..7, P(m=7)=0.5), AR loss weight 1.0, LR 5e-6 const (20 warmup), micro 1 x accum 2 x 16 GPUs, 32k packing",
+ "loss":{"diff":[[5,1.416],[20,1.466],[30,1.425],[40,1.514],[50,1.339],[60,1.403],[70,1.371],[80,1.384],[90,1.258],[100,1.254]],
+         "ar":[[5,0.190],[20,0.145],[30,0.107],[40,0.111],[50,0.093],[60,0.097],[70,0.092],[80,0.090],[90,0.080],[100,0.077]]},
+ "rows":[
+  {"ckpt":"step_18000 (baseline)","N":4,"tok_fwd":2.314,"cold":33.8,"slot1":83.4,"allacc":49.5,"acc":"25/30"},
+  {"ckpt":"pilot step_50","N":4,"tok_fwd":2.352,"cold":33.3,"slot1":85.1,"allacc":50.7,"acc":"25/30"},
+  {"ckpt":"pilot step_100","N":4,"tok_fwd":2.381,"cold":32.6,"slot1":85.1,"allacc":51.9,"acc":"26/30"},
+  {"ckpt":"step_18000 (baseline)","N":8,"tok_fwd":2.418,"cold":47.6,"slot1":83.9,"allacc":10.2,"acc":"25/30"},
+  {"ckpt":"pilot step_50","N":8,"tok_fwd":2.399,"cold":47.9,"slot1":83.7,"allacc":9.4,"acc":"25/30"},
+  {"ckpt":"pilot step_100","N":8,"tok_fwd":2.385,"cold":48.3,"slot1":84.2,"allacc":7.9,"acc":"26/30"}],
+ "ar_guard":{"step_18000":"25/30","step_50":"25/30","step_100":"24/30"},
+ "infra":"3 failed launches first: IB on NCCL's default pkey index 0 (limited partition) + memlock 8 MB from a Tailscale-SSH login (Slurm propagates it); node-1 root disk full; activation offload 6x slower. Fixed: ulimit -l unlimited, NCCL_IB_PKEY=1 (+RoCE) = 332 GB/s bus; pilot itself ran on TCP at ~20 s/step (compute-bound, ~8% MFU).",
+ "verdict":"flat"}

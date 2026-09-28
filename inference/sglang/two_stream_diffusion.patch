@@ -1,0 +1,843 @@
+diff --git a/eval/sglang/srt/configs/__init__.py b/eval/sglang/srt/configs/__init__.py
+index dff1f81..4c98532 100644
+--- a/eval/sglang/srt/configs/__init__.py
++++ b/eval/sglang/srt/configs/__init__.py
+@@ -22,7 +22,7 @@ from sglang.srt.configs.longcat_flash import LongcatFlashConfig
+ from sglang.srt.configs.nano_nemotron_vl import NemotronH_Nano_VL_V2_Config
+ from sglang.srt.configs.nemotron_h import NemotronHConfig
+ from sglang.srt.configs.olmo3 import Olmo3Config
+-from sglang.srt.configs.qwen3_5 import Qwen3_5Config, Qwen3_5MoeConfig
++from sglang.srt.configs.qwen3_5 import Qwen3_5Config, Qwen3_5MoeConfig, Qwen3_5TextConfig
+ from sglang.srt.configs.qwen3_asr import Qwen3ASRConfig
+ from sglang.srt.configs.qwen3_next import Qwen3NextConfig
+ from sglang.srt.configs.step3_vl import (
+@@ -52,6 +52,7 @@ __all__ = [
+     "Qwen3NextConfig",
+     "Qwen3_5Config",
+     "Qwen3_5MoeConfig",
++    "Qwen3_5TextConfig",
+     "DotsVLMConfig",
+     "DotsOCRConfig",
+     "FalconH1Config",
+diff --git a/eval/sglang/srt/dllm/algorithm/base.py b/eval/sglang/srt/dllm/algorithm/base.py
+index 24d9880..09b8635 100644
+--- a/eval/sglang/srt/dllm/algorithm/base.py
++++ b/eval/sglang/srt/dllm/algorithm/base.py
+@@ -6,6 +6,10 @@ from sglang.srt.server_args import ServerArgs
+ 
+ 
+ class DllmAlgorithm:
++    # Whether the scheduler's tight decode loop may inline-absorb new
++    # prefill requests into this algorithm's decode batches.
++    supports_inline_prefill_absorb = False
++
+ 
+     def __init__(
+         self,
+diff --git a/eval/sglang/srt/dllm/algorithm/hybrid_diffusion_self_spec.py b/eval/sglang/srt/dllm/algorithm/hybrid_diffusion_self_spec.py
+index e34017d..fae2b24 100644
+--- a/eval/sglang/srt/dllm/algorithm/hybrid_diffusion_self_spec.py
++++ b/eval/sglang/srt/dllm/algorithm/hybrid_diffusion_self_spec.py
+@@ -199,6 +199,10 @@ class HybridDiffusionSelfSpec(DllmAlgorithm):
+       _advance_override: per-request variable dllm_block_offset advance
+     """
+ 
++    # The scheduler's tight decode loop may absorb new prefill requests
++    # into running decode batches for this algorithm.
++    supports_inline_prefill_absorb = True
++
+     def __init__(self, config: DllmConfig):
+         super().__init__(config)
+         self.variant = config.variant
+diff --git a/eval/sglang/srt/dllm/algorithm/low_confidence_shift_hybrid_diffusion.py b/eval/sglang/srt/dllm/algorithm/low_confidence_shift_hybrid_diffusion.py
+index 311e3e2..e8a5077 100644
+--- a/eval/sglang/srt/dllm/algorithm/low_confidence_shift_hybrid_diffusion.py
++++ b/eval/sglang/srt/dllm/algorithm/low_confidence_shift_hybrid_diffusion.py
+@@ -11,13 +11,13 @@ it outside the active query block. The carried seed is why runtime
+ ``block_size: 3`` corresponds to paper block size B=4.
+ """
+ 
+-from typing import Dict, List, Tuple, Union
++from typing import Dict, List, Optional, Tuple, Union
+ 
+ import torch
+ import torch.nn.functional as F
+ 
+ from sglang.srt.dllm.algorithm.low_confidence import LowConfidence
+-from sglang.srt.dllm.config import DllmConfig
++from sglang.srt.dllm.config import DLLM_ATTN_MASK_CAUSAL_PREFILL, DllmConfig
+ from sglang.srt.layers.logits_processor import LogitsProcessorOutput
+ from sglang.srt.model_executor.forward_batch_info import ForwardBatch
+ from sglang.srt.model_executor.model_runner import ModelRunner
+@@ -40,6 +40,9 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+                 f"([seed, one-or-more MASKs]), got {self.block_size}"
+             )
+ 
++        self.supports_inline_prefill_absorb = bool(
++            config.algorithm_config.get("inline_prefill_absorb", False)
++        )
+         self.maximum_unroll = int(config.algorithm_config.get("maximum_unroll", 0))
+         self.temperature = float(config.algorithm_config.get("temperature", 0.0))
+         self.top_k = int(config.algorithm_config.get("top_k", 50))
+@@ -88,6 +91,29 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+         ).squeeze(-1)
+         return ids, picked_probs
+ 
++    _SAMPLE_CHUNK_ROWS = 128
++
++    def _sample_tokens_chunked(
++        self, full_logits: torch.Tensor, pos_index: torch.Tensor
++    ) -> Tuple[torch.Tensor, torch.Tensor]:
++        """_sample_tokens over full_logits[pos_index], in row chunks.
++
++        The sampler materializes several fp32 (rows, vocab) temporaries; at
++        large decode batch sizes an unchunked call transiently needs multiple
++        GiB on a GPU that is already near the static-memory watermark.
++        """
++        n = int(pos_index.numel())
++        if n <= self._SAMPLE_CHUNK_ROWS:
++            return self._sample_tokens(full_logits[pos_index])
++        ids_parts: List[torch.Tensor] = []
++        probs_parts: List[torch.Tensor] = []
++        for s in range(0, n, self._SAMPLE_CHUNK_ROWS):
++            idx = pos_index[s : s + self._SAMPLE_CHUNK_ROWS]
++            ids, probs = self._sample_tokens(full_logits[idx])
++            ids_parts.append(ids)
++            probs_parts.append(probs)
++        return torch.cat(ids_parts), torch.cat(probs_parts)
++
+     def _set_denoise_flags(self, forward_batch: ForwardBatch) -> None:
+         forward_batch.dllm_force_causal = False
+         forward_batch.dllm_force_bidir_mask = True
+@@ -97,8 +123,16 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+         forward_batch.dllm_gdn_persist_state = False
+         forward_batch.dllm_gdn_causal_mode = 2
+         forward_batch.dllm_gdn_num_clean = 1
+-        forward_batch.dllm_gdn_cache_intermediate_for_commit = True
++        # This algorithm never reads the intermediate commit buffers (the
++        # commit forward recomputes the block state causally from scratch), so
++        # take the non-intermediate kernel path; the pool then skips allocating
++        # those buffers entirely (see _get_mamba_spec_num_draft_tokens).
++        forward_batch.dllm_gdn_cache_intermediate_for_commit = False
+         forward_batch.dllm_gdn_save_for_commit = False
++        # This algorithm re-runs absorbed prefill rows on EVERY denoise round;
++        # their recurrent state must be restored after each non-persist round
++        # so the commit forward advances it exactly once.
++        forward_batch.dllm_gdn_prefill_state_restore = True
+         forward_batch.dllm_gdn_block_size = self.block_size
+         forward_batch.dllm_return_argmax_only = False
+         forward_batch.dllm_return_topk_probs = False
+@@ -108,6 +142,7 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+         forward_batch.dllm_force_bidir_mask = False
+         forward_batch.dllm_bidir_custom_mask = None
+         forward_batch.dllm_gdn_persist_state = True
++        forward_batch.dllm_gdn_prefill_state_restore = False
+         forward_batch.dllm_gdn_causal_mode = 1
+         forward_batch.dllm_gdn_num_clean = 0
+         forward_batch.dllm_gdn_cache_intermediate_for_commit = False
+@@ -117,6 +152,7 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+         forward_batch.dllm_return_topk_probs = False
+ 
+     def _clear_flags(self, forward_batch: ForwardBatch) -> None:
++        forward_batch.dllm_gdn_prefill_state_restore = False
+         forward_batch.dllm_force_causal = False
+         forward_batch.dllm_force_bidir_mask = False
+         forward_batch.dllm_bidir_custom_mask = None
+@@ -126,6 +162,13 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+         forward_batch.dllm_return_argmax_only = False
+         forward_batch.dllm_return_topk_probs = False
+ 
++    # Inline prefill absorption (mixed decode+prefill batches) is SUPPORTED but
++    # off by default: absorbed rounds are mixed batches, which cannot replay
++    # CUDA graphs, and measured 8-GPU eval throughput dropped ~40% with it on.
++    # It reduces time-to-first-token for online serving; enable via the
++    # `inline_prefill_absorb: true` key in the algorithm YAML for that regime.
++    supports_inline_prefill_absorb = False
++
+     def run(
+         self,
+         model_runner: ModelRunner,
+@@ -133,11 +176,17 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+         overlap_fn=None,
+     ) -> Tuple[Union[LogitsProcessorOutput, torch.Tensor], List[torch.Tensor], bool]:
+         batch_size = forward_batch.batch_size
+-        mask_index = forward_batch.input_ids == self.mask_id
+         rpx_list = self._req_pool_indices_cpu(forward_batch)
++        device = forward_batch.input_ids.device
++        B = self.block_size
+ 
+-        if torch.sum(mask_index).item() == 0:
++        mask_index = forward_batch.input_ids == self.mask_id
++        if not bool(mask_index.any().item()):
++            # Pure prompt prefill (no decode windows in the batch): only the
++            # last position's logit is needed per request (seed sampling).
++            forward_batch.dllm_prefill_last_only = True
+             out = model_runner.forward(forward_batch, pp_proxy_tensors=None)
++            forward_batch.dllm_prefill_last_only = False
+             self._stats["total_forwards"] += 1
+             self._stats["prefill_forwards"] += 1
+             logits_output = out.logits_output
+@@ -145,29 +194,70 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+                 self._capture_prefill_seeds(logits_output, forward_batch, rpx_list)
+             return logits_output, [], out.can_run_graph
+ 
+-        expected_tokens = batch_size * self.block_size
+-        if forward_batch.input_ids.numel() != expected_tokens:
+-            raise RuntimeError(
+-                "LowConfidenceShiftHybridDiffusion only supports pure decode batches with "
+-                f"{self.block_size} tokens per request. Got "
+-                f"{forward_batch.input_ids.numel()} tokens for batch_size={batch_size}."
++        # ---- ragged segment geometry (mixed inline-prefill support) ----
++        _el = forward_batch.extend_seq_lens
++        if _el is not None:
++            extend_lens_cpu = (
++                [int(x) for x in _el.detach().cpu().tolist()]
++                if torch.is_tensor(_el)
++                else [int(x) for x in _el]
+             )
+-        if getattr(forward_batch, "dllm_attn_mask_types_cpu", None) is not None:
+-            raise RuntimeError(
+-                "LowConfidenceShiftHybridDiffusion decode must not be mixed with inline "
+-                "prefill requests."
++            if sum(extend_lens_cpu) != int(forward_batch.input_ids.numel()):
++                extend_lens_cpu = [B] * batch_size
++        else:
++            extend_lens_cpu = [B] * batch_size
++        base_offsets = [0] * batch_size
++        for bid in range(1, batch_size):
++            base_offsets[bid] = base_offsets[bid - 1] + extend_lens_cpu[bid - 1]
++        mask_types = getattr(forward_batch, "dllm_attn_mask_types_cpu", None)
++        if mask_types is not None and len(mask_types) == batch_size:
++            is_prefill = [mt == DLLM_ATTN_MASK_CAUSAL_PREFILL for mt in mask_types]
++        else:
++            is_prefill = [extend_lens_cpu[bid] != B for bid in range(batch_size)]
++        decode_bids = [b for b in range(batch_size) if not is_prefill[b]]
++        prefill_bids = [b for b in range(batch_size) if is_prefill[b]]
++        for bid in decode_bids:
++            if extend_lens_cpu[bid] != B:
++                raise RuntimeError(
++                    "LowConfidenceShiftHybridDiffusion decode rows must be exactly "
++                    f"block_size={B} tokens; row {bid} has {extend_lens_cpu[bid]}."
++                )
++        empty = torch.empty(0, dtype=forward_batch.input_ids.dtype, device=device)
++        if not decode_bids:
++            forward_batch.dllm_prefill_last_only = True
++            out = model_runner.forward(forward_batch, pp_proxy_tensors=None)
++            forward_batch.dllm_prefill_last_only = False
++            self._stats["total_forwards"] += 1
++            self._stats["prefill_forwards"] += 1
++            logits_output = out.logits_output
++            if logits_output is not None:
++                self._capture_prefill_seeds(
++                    logits_output, forward_batch, rpx_list, only_bids=prefill_bids
++                )
++            return (
++                logits_output,
++                [empty for _ in range(batch_size)],
++                out.can_run_graph,
+             )
+-
+-        start_list: List[int] = []
+-        for bid in range(batch_size):
+-            block_start = bid * self.block_size
+-            block_end = block_start + self.block_size
+-            block_input_ids = forward_batch.input_ids[block_start:block_end]
+-            block_mask_index = block_input_ids == self.mask_id
+-            start = self.block_size - torch.sum(block_mask_index).item()
+-            start_list.append(start)
+-
+-            if start == 0 and bool(block_mask_index[0].item()):
++        n_dec = len(decode_bids)
++
++        # (n_dec, B) index grid of the decode windows within the flat input_ids
++        dec_index = torch.tensor(
++            [base_offsets[bid] for bid in decode_bids], dtype=torch.long, device=device
++        ).unsqueeze(1) + torch.arange(B, dtype=torch.long, device=device).unsqueeze(0)
++        # flat indices of each position's PREDECESSOR (shifted-logit source)
++        prev_pos_index = dec_index[:, : B - 1].reshape(-1)
++
++        # ---- cold-start seed injection ----
++        cur = forward_batch.input_ids[dec_index]
++        m = cur == self.mask_id
++        starts = (B - m.sum(dim=1)).tolist()
++        start_by_bid = {}
++        seed_pos: List[int] = []
++        seed_val: List[int] = []
++        for k, bid in enumerate(decode_bids):
++            start_by_bid[bid] = int(starts[k])
++            if starts[k] == 0:
+                 rpx = int(rpx_list[bid])
+                 seed = self._seed_tokens.get(rpx)
+                 if seed is None:
+@@ -176,20 +266,33 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+                         f"req_pool_idx={rpx}. Ensure prompt prefill runs before "
+                         "the first decode block."
+                     )
+-                forward_batch.input_ids[block_start] = seed
++                seed_pos.append(base_offsets[bid])
++                seed_val.append(int(seed))
++        if seed_pos:
++            forward_batch.input_ids[
++                torch.tensor(seed_pos, dtype=torch.long, device=device)
++            ] = torch.tensor(
++                seed_val, dtype=forward_batch.input_ids.dtype, device=device
++            )
+ 
+         step_budget = (
+             self.maximum_unroll if self.maximum_unroll > 0 else self.block_size
+         )
+         logits_output = None
+         can_run_cuda_graph = False
++        neg_inf = float("-inf")
+         for step in range(step_budget):
+-            mask_index = forward_batch.input_ids == self.mask_id
+-            if torch.sum(mask_index).item() == 0:
++            cur = forward_batch.input_ids[dec_index]
++            m = cur == self.mask_id
++            if not bool(m.any().item()):  # single host sync per round
+                 break
+ 
+             self._set_denoise_flags(forward_batch)
+             out = model_runner.forward(forward_batch, pp_proxy_tensors=None)
++            if overlap_fn is not None and step == 0:
++                # Hide recv/stream_output of the scheduler's tight loop inside
++                # the GPU window of the first denoise forward.
++                overlap_fn()
+             self._stats["total_forwards"] += 1
+             self._stats["decode_forwards"] += 1
+             logits_output, can_run_cuda_graph = out.logits_output, out.can_run_graph
+@@ -201,40 +304,39 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+                 )
+             is_last_step = step == step_budget - 1
+ 
+-            for bid in range(batch_size):
+-                block_start = bid * self.block_size
+-                block_end = block_start + self.block_size
+-                block_input_ids = forward_batch.input_ids[block_start:block_end]
+-                block_mask_index = block_input_ids == self.mask_id
+-                if not bool(block_mask_index.any().item()):
+-                    continue
+-
+-                shifted_logits = full_logits[block_start : block_end - 1]
+-                dummy = torch.zeros(
+-                    (1, shifted_logits.shape[-1]),
+-                    dtype=shifted_logits.dtype,
+-                    device=shifted_logits.device,
+-                )
+-                curr_logits = torch.cat([dummy, shifted_logits], dim=0)
+-                sampled, probs = self._sample_tokens(curr_logits)
+-
+-                block_mask_index[0] = False
+-                sampled = torch.where(block_mask_index, sampled, block_input_ids)
+-                confidence = torch.where(
+-                    block_mask_index,
+-                    probs,
+-                    torch.tensor(float("-inf"), dtype=probs.dtype, device=probs.device),
+-                )
+-
+-                if is_last_step:
+-                    transfer_index = block_mask_index
+-                else:
+-                    transfer_index = confidence > self.threshold
+-                    if transfer_index.sum().item() == 0:
+-                        _, select_index = torch.topk(confidence, k=1)
+-                        transfer_index[select_index] = True
+-
+-                block_input_ids[transfer_index] = sampled[transfer_index]
++            # Sample only the rows that still have masks (later rounds usually
++            # have few active rows; sampling dead rows costs full-vocab sorts).
++            # nonzero keeps everything on-device — no extra host sync.
++            active = m.any(dim=1)
++            act_rows = active.nonzero(as_tuple=False).squeeze(1)
++            n_act = act_rows.numel()
++            act_prev_index = prev_pos_index.view(n_dec, B - 1)[act_rows].reshape(-1)
++            sampled_flat, probs_flat = self._sample_tokens_chunked(
++                full_logits, act_prev_index
++            )
++            cur_act = cur[act_rows]
++            m0 = m[act_rows].clone()
++            m0[:, 0] = False  # the seed position is never resampled
++            sampled = torch.zeros((n_act, B), dtype=cur.dtype, device=device)
++            sampled[:, 1:] = sampled_flat.view(n_act, B - 1)
++            probs = torch.full((n_act, B), neg_inf, dtype=torch.float32, device=device)
++            probs[:, 1:] = probs_flat.view(n_act, B - 1).float()
++
++            if is_last_step:
++                transfer = m0
++            else:
++                conf = torch.where(m0, probs, torch.full_like(probs, neg_inf))
++                transfer = conf > self.threshold
++                # Rows with masks left but nothing above threshold: force top-1.
++                need = m0.any(dim=1) & ~transfer.any(dim=1)
++                force = torch.zeros_like(transfer)
++                force[
++                    torch.arange(n_act, device=device), conf.argmax(dim=1)
++                ] = True
++                transfer = torch.where(need.unsqueeze(1), force, transfer)
++            forward_batch.input_ids[dec_index[act_rows]] = torch.where(
++                transfer, sampled, cur_act
++            )
+ 
+         self._set_commit_flags(forward_batch)
+         out = model_runner.forward(forward_batch, pp_proxy_tensors=None)
+@@ -246,12 +348,25 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+                 "LowConfidenceShiftHybridDiffusion requires full logits from the causal "
+                 "commit forward to capture the next seed."
+             )
+-        self._capture_next_seeds(logits_output.full_logits, rpx_list, batch_size)
++        self._capture_next_seeds(
++            logits_output.full_logits, rpx_list, decode_bids, base_offsets
++        )
++        if prefill_bids:
++            # Absorbed prefill rows: their (chunk-)final logit seeds the first
++            # decode block; the commit forward computed them causally.
++            self._capture_prefill_seeds(
++                logits_output, forward_batch, rpx_list, only_bids=prefill_bids
++            )
+ 
+-        next_token_ids = torch.reshape(forward_batch.input_ids, (batch_size, -1))
+-        next_token_ids_list = [
+-            next_token_ids[i, start_list[i] :] for i in range(batch_size)
+-        ]
++        final = forward_batch.input_ids[dec_index]
++        next_token_ids_list: List[torch.Tensor] = []
++        di = 0
++        for bid in range(batch_size):
++            if is_prefill[bid]:
++                next_token_ids_list.append(empty)
++            else:
++                next_token_ids_list.append(final[di, start_by_bid[bid] :])
++                di += 1
+         self._stats["total_tokens"] += sum(len(t) for t in next_token_ids_list)
+         self._clear_flags(forward_batch)
+         return logits_output, next_token_ids_list, can_run_cuda_graph
+@@ -268,6 +383,7 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+         logits_output: LogitsProcessorOutput,
+         forward_batch: ForwardBatch,
+         rpx_list: List[int],
++        only_bids: Optional[List[int]] = None,
+     ) -> None:
+         full_logits = getattr(logits_output, "full_logits", None)
+         if full_logits is None:
+@@ -276,6 +392,8 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+                 return
+             seed_ids, _ = self._sample_tokens(next_logits)
+             for bid, seed in enumerate(seed_ids.detach().cpu().tolist()):
++                if only_bids is not None and bid not in only_bids:
++                    continue
+                 self._seed_tokens[int(rpx_list[bid])] = int(seed)
+             return
+ 
+@@ -291,7 +409,7 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+         valid_bids: List[int] = []
+         offset = 0
+         for bid, n_new in enumerate(extend_lens_list):
+-            if n_new > 0:
++            if n_new > 0 and (only_bids is None or bid in only_bids):
+                 last_indices.append(offset + n_new - 1)
+                 valid_bids.append(bid)
+             offset += n_new
+@@ -304,14 +422,18 @@ class LowConfidenceShiftHybridDiffusion(LowConfidence):
+             self._seed_tokens[int(rpx_list[out_bid])] = int(seed)
+ 
+     def _capture_next_seeds(
+-        self, full_logits: torch.Tensor, rpx_list: List[int], batch_size: int
++        self,
++        full_logits: torch.Tensor,
++        rpx_list: List[int],
++        decode_bids: List[int],
++        base_offsets: List[int],
+     ) -> None:
+         last_indices = [
+-            (bid + 1) * self.block_size - 1 for bid in range(batch_size)
++            base_offsets[bid] + self.block_size - 1 for bid in decode_bids
+         ]
+         idx = torch.tensor(last_indices, dtype=torch.long, device=full_logits.device)
+         seed_ids, _ = self._sample_tokens(full_logits[idx])
+-        for bid, seed in enumerate(seed_ids.detach().cpu().tolist()):
++        for bid, seed in zip(decode_bids, seed_ids.detach().cpu().tolist()):
+             self._seed_tokens[int(rpx_list[bid])] = int(seed)
+ 
+ 
+diff --git a/eval/sglang/srt/dllm/mixin/scheduler.py b/eval/sglang/srt/dllm/mixin/scheduler.py
+index 45ee3d8..b7adcc8 100644
+--- a/eval/sglang/srt/dllm/mixin/scheduler.py
++++ b/eval/sglang/srt/dllm/mixin/scheduler.py
+@@ -401,7 +401,8 @@ class SchedulerDllmMixin:
+             )
+ 
+         # Safety guard: never mix prefill and decode reqs in the same batch.
+-        # HybridDiffusionSelfSpec algorithm assumes either all-prefill or all-decode.
++        # dLLM algorithms expect either all-prefill or all-decode from the OUTER
++        # scheduler; mixing happens only via the tight-loop inline absorption.
+         if adder.can_run_list:
+             has_prefill = any(req.is_dllm_prefill() for req in adder.can_run_list)
+             has_decode = any(not req.is_dllm_prefill() for req in adder.can_run_list)
+@@ -610,6 +611,10 @@ class SchedulerDllmMixin:
+             absorbed += 1
+ 
+         if absorbed > 0:
++            logger.info(
++                "[DLLM inline absorb] absorbed %d prefill req(s) into a running "
++                "decode batch (bs now %d)", absorbed, len(batch.reqs)
++            )
+             if batch.multimodal_inputs is not None:
+                 batch.multimodal_inputs.extend([None] * absorbed)
+             batch.sampling_info = SamplingBatchInfo.from_schedule_batch(
+diff --git a/eval/sglang/srt/layers/attention/linear/gdn_dllm_backend.py b/eval/sglang/srt/layers/attention/linear/gdn_dllm_backend.py
+index 9d0eb42..0c34e80 100644
+--- a/eval/sglang/srt/layers/attention/linear/gdn_dllm_backend.py
++++ b/eval/sglang/srt/layers/attention/linear/gdn_dllm_backend.py
+@@ -296,6 +296,12 @@ class GDNDllmBackend:
+         """Run dLLM mixed inline prefill without sending prefill through decode kernels."""
+         forward_metadata = self.gdn_backend.forward_metadata
+         cache_indices = forward_metadata.mamba_cache_indices
++        # Honour the algorithm's state-persistence request. Denoise rounds run
++        # with persist_state=False (conv/ssm must be restored so the commit
++        # forward re-advances them from the pre-block state exactly once);
++        # LowConfidenceShiftHybridDiffusion's commit forward runs with
++        # persist_state=True and MUST write state even in a mixed batch.
++        persist_state = bool(getattr(forward_batch, "dllm_gdn_persist_state", False))
+         mask_types = forward_batch.dllm_attn_mask_types_cpu
+         seq_lens_cpu = list(forward_batch.extend_seq_lens_cpu)
+         prefix_lens_cpu = [
+@@ -338,6 +344,25 @@ class GDNDllmBackend:
+                     for start, end in (ranges[i] for i in prefill_bids)
+                 ]
+             )
++            prefill_cache_indices = cache_indices[
++                torch.tensor(
++                    prefill_bids, dtype=torch.long, device=cache_indices.device
++                )
++            ]
++            # Only algorithms that RE-RUN prefill rows across rounds (the
++            # shifted-diffusion denoise loop) may request restore; single-pass
++            # algorithms (self-spec) rely on the stock always-persist behavior.
++            prefill_restore = (
++                not persist_state
++                and bool(
++                    getattr(forward_batch, "dllm_gdn_prefill_state_restore", False)
++                )
++            )
++            if prefill_restore:
++                # Snapshot and restore so repeated denoise rounds do not
++                # re-apply the same prefill chunk to the recurrent state.
++                prefill_conv_backup = conv_states[prefill_cache_indices].clone()
++                prefill_ssm_backup = ssm_states[prefill_cache_indices].clone()
+             prefill_fb = self._subset_forward_batch(
+                 forward_batch,
+                 prefill_bids,
+@@ -357,6 +382,9 @@ class GDNDllmBackend:
+                 )
+             finally:
+                 self.gdn_backend.forward_metadata = old_metadata
++            if prefill_restore:
++                conv_states[prefill_cache_indices] = prefill_conv_backup
++                ssm_states[prefill_cache_indices] = prefill_ssm_backup
+ 
+             offset = 0
+             for bid in prefill_bids:
+@@ -400,7 +428,8 @@ class GDNDllmBackend:
+                 b_saved = b.clone()
+                 conv_snapshots = conv_states[cache_indices].clone()
+ 
+-            conv_state_backup = conv_states[decode_cache_indices].clone()
++            if not persist_state:
++                conv_state_backup = conv_states[decode_cache_indices].clone()
+             decode_mixed = causal_conv1d_fn(
+                 mixed_qkv[decode_token_indices].transpose(0, 1),
+                 layer.conv_weights,
+@@ -412,7 +441,8 @@ class GDNDllmBackend:
+                 query_start_loc=decode_query_start,
+                 seq_lens_cpu=torch.tensor(decode_lens_cpu),
+             ).transpose(0, 1)[: len(decode_token_indices)]
+-            conv_states[decode_cache_indices] = conv_state_backup
++            if not persist_state:
++                conv_states[decode_cache_indices] = conv_state_backup
+ 
+             query, key, value = torch.split(
+                 decode_mixed, [layer.q_dim, layer.k_dim, layer.v_dim], dim=-1
+@@ -432,19 +462,19 @@ class GDNDllmBackend:
+ 
+             initial_state = ssm_states[decode_cache_indices] if decode_has_initial.any() else None
+             if causal_mode == 1:
+-                decode_out, _ = fused_recurrent_gated_delta_rule(
++                decode_out, decode_final_state = fused_recurrent_gated_delta_rule(
+                     q=query,
+                     k=key,
+                     v=value,
+                     g=g,
+                     beta=beta_val,
+                     initial_state=initial_state,
+-                    output_final_state=False,
++                    output_final_state=persist_state,
+                     use_qk_l2norm_in_kernel=True,
+                     cu_seqlens=decode_query_start.to(dtype=torch.long),
+                 )
+             else:
+-                decode_out, _ = fused_recurrent_block_causal_gated_delta_rule(
++                decode_out, decode_final_state = fused_recurrent_block_causal_gated_delta_rule(
+                     q=query,
+                     k=key,
+                     v=value,
+@@ -454,10 +484,14 @@ class GDNDllmBackend:
+                     causal_mode=causal_mode,
+                     num_clean=num_clean,
+                     initial_state=initial_state,
+-                    output_final_state=False,
++                    output_final_state=persist_state,
+                     use_qk_l2norm_in_kernel=True,
+                     cu_seqlens=decode_query_start.to(dtype=torch.long),
+                 )
++            if persist_state and decode_final_state is not None:
++                ssm_states[decode_cache_indices] = decode_final_state.to(
++                    ssm_states.dtype
++                )
+ 
+             offset = 0
+             for bid in decode_bids:
+diff --git a/eval/sglang/srt/layers/logits_processor.py b/eval/sglang/srt/layers/logits_processor.py
+index ff76fd5..260c233 100644
+--- a/eval/sglang/srt/layers/logits_processor.py
++++ b/eval/sglang/srt/layers/logits_processor.py
+@@ -217,6 +217,10 @@ class LogitsMetadata:
+     is_prefill_only: bool = False
+     dllm_return_argmax_only: bool = False
+     dllm_return_topk_probs: bool = False
++    # Pure prompt-prefill dLLM forward: only each request's final-position
++    # logit is consumed (block-seed sampling) — skip full-vocab logits over
++    # every prefill position (an ~V x tokens allocation that OOMs on long prompts).
++    dllm_prefill_last_only: bool = False
+     dllm_top_k: int = 0
+     dllm_top_p: float = 1.0
+     dllm_temperature: float = 1.0
+@@ -269,6 +273,9 @@ class LogitsMetadata:
+             dllm_return_argmax_only=bool(
+                 getattr(forward_batch, "dllm_return_argmax_only", False)
+             ),
++            dllm_prefill_last_only=bool(
++                getattr(forward_batch, "dllm_prefill_last_only", False)
++            ),
+             dllm_return_topk_probs=bool(
+                 getattr(forward_batch, "dllm_return_topk_probs", False)
+             ),
+@@ -1207,6 +1214,18 @@ class LogitsProcessor(nn.Module):
+         logits_metadata: LogitsMetadata,
+     ) -> LogitsProcessorOutput:
+         assert self.return_full_logits
++        if (
++            logits_metadata.dllm_prefill_last_only
++            and logits_metadata.extend_seq_lens is not None
++        ):
++            last_idx = torch.cumsum(logits_metadata.extend_seq_lens, dim=0) - 1
++            last_hidden = hidden_states[last_idx]
++            next_logits = self._get_logits(last_hidden, lm_head, logits_metadata)
++            return LogitsProcessorOutput(
++                full_logits=None,
++                next_token_logits=next_logits,
++                dllm_logits_mode="last_only",
++            )
+         if logits_metadata.dllm_return_argmax_only:
+             full_argmax = self._compute_lm_head_argmax_tiled(
+                 hidden_states, lm_head
+diff --git a/eval/sglang/srt/managers/schedule_batch.py b/eval/sglang/srt/managers/schedule_batch.py
+index b7a0cd0..51ce99b 100644
+--- a/eval/sglang/srt/managers/schedule_batch.py
++++ b/eval/sglang/srt/managers/schedule_batch.py
+@@ -1003,6 +1003,13 @@ class Req(ReqDllmMixin):
+ 
+         # NOTE: the matched length is at most 1 less than the input length to enable logprob computation
+         max_prefix_len = input_len - 1
++        if self.is_dllm() and not self.output_ids:
++            # dLLM fill_ids end with block_size mask placeholders, so the cap
++            # above can still swallow the entire prompt on a full radix hit.
++            # The shifted dLLM algorithms sample the first decode seed from the
++            # last prompt token's prefill logit, so keep at least one prompt
++            # token out of the match to guarantee a prefill forward.
++            max_prefix_len = min(max_prefix_len, len(self.origin_input_ids) - 1)
+         if self.return_logprob and self.logprob_start_len >= 0:
+             max_prefix_len = min(max_prefix_len, self.logprob_start_len)
+         max_prefix_len = max(max_prefix_len, 0)
+diff --git a/eval/sglang/srt/managers/scheduler.py b/eval/sglang/srt/managers/scheduler.py
+index 17750ad..756af77 100644
+--- a/eval/sglang/srt/managers/scheduler.py
++++ b/eval/sglang/srt/managers/scheduler.py
+@@ -1410,10 +1410,9 @@ class Scheduler(
+                     and batch.is_dllm()
+                     and getattr(
+                         getattr(self.tp_worker, "dllm_algorithm", None),
+-                        "__class__",
+-                        type(None),
+-                    ).__name__
+-                    == "HybridDiffusionSelfSpec"
++                        "supports_inline_prefill_absorb",
++                        False,
++                    )
+                     and not any(r.finished() for r in batch.reqs)
+                     and not any(r.is_dllm_prefill() for r in batch.reqs)
+                 ):
+diff --git a/eval/sglang/srt/model_executor/cuda_graph_runner.py b/eval/sglang/srt/model_executor/cuda_graph_runner.py
+index 381be7c..e4328ed 100644
+--- a/eval/sglang/srt/model_executor/cuda_graph_runner.py
++++ b/eval/sglang/srt/model_executor/cuda_graph_runner.py
+@@ -792,6 +792,11 @@ class CudaGraphRunner:
+                 )
+             )
+             is_hybrid_gdn_model = self.model_runner.hybrid_gdn_config is not None
++            # Replay only when the runtime flag matches what capture used (the
++            # shifted-diffusion algorithm captures without intermediate buffers).
++            expected_cache_intermediate = (
++                self.dllm_config.algorithm != "LowConfidenceShiftHybridDiffusion"
++            )
+             dllm_gdn_semantics_supported = (
+                 not is_hybrid_gdn_model
+                 or (
+@@ -802,6 +807,7 @@ class CudaGraphRunner:
+                             False,
+                         )
+                     )
++                    == expected_cache_intermediate
+                     and not bool(
+                         getattr(forward_batch, "dllm_gdn_save_for_commit", False)
+                     )
+@@ -1183,7 +1189,12 @@ class CudaGraphRunner:
+                 forward_batch.dllm_gdn_causal_mode = 1
+             forward_batch.dllm_bidir_custom_mask = None
+             forward_batch.dllm_gdn_persist_state = False
+-            forward_batch.dllm_gdn_cache_intermediate_for_commit = True
++            # The shifted-diffusion algorithm runs without the intermediate
++            # commit buffers (they are not allocated for it); capture must use
++            # the same kernel path its denoise forwards request at replay time.
++            forward_batch.dllm_gdn_cache_intermediate_for_commit = (
++                self.dllm_config.algorithm != "LowConfidenceShiftHybridDiffusion"
++            )
+             forward_batch.dllm_gdn_save_for_commit = False
+             forward_batch.dllm_gdn_use_graph_save_buffer = False
+             forward_batch.dllm_gdn_block_size = self.num_tokens_per_bs
+diff --git a/eval/sglang/srt/model_executor/model_runner_kv_cache_mixin.py b/eval/sglang/srt/model_executor/model_runner_kv_cache_mixin.py
+index e4cbef6..b0a44d1 100644
+--- a/eval/sglang/srt/model_executor/model_runner_kv_cache_mixin.py
++++ b/eval/sglang/srt/model_executor/model_runner_kv_cache_mixin.py
+@@ -57,6 +57,12 @@ class ModelRunnerKVCacheMixin:
+         if self.server_args.speculative_num_draft_tokens is not None:
+             return self.server_args.speculative_num_draft_tokens
+         if self.server_args.dllm_algorithm is not None:
++            # The shifted-diffusion algorithm never reads the per-step
++            # intermediate GDN buffers: its commit forward recomputes the block
++            # state causally from scratch, so the (rr x block_size x
++            # per-req-state) reservation would be pure waste.
++            if self.server_args.dllm_algorithm == "LowConfidenceShiftHybridDiffusion":
++                return None
+             from sglang.srt.dllm.config import DllmConfig
+ 
+             return DllmConfig.from_server_args(self.server_args).block_size
+@@ -86,8 +92,10 @@ class ModelRunnerKVCacheMixin:
+         # Reserve memory for intermediate Mamba/GDN states used by speculative
+         # verify paths and by dLLM accepted-state scatter commit.
+         spec_num_draft_tokens = self._get_mamba_spec_num_draft_tokens()
+-        if not self.spec_algorithm.is_none() or server_args.dllm_algorithm is not None:
+-            assert spec_num_draft_tokens is not None
++        if (
++            not self.spec_algorithm.is_none()
++            or server_args.dllm_algorithm is not None
++        ) and spec_num_draft_tokens is not None:
+             assert server_args.max_running_requests is not None
+ 
+             max_running_requests = server_args.max_running_requests // (
+diff --git a/eval/sglang/srt/models/qwen3_5.py b/eval/sglang/srt/models/qwen3_5.py
+index 50e7588..0be331f 100644
+--- a/eval/sglang/srt/models/qwen3_5.py
++++ b/eval/sglang/srt/models/qwen3_5.py
+@@ -940,7 +940,15 @@ class Qwen3_5ForCausalLM(nn.Module):
+ 
+         # Decoder layers
+         def get_layer(idx: int, prefix: str):
+-            layer_type = config.layers_block_type[idx]
++            # stock HF Qwen3_5TextConfig ships `layer_types` ("full_attention"),
++            # not `layers_block_type` ("attention")
++            block_types = getattr(config, "layers_block_type", None)
++            if block_types is not None:
++                layer_type = block_types[idx]
++            else:
++                layer_type = config.layer_types[idx]
++                if layer_type == "full_attention":
++                    layer_type = "attention"
+             layer_class = ALL_DECODER_LAYER_TYPES[layer_type]
+             if layer_type == "attention":
+                 prefix = add_prefix("self_attn", prefix)
+@@ -1132,9 +1140,12 @@ class Qwen3_5ForCausalLM(nn.Module):
+ 
+     @classmethod
+     def get_model_config_for_expert_location(cls, config):
++        num_experts = getattr(config, "num_experts", None)
++        if not num_experts:  # dense Qwen3.5 checkpoints carry no expert fields
++            return None
+         return ModelConfigForExpertLocation(
+             num_layers=config.num_hidden_layers,
+-            num_logical_experts=config.num_experts,
++            num_logical_experts=num_experts,
+             num_groups=None,
+         )
+ 
+diff --git a/eval/sglang/srt/server_args.py b/eval/sglang/srt/server_args.py
+index ed0df9e..5029e8d 100644
+--- a/eval/sglang/srt/server_args.py
++++ b/eval/sglang/srt/server_args.py
+@@ -3991,19 +3991,26 @@ class ServerArgs:
+ 
+         config = DllmConfig.from_server_args(self)
+         if config.variant == SelfSpecVariant.HYBRID_DIFFUSION_SHIFT and not self.disable_radix_cache:
+-            logger.warning(
+-                "Radix cache is disabled for HybridDiffusion shifted diffusion sampling. "
+-                "The algorithm needs a prompt prefill forward to capture the "
+-                "first decode seed, and generated-prefix Mamba tracking for "
+-                "radix reuse is not implemented yet."
+-            )
+-            self.disable_radix_cache = True
+-            if self.enable_mamba_extra_buffer():
++            # Radix cache works for shifted diffusion sampling: the dLLM prefix
++            # match is capped at the last prompt token (see
++            # Req.init_next_round_input), so a prefill forward always runs and
++            # captures the first decode seed. Cached-prefix insertion needs the
++            # mamba extra_buffer state tracking; with an explicit no_buffer
++            # strategy nothing can be inserted for dLLM requests, so keep the
++            # old force-disable there.
++            if self.mamba_scheduler_strategy == "no_buffer":
+                 logger.warning(
+-                    "Mamba extra_buffer is disabled together with radix cache "
+-                    "for HybridDiffusion shifted diffusion sampling."
++                    "Radix cache is disabled for HybridDiffusion shifted diffusion "
++                    "sampling with mamba no_buffer: dLLM prefixes cannot be "
++                    "inserted without extra_buffer state tracking."
++                )
++                self.disable_radix_cache = True
++            else:
++                logger.warning(
++                    "Radix cache enabled for HybridDiffusion shifted diffusion "
++                    "sampling (prompt-prefix reuse; generated tokens are inserted "
++                    "up to the prefill-time mamba track boundary at request exit)."
+                 )
+-                self.mamba_scheduler_strategy = "no_buffer"
+ 
+         if not self.disable_radix_cache:
+             if self.enable_mamba_extra_buffer():
+diff --git a/eval/sglang/srt/utils/hf_transformers/common.py b/eval/sglang/srt/utils/hf_transformers/common.py
+index 0f3ccf9..6820a29 100644
+--- a/eval/sglang/srt/utils/hf_transformers/common.py
++++ b/eval/sglang/srt/utils/hf_transformers/common.py
+@@ -44,6 +44,7 @@ from sglang.srt.configs import (
+     Olmo3Config,
+     Qwen3_5Config,
+     Qwen3_5MoeConfig,
++    Qwen3_5TextConfig,
+     Qwen3NextConfig,
+     Step3p5Config,
+     Step3VLConfig,
+@@ -91,6 +92,7 @@ _CONFIG_REGISTRY: Dict[str, Type[PretrainedConfig]] = {
+         DeepseekVLV2Config,
+         Qwen3_5Config,
+         Qwen3_5MoeConfig,
++    Qwen3_5TextConfig,
+         JetNemotronConfig,
+         JetVLMConfig,
+         KimiK25Config,

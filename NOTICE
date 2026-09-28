@@ -1,0 +1,64 @@
+trida-stack
+Copyright 2026 Trillion Labs
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes third-party open-source software. Each component below
+retains its own upstream license.
+
+================================================================================
+Bundled third-party code (redistributed in this repository)
+================================================================================
+
+IFEval — Instruction-Following Eval
+  Copyright The Google Research Authors.
+  License: Apache License 2.0
+  Source:  https://github.com/google-research/google-research/tree/master/instruction_following_eval
+  Bundled: inference/ifeval_lib/ — used (aside from packaging) unmodified to score
+           the eval_ifeval.py benchmark. See inference/NOTICE for the folder-local
+           notice.
+
+Two-stream Gated-DeltaNet / ShortConv Triton kernels
+  From HybridDiffusion (yuchen-zhu-zyc/HybridDiffusion @ 6ca547a), itself a fork of
+  SGLang (Apache-2.0).
+  License: PolyForm Noncommercial License 1.0.0 — noncommercial use only.
+           https://polyformproject.org/licenses/noncommercial/1.0.0
+  Bundled: train/block_gated_delta_rule/ — vendored; see the folder-local
+           LICENSE.HybridDiffusion and VENDORED.md.
+  Derived: inference/vllm/vllm_native_diffusion/block_causal_readout.py and the
+           block-causal readout in qwen3_5_diffusion.py are ports of the same
+           upstream kernels (see their file headers).
+  Note:    inference/sglang/ vendors nothing — it builds the backend from upstream
+           via a patch; see inference/sglang/NOTICE for that recipe's terms.
+
+The two components above are the third-party source code redistributed in this
+repository. They do not share a single license: see COMPLIANCE.md section 1.
+
+================================================================================
+Referenced, NOT bundled — NONCOMMERCIAL upstream (fetched via recipe)
+================================================================================
+
+Two-stream Gated-DeltaNet / block-diffusion Triton kernels
+  Copyright (c) 2026 Yuchen Zhu; portions (c) 2023-2025 Songlin Yang, Yu Zhang.
+  HybridDiffusion is developed from TorchTitan (Copyright (c) Meta Platforms, Inc.
+  and affiliates); portions are derived from Flash Linear Attention (FLA, MIT).
+  See train/block_gated_delta_rule/NOTICE.HybridDiffusion for the upstream notice.
+  License: PolyForm Noncommercial 1.0.0  (NONCOMMERCIAL — not Apache-2.0)
+  Upstream: https://github.com/yuchen-zhu-zyc/HybridDiffusion @ 6ca547a
+  Not vendored here. Assembled from upstream by the fetch/patch recipes in:
+    - train/block_gated_delta_rule/     (fetch_kernels.sh + trillion_mods.patch)
+    - inference/sglang/                 (two_stream_diffusion.patch)
+    - inference/vllm/vllm_native_diffusion/KERNELS.md
+  These kernels are required to run the two-stream training and diffusion serving
+  paths, and Trillion Labs' patches against them are derivative works also bound by
+  PolyForm Noncommercial 1.0.0. Running those paths is noncommercial-only.
+
+================================================================================
+Referenced, NOT bundled (installed separately)
+================================================================================
+
+Runtime backends and libraries — PyTorch, Hugging Face Transformers / Datasets /
+Accelerate, SGLang, and optionally vLLM — and the benchmark harnesses invoked from
+benchmark/ (EleutherAI lm-evaluation-harness, BFCL, tau2-bench, FunctionChat,
+KoAgentBench, SWE-bench, Terminal-Bench) are dependencies, not redistributed here.
+See COMPLIANCE.md for the full inventory and licenses.

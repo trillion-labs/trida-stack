@@ -1,0 +1,7 @@
+block_size: 32
+mask_id: 156895   # mask token id of the served checkpoint (model-specific)
+# One token per denoising step reproduces block_length=steps=32.
+threshold: 1.0
+temperature: 0.1
+top_k: 0
+top_p: 1.0

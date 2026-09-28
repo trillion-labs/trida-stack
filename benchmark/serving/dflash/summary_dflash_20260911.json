@@ -1,0 +1,330 @@
+{
+ "run": "$SCRATCH/runs/2026-09-11_dflash",
+ "jobs": {
+  "sweep-vllm": {
+   "results": {
+    "ar": {
+     "1": {
+      "tok_per_s": 217.36,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "16": {
+      "tok_per_s": 2858.65,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 726.29,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "8": {
+      "tok_per_s": 1556.17,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     }
+    },
+    "dflash16": {
+     "1": {
+      "tok_per_s": 527.35,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "16": {
+      "tok_per_s": 4465.19,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 1690.85,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "8": {
+      "tok_per_s": 2708.19,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     }
+    },
+    "dflash4": {
+     "1": {
+      "tok_per_s": 307.73,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "16": {
+      "tok_per_s": 3391.82,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 1024.41,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "8": {
+      "tok_per_s": 1903.99,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     }
+    },
+    "dflash8": {
+     "1": {
+      "tok_per_s": 445.31,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "16": {
+      "tok_per_s": 4363.04,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 1415.86,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "8": {
+      "tok_per_s": 2517.03,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     }
+    },
+    "selfspec4": {
+     "1": {
+      "tok_per_s": 345.58,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "16": {
+      "tok_per_s": 2952.95,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 861.0,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "8": {
+      "tok_per_s": 1776.14,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     }
+    },
+    "selfspec8": {
+     "1": {
+      "tok_per_s": 333.56,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "16": {
+      "tok_per_s": 0.0,
+      "n_ok": 0,
+      "n_err": 64,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 757.31,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "8": {
+      "tok_per_s": 1270.97,
+      "n_ok": 16,
+      "n_err": 48,
+      "accept": null
+     }
+    }
+   },
+   "accept_len_serverlog": {
+    "dflash16": 6.5,
+    "dflash4": 3.83,
+    "dflash8": 5.18
+   }
+  },
+  "sweep-vllm-bigN": {
+   "results": {
+    "ar": {
+     "1": {
+      "tok_per_s": 218.12,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 730.25,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     }
+    },
+    "selfspec16": {
+     "1": {
+      "tok_per_s": 272.98,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 634.63,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     }
+    },
+    "selfspec32": {
+     "1": {
+      "tok_per_s": 202.06,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 572.97,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     }
+    }
+   },
+   "accept_len_serverlog": {}
+  },
+  "sweep-sglang": {
+   "results": {
+    "ar": {
+     "1": {
+      "tok_per_s": 243.03,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "16": {
+      "tok_per_s": 3115.56,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 826.51,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "8": {
+      "tok_per_s": 1697.0,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     }
+    },
+    "dflash16": {
+     "1": {
+      "tok_per_s": 853.58,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "16": {
+      "tok_per_s": 4392.53,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 2370.05,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "8": {
+      "tok_per_s": 3416.2,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     }
+    },
+    "dflash4": {
+     "1": {
+      "tok_per_s": 540.35,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "16": {
+      "tok_per_s": 5014.2,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 1383.95,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "8": {
+      "tok_per_s": 3031.78,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     }
+    },
+    "dflash8": {
+     "1": {
+      "tok_per_s": 760.06,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "16": {
+      "tok_per_s": 4948.17,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "4": {
+      "tok_per_s": 1774.36,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     },
+     "8": {
+      "tok_per_s": 3626.04,
+      "n_ok": 64,
+      "n_err": 0,
+      "accept": null
+     }
+    }
+   },
+   "accept_len_serverlog": {
+    "dflash16": 6.25,
+    "dflash4": 3.34,
+    "dflash8": 4.99
+   }
+  }
+ }
+}

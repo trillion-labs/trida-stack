@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vllm-native-diffusion"
+version = "0.1.0"
+description = "Trida block-diffusion and self-spec (AR-Trust) decoding for vLLM 0.27.x — out-of-tree ModelState plugin (Qwen3.5 two-stream)"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Trillion Labs" }]
+# torch is the only hard dependency (enough for the CPU unit test). The vLLM host is an
+# extra so `pip install ".[test]"` runs CPU tests without pulling the GPU serving stack.
+# NOTE: the two-stream readout kernel is PolyForm-NC and not bundled — see
+# vllm_native_diffusion/KERNELS.md.
+dependencies = ["torch"]
+
+[project.optional-dependencies]
+vllm = ["vllm>=0.27,<0.28"]
+test = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/trillion-labs/trida-stack"
+
+[project.entry-points."vllm.general_plugins"]
+# The entry-point NAME (left of =) is what you put in VLLM_PLUGINS.
+trida_diffusion = "vllm_native_diffusion.plugin:register_trida"
+
+[tool.setuptools]
+packages = ["vllm_native_diffusion"]
