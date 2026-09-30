@@ -1,0 +1,4 @@
+기록일,프로젝트,이름/버전,라이선스,점수,결정,평가자,재평가 예정,비고
+2026-09-30,trida-stack,HybridDiffusion @6ca547a,PolyForm-NC-1.0.0,47(게이트 불통과),조건부 승인,research team,2026-12-31,치명조건 미충족(상업이용 금지). LICENSE_POLICY.md 카브아웃으로 채택. 대체전략 미착수.
+2026-09-30,trida-stack,SGLang (HybridDiffusion fork @6ca547a),Apache-2.0 상위 / PolyForm-NC 상속,미채점,조건부 승인,research team,2026-12-31,업스트림 SGLang은 Apache-2.0. 비상업 제약은 HybridDiffusion 베이스에서 상속.
+2026-09-30,trida-stack,vLLM 0.27.*,Apache-2.0,92,승인,research team,2026-12-31,아웃오브트리 플러그인. 포크 없음.

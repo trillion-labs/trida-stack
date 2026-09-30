@@ -1,0 +1,9 @@
+assessment_date,dimension,level,evidence_url,gap,next_level_criterion,improvement_action,owner,due_date,reviewer
+2026-09-30,strategy,3,https://github.com/trillion-labs/trida-stack#readme,공개 목적과 대상 사용자는 명확하나 지원 범위·lifecycle 선언이 없다,charter에 사용자·제공가치·지원범위·lifecycle 각 1문장,README에 Project status 섹션 추가,research team,2026-12-31,
+2026-09-30,governance,1,,GOVERNANCE.md 없음. 역할·권한·의사결정·승계가 문서화되지 않음,역할과 의사결정 절차 문서화,GOVERNANCE.md 작성,research team,2026-12-31,
+2026-09-30,development,4,https://github.com/trillion-labs/trida-stack/actions,CI·분기보호·PR템플릿·코드리뷰가 실제 운영 증거로 존재,lead time과 품질 균형 개선 증거,리뷰 소요시간 측정 시작,research team,2027-03-31,
+2026-09-30,community,1,,CONTRIBUTING·CODE_OF_CONDUCT는 있으나 COMMUNITY.md 없음. README에서 질문·기여·보안 경로에 도달할 수 없음. Discussions 미개설,채널별 목적·응답기대치 게시 및 triage 시작,README 경로 섹션 + COMMUNITY.md + Discussions,research team,2026-12-31,
+2026-09-30,security_supply_chain,2,https://github.com/trillion-labs/trida-stack/blob/main/SECURITY.md,SECURITY.md와 신고 SLA는 존재(정의 증거). SBOM·SCA·조치대장 없음(운영 증거 없음),SBOM 정기 생성 + SCA + 조치 이력,공급망 4주 프로그램,research team,2026-12-31,
+2026-09-30,release_quality,2,https://github.com/trillion-labs/trida-stack/releases/tag/v0.1.0,릴리스 1건. 서명·provenance·checksum 없음. 지원 버전 선언 없음,서명·note·일정 기록,릴리스 자산 정의 후 서명 도입,research team,2027-03-31,
+2026-09-30,adoption_impact,1,,대상 사용자는 정의되어 있으나 adopter 증거 없음. 외부 기여자 0명,adopter 증거 확보,미정 — 인위적 목표를 세우지 않는다,research team,2027-03-31,
+2026-09-30,sustainability,1,,단일 maintainer. bus factor 1. 승계 계획 없음,maintainer 2인 이상 또는 승계 문서화,GOVERNANCE.md에 승계 조항 포함,research team,2026-12-31,

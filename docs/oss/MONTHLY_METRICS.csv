@@ -1,0 +1,9 @@
+period,kpi_id,value,numerator,denominator,data_extracted_at,source_snapshot,event_annotation,quality_status,owner,interpretation,action_issue
+2026-09,KPI-001,결측,,,2026-09-30T08:10:27Z,GitHub API repos/trillion-labs/trida-stack/issues,저장소 공개 2026-09-28,missing_no_data,research team,외부 이슈·PR 0건. 값이 0이 아니라 측정 대상이 없다.,
+2026-09,KPI-002,100,4,4,2026-09-30T08:10:27Z,GitHub Actions runs?branch=main,저장소 공개 2026-09-28; PR #1 병합,ok_small_sample,research team,표본 4건으로 추세 해석 불가. 기준선으로만 사용.,
+2026-09,KPI-003,결측,,,2026-09-30T08:10:27Z,git tags,v0.1.0 태그 2026-09-30,missing_single_point,research team,릴리스 1건. 간격은 2번째 릴리스부터.,
+2026-09,KPI-004,0,0,1,2026-09-30T08:10:27Z,GitHub releases v0.1.0 assets,v0.1.0 릴리스,ok,research team,릴리스는 있으나 SBOM 자산이 없다. 공급망 Lv3 작업의 직접 대상.,
+2026-09,KPI-005,0,0,0,2026-09-30T08:10:27Z,GitHub releases v0.1.0 assets,v0.1.0 릴리스,ok_zero_denominator,research team,릴리스 자산 자체가 0건이라 분모가 0. 서명 이전에 배포 자산 정의가 필요.,
+2026-09,KPI-006,100,4,4,2026-09-30T08:10:27Z,git log public main,공개 저장소 squash 히스토리,degraded_scope_mismatch,research team,공개 저장소 기준 100%. squash된 히스토리라 실제 분포가 아니다. 해석하지 말 것.,
+2026-09,GR-001,결측,0,0,2026-09-30T08:10:27Z,GitHub API issues,,missing_no_data,research team,대상 0건.,
+2026-09,GR-002,미측정,,,2026-09-30T08:10:27Z,manual,,not_collected,research team,9월에는 수집하지 않았다. 10월부터 수집.,

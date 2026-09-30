@@ -1,0 +1,7 @@
+evidence_id,domain,description,period,source_url,collected_at,collected_by,access_level,retention_until,integrity_hash,related_kpi,notes
+EVD-001,release_quality,v0.1.0 릴리스 및 태그,2026-Q3,https://github.com/trillion-labs/trida-stack/releases/tag/v0.1.0,2026-09-30T08:10:27Z,research team,public,2029-09-30,,KPI-003 KPI-004 KPI-005,최초 공개 릴리스. 자산 0건.
+EVD-002,development,main CI 실행 이력 (전건 성공),2026-Q3,https://github.com/trillion-labs/trida-stack/actions,2026-09-30T08:10:27Z,research team,public,2029-09-30,,KPI-002,ruff + pytest 2개 잡.
+EVD-003,development,분기 보호 룰셋 활성,2026-Q3,https://github.com/trillion-labs/trida-stack/rules,2026-09-30T08:10:27Z,research team,public,2029-09-30,,,개발환경 품질관리체계 근거.
+EVD-004,security_supply_chain,third-party 커널 비상업 라이선스 고지,2026-Q3,https://github.com/trillion-labs/trida-stack/pull/1,2026-09-30T08:10:27Z,research team,public,2029-09-30,,,4개 README + NOTICE + COMPLIANCE.
+EVD-005,governance,OSS 도입 평가 기록 3건,2026-Q3,https://github.com/trillion-labs/trida-stack/tree/main/docs/oss/intake,2026-09-30T08:10:27Z,research team,public,2029-09-30,,,HybridDiffusion / SGLang / vLLM.
+EVD-006,sustainability,내부 저장소 기여 분포,2026-Q3,,2026-09-30T08:10:27Z,research team,internal,2029-09-30,,KPI-006,내부 저장소 기준 실제 기여 분포. 공개 저장소 squash 히스토리를 보정하기 위한 근거이며 수치는 공개하지 않는다.
