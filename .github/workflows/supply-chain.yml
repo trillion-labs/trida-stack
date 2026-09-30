@@ -1,0 +1,68 @@
+name: Supply chain
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly: dependencies rot even when the repo does not change.
+    - cron: "0 3 * * 1"
+
+concurrency:
+  group: supply-chain-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pin-drift:
+    name: Pinned-commit drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      # The PolyForm-NC kernels are fetched at build time, so no scanner sees them and
+      # we describe them by hand in docs/oss/sbom/external-components.json. This fails
+      # if that hand-written record drifts from what fetch_kernels.sh actually checks out.
+      - name: Check pinned commit consistency
+        run: python tools/check_supply_chain.py
+
+  audit:
+    name: Dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install pip-audit
+        run: pip install pip-audit==2.7.3
+      # Advisory, not blocking: requirements.txt is largely unpinned by design (the CUDA
+      # build is chosen per cluster), so a hard failure here would block unrelated PRs on
+      # transitive advisories we cannot act on in that PR. Findings are triaged into
+      # docs/oss/VULN_DISPOSITION.csv, which is where the Lv3 requirement actually lives
+      # -- the standard is "조치까지", not "스캔까지".
+      - name: Audit declared dependencies
+        continue-on-error: true
+        run: pip-audit -r requirements.txt --desc
+      - name: Audit inference client dependencies
+        continue-on-error: true
+        run: pip-audit -r inference/requirements.txt --desc
+
+  dependency-review:
+    name: Dependency review (PR only)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          # Mirrors docs/oss/LICENSE_POLICY.md. PolyForm-NC is absent on purpose: it
+          # arrives by build-time fetch, not through the dependency graph, so this gate
+          # cannot see it. The pin-drift job above is what covers that path.
+          deny-licenses: AGPL-3.0, GPL-3.0, GPL-2.0, SSPL-1.0

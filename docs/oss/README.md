@@ -8,6 +8,10 @@ Structure follows the NIPA/오픈업 오픈소스 성숙도 guidelines (TTAK.KO-
 | [`LICENSE_POLICY.md`](LICENSE_POLICY.md) | 프로젝트평가 | 허용/조건부/금지 license list, and the PolyForm-NC carve-out |
 | [`INTAKE_REGISTER.csv`](INTAKE_REGISTER.csv) | 프로젝트평가 | one row per adopted third-party component |
 | [`intake/`](intake/) | 프로젝트평가 | the completed 도입 평가서 behind each register row |
+| [`SUPPLY_CHAIN.md`](SUPPLY_CHAIN.md) | 공급망관리 | how components enter, are scanned, and are dispositioned |
+| [`ASSET_INVENTORY.csv`](ASSET_INVENTORY.csv) | 공급망관리 | 통합자산목록 — 1 row per component |
+| [`VULN_DISPOSITION.csv`](VULN_DISPOSITION.csv) | 공급망관리 | 취약점 조치대장 — findings and decisions |
+| [`sbom/external-components.json`](sbom/external-components.json) | 공급망관리 | components no scanner can see |
 | [`KPI_DEFINITION.csv`](KPI_DEFINITION.csv) | 성과관리 | 6 KPIs + 2 guardrails: formula, scope, filters, limitations |
 | [`MONTHLY_METRICS.csv`](MONTHLY_METRICS.csv) | 성과관리 | monthly measurements with data-quality status |
 | [`EVIDENCE_REGISTER.csv`](EVIDENCE_REGISTER.csv) | 성과관리 | claim → evidence URL |

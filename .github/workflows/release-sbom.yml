@@ -1,0 +1,66 @@
+name: Release SBOM
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sbom:
+    name: Generate and attach SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # Guard first: an SBOM that disagrees with the fetch recipe is worse than none,
+      # because it states with authority that the noncommercial kernels are a version
+      # they are not.
+      - name: Check pinned commit consistency
+        run: python tools/check_supply_chain.py
+
+      - name: Generate SPDX + CycloneDX from the source tree
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Generate CycloneDX
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+
+      # Scanners only see what a manifest declares. Three of our components are fetched
+      # at build time and one is vendored in-tree with no manifest, so none of them
+      # appear above. Without this merge the SBOM would silently omit every
+      # PolyForm-Noncommercial component in the build -- the exact thing a consumer
+      # needs the SBOM to tell them.
+      - name: Merge build-time-fetched and vendored components
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          sbom = json.loads(pathlib.Path("sbom.cyclonedx.json").read_text())
+          extra = json.loads(pathlib.Path("docs/oss/sbom/external-components.json").read_text())
+          sbom.setdefault("components", []).extend(extra["components"])
+          pathlib.Path("sbom.cyclonedx.json").write_text(json.dumps(sbom, indent=2))
+          print(f"merged {len(extra['components'])} externally-acquired components")
+          PY
+
+      - name: Assemble the notice package
+        run: bash tools/make_notice_package.sh
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            sbom.spdx.json sbom.cyclonedx.json trida-stack-oss-docs.tar.gz \
+            --clobber

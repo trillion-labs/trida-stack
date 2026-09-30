@@ -1,0 +1,22 @@
+구분,이름·버전,라이선스,사용 위치,획득 경로,취약점 점검일,조치 상태,비고
+직접개발,trida-stack 0.1.0,Apache-2.0,train/ inference/ benchmark/,https://github.com/trillion-labs/trida-stack,2026-09-30,양호,1st-party. 릴리스 v0.1.0.
+직접개발,vllm-native-diffusion 0.1.0,Apache-2.0,inference/vllm/,https://github.com/trillion-labs/trida-stack,2026-09-30,양호,1st-party 플러그인. vLLM 포크 아님.
+외부유입,IFEval scorer (google-research),Apache-2.0,inference/ifeval_lib/,https://github.com/google-research/google-research/tree/master/instruction_following_eval,2026-09-30,양호,저장소에 유일하게 vendoring된 3rd-party 소스. 버전 고정 없음(스냅샷) — 조치중.
+수정포함,HybridDiffusion @6ca547a (training kernels),PolyForm-NC-1.0.0,train/block_gated_delta_rule/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,2026-09-30,수정보류+사유,빌드시 fetch. trillion_mods.patch 적용. 비상업 제약 — LICENSE_POLICY.md 카브아웃.
+수정포함,HybridDiffusion @6ca547a (sglang backend),PolyForm-NC-1.0.0,inference/sglang/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,2026-09-30,수정보류+사유,빌드시 fetch. two_stream_diffusion.patch (14개 파일). 상위 SGLang은 Apache-2.0.
+수정포함,HybridDiffusion @6ca547a (vLLM readout kernel),PolyForm-NC-1.0.0,inference/vllm/vllm_native_diffusion/block_causal_readout.py,https://github.com/yuchen-zhu-zyc/HybridDiffusion,2026-09-30,수정보류+사유,빌드시 fetch. FLA import만 vLLM 번들로 변경.
+외부유입,torch 2.11.0,BSD-3-Clause,전체,https://github.com/pytorch/pytorch,2026-09-30,양호,고정 버전. CUDA 12.8 빌드 권장.
+외부유입,transformers >=4.57 <5,Apache-2.0,train/ inference/,https://github.com/huggingface/transformers,2026-09-30,양호,5.x는 체크포인트 remote code 비호환.
+외부유입,datasets,Apache-2.0,inference/ eval,https://github.com/huggingface/datasets,2026-09-30,양호,버전 미고정 — 조치중.
+외부유입,huggingface_hub,Apache-2.0,모델 다운로드,https://github.com/huggingface/huggingface_hub,2026-09-30,양호,버전 미고정 — 조치중.
+외부유입,accelerate,Apache-2.0,train/,https://github.com/huggingface/accelerate,2026-09-30,양호,버전 미고정 — 조치중.
+외부유입,wandb,MIT,train/ 로깅,https://github.com/wandb/wandb,2026-09-30,조치중,노출된 API 키 교체 미완료. QUARTERLY_REVIEW.md 3절 참조.
+외부유입,numpy,BSD-3-Clause,전체,https://github.com/numpy/numpy,2026-09-30,양호,버전 미고정 — 조치중.
+외부유입,sentencepiece,Apache-2.0,토크나이저,https://github.com/google/sentencepiece,2026-09-30,양호,버전 미고정 — 조치중.
+외부유입,tiktoken,MIT,토크나이저,https://github.com/openai/tiktoken,2026-09-30,양호,버전 미고정 — 조치중.
+외부유입,fsspec,BSD-3-Clause,파일시스템 추상화,https://github.com/fsspec/filesystem_spec,2026-09-30,양호,버전 미고정 — 조치중.
+외부유입,python-dotenv,BSD-3-Clause,설정,https://github.com/theskumar/python-dotenv,2026-09-30,양호,버전 미고정 — 조치중.
+외부유입,requests,Apache-2.0,inference/ 클라이언트,https://github.com/psf/requests,2026-09-30,양호,버전 미고정 — 조치중.
+외부유입,absl-py / immutabledict / langdetect / nltk,Apache-2.0 / MIT / Apache-2.0 / Apache-2.0,inference/eval_ifeval.py,PyPI,2026-09-30,양호,IFEval 스코어러 전용. 버전 미고정 — 조치중.
+외부유입,vLLM >=0.27 <0.28,Apache-2.0,inference/vllm/ (선택),https://github.com/vllm-project/vllm,2026-09-30,양호,stock wheel. 포크 없음.
+외부유입,SGLang (HybridDiffusion fork 경유),Apache-2.0 상위 / PolyForm-NC 상속,inference/sglang/ (선택),https://github.com/sgl-project/sglang,2026-09-30,수정보류+사유,별도 설치. 비상업 제약은 베이스에서 상속.

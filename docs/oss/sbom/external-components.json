@@ -1,0 +1,80 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "name": "trida-stack",
+      "description": "Components that no dependency scanner can see. Merged into every generated SBOM by .github/workflows/release-sbom.yml."
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "HybridDiffusion-block-gated-delta-rule",
+      "version": "6ca547a",
+      "description": "Two-stream Gated-DeltaNet + ShortConv Triton kernels. Fetched at build time by train/block_gated_delta_rule/fetch_kernels.sh and patched with trillion_mods.patch. Never committed to this repository.",
+      "supplier": { "name": "yuchen-zhu-zyc" },
+      "licenses": [ { "license": { "name": "PolyForm Noncommercial 1.0.0", "url": "https://polyformproject.org/licenses/noncommercial/1.0.0" } } ],
+      "externalReferences": [
+        { "type": "vcs", "url": "https://github.com/yuchen-zhu-zyc/HybridDiffusion" }
+      ],
+      "properties": [
+        { "name": "trida:acquisition", "value": "build-time-fetch" },
+        { "name": "trida:modified", "value": "true" },
+        { "name": "trida:commercial-use", "value": "prohibited" }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "HybridDiffusion-sglang-backend",
+      "version": "6ca547a",
+      "description": "SGLang serving stack consumed through the HybridDiffusion fork, patched by inference/sglang/two_stream_diffusion.patch (14 files). Upstream sgl-project/sglang is Apache-2.0; the noncommercial restriction is inherited from the HybridDiffusion base.",
+      "supplier": { "name": "yuchen-zhu-zyc" },
+      "licenses": [ { "license": { "name": "PolyForm Noncommercial 1.0.0", "url": "https://polyformproject.org/licenses/noncommercial/1.0.0" } } ],
+      "externalReferences": [
+        { "type": "vcs", "url": "https://github.com/yuchen-zhu-zyc/HybridDiffusion" },
+        { "type": "other", "url": "https://github.com/sgl-project/sglang" }
+      ],
+      "properties": [
+        { "name": "trida:acquisition", "value": "build-time-fetch" },
+        { "name": "trida:modified", "value": "true" },
+        { "name": "trida:commercial-use", "value": "prohibited" },
+        { "name": "trida:upstream-license", "value": "Apache-2.0 (sgl-project/sglang)" }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "HybridDiffusion-block-causal-readout",
+      "version": "6ca547a",
+      "description": "block_causal_readout.py, the block-end readout kernel for the vLLM plugin. Assembled by the recipe in inference/vllm/vllm_native_diffusion/KERNELS.md. Never committed.",
+      "supplier": { "name": "yuchen-zhu-zyc" },
+      "licenses": [ { "license": { "name": "PolyForm Noncommercial 1.0.0", "url": "https://polyformproject.org/licenses/noncommercial/1.0.0" } } ],
+      "externalReferences": [
+        { "type": "vcs", "url": "https://github.com/yuchen-zhu-zyc/HybridDiffusion" }
+      ],
+      "properties": [
+        { "name": "trida:acquisition", "value": "build-time-fetch" },
+        { "name": "trida:modified", "value": "true" },
+        { "name": "trida:commercial-use", "value": "prohibited" }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "instruction_following_eval",
+      "version": "vendored-snapshot",
+      "description": "Google Research IFEval scorer, vendored in inference/ifeval_lib/. In-tree source with no package manifest, so dependency scanners do not report it.",
+      "supplier": { "name": "Google Research" },
+      "licenses": [ { "license": { "id": "Apache-2.0" } } ],
+      "externalReferences": [
+        { "type": "vcs", "url": "https://github.com/google-research/google-research/tree/master/instruction_following_eval" }
+      ],
+      "properties": [
+        { "name": "trida:acquisition", "value": "vendored" },
+        { "name": "trida:modified", "value": "false" },
+        { "name": "trida:version-pinned", "value": "false" }
+      ]
+    }
+  ]
+}
