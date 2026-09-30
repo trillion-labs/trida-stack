@@ -7,13 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-### Changed
-
-### Fixed
-
-## [0.1.0] — 2026-09-23
+## [0.1.0] — 2026-09-30
 
 Initial public release of `trida-stack` — the training and serving stack for
 Trillion Labs' **Trida** two-stream block-diffusion language models
@@ -44,7 +38,12 @@ Trillion Labs' **Trida** two-stream block-diffusion language models
   Terminal-Bench, and lm-evaluation-harness (the harnesses themselves install
   separately).
 - Community and compliance docs: `README.md`, `COMPLIANCE.md`, `NOTICE`,
-  `LICENSE`, and dataset catalog.
+  `LICENSE`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue / PR
+  templates, `CITATION.cff`, and the dataset catalog.
+- **Setup docs for the one-time third-party kernel fetch** in the root, `train/`,
+  `inference/` and `inference/vllm/` READMEs — the fetched kernels are
+  PolyForm-Noncommercial and not vendored, so a fresh clone cannot build the
+  two-stream training or diffusion-serving paths without running the recipe.
 
 ### Notes
 

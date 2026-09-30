@@ -65,6 +65,9 @@ of some draft quality.
 ## Quickstart
 
 ### Train (AR → diffusion)
+> Qwen3.5 two-stream (hybrid) runs need the one-time kernel fetch first —
+> `bash train/block_gated_delta_rule/fetch_kernels.sh` (see [Install](#install)).
+
 ```bash
 PYTHONPATH=. torchrun --nproc_per_node=8 train.py \
   --model_id Qwen/Qwen3-4B \
@@ -110,7 +113,8 @@ train/                   AR -> diffusion SFT trainer    (entry: train.py -> trai
   README.md                  launching, resume, model-family notes
   hf_block_diffusion.py      block masks, loss, HF model wrapper (dense / Qwen3)
   hf_block_diffusion_hybrid.py   hybrid path (Qwen3.5: gated-delta linear + full attention)
-  block_gated_delta_rule/    vendored Triton kernels for block-causal gated-delta (needs `fla`)
+  block_gated_delta_rule/    fetch recipe for the block-causal gated-delta Triton kernels
+                             (PolyForm-NC upstream, NOT vendored -- run fetch_kernels.sh first)
   data/text_sft_data.py      packing / bucketing / multi-turn
 inference/               nano-inference serving stack (thin, nanoGPT-style)
   README.md                  serving, chat, benchmarks
@@ -137,6 +141,22 @@ pip install -r inference/requirements.txt    # serving/eval client
 Serving needs the diffusion-serving **SGLang** backend — install separately (not vendored here);
 see [`inference/README.md`](inference/README.md). The **vLLM** backend is a plugin:
 `pip install -e inference/vllm` and `VLLM_PLUGINS=trida_diffusion` — see [`inference/vllm/README.md`](inference/vllm/README.md).
+
+### Third-party kernels — one-time fetch (required)
+
+Three pieces of this stack are **PolyForm Noncommercial 1.0.0** upstream, so they are *not*
+vendored in this Apache-2.0 repo. Each ships a pinned fetch-and-patch recipe instead. Run the one
+for the path you use, **before** training or serving — without it the import fails.
+
+| you are… | run | what it assembles |
+|---|---|---|
+| training the Qwen3.5 two-stream (hybrid) path | `bash train/block_gated_delta_rule/fetch_kernels.sh` | two-stream Gated-DeltaNet + ShortConv Triton kernels — [recipe](train/block_gated_delta_rule/README.md) |
+| serving via **SGLang** | follow [`inference/sglang/README.md`](inference/sglang/README.md) | the patched HybridDiffusion SGLang backend (clone → patch → install → shape) |
+| serving via **vLLM** | follow [`inference/vllm/vllm_native_diffusion/KERNELS.md`](inference/vllm/vllm_native_diffusion/KERNELS.md) | `block_causal_readout.py`, the block-end readout kernel |
+
+Each recipe pins an upstream commit (`yuchen-zhu-zyc/HybridDiffusion@6ca547a`) and applies our
+patch. **The fetched code is noncommercial-licensed and is not covered by this repo's Apache-2.0
+license** — see `NOTICE` and `COMPLIANCE.md`.
 
 ## License
 See `LICENSE`, plus `NOTICE` and `COMPLIANCE.md` for third-party attribution.
