@@ -17,6 +17,12 @@ pip install vllm==0.27.*          # a stock vLLM 0.27.x wheel
 pip install -e inference/vllm     # registers the `trida_diffusion` plugin
 ```
 
+**One-time kernel fetch (required).** `qwen3_5_diffusion.py` needs `block_causal_readout.py`, the
+two-stream block-causal Gated-DeltaNet **readout** kernel. It is **PolyForm Noncommercial 1.0.0**
+upstream, so it is not vendored in this Apache-2.0 repo — assemble it with the recipe in
+[`vllm_native_diffusion/KERNELS.md`](vllm_native_diffusion/KERNELS.md). Until that file is present
+the plugin will not import and `serve_diffusion.sh` fails at startup.
+
 The editable install wires an entry point in the `vllm.general_plugins` group.
 vLLM runs that plugin in **every** process (launcher, EngineCore, workers), which
 is what registers the `Qwen3_5ForBlockDiffusion` architecture and installs the
