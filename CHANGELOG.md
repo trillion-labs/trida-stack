@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `inference/mlx/`: on-device (Apple Silicon, MLX) serving of Trida2.0-4B with lossless
+  self-speculative decoding (`bd_bidir_shift` b7/g4 semantics), an OpenAI-compatible server with
+  tool calls and a prompt cache, a minimal agent loop, MLX quantization, and offline tests.
+
 ### Changed
 
 ### Fixed
