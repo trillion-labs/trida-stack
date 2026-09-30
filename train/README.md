@@ -85,11 +85,23 @@ other's logits by exactly 0.
 - `--save_optim_state` for exactly-resumable checkpoints; `--fsdp_keep_params` keeps gathered
   params between fwd/bwd (measured unnecessary on 2 nodes — inter-node comm ≈ 0).
 
-## Vendored kernels — `block_gated_delta_rule/`
+## Third-party kernels — `block_gated_delta_rule/` (fetch these first)
 
-The two-stream block-causal gated-delta kernels are vendored from FLARE/HybridDiffusion and are
-**PolyForm Noncommercial** licensed — see `LICENSE.HybridDiffusion` / `NOTICE.HybridDiffusion` /
-`VENDORED.md` in that directory before any commercial use. They are relative-import-only and
-self-contained (torch + triton + fla). Note for anyone debugging them: test through the real model
-path — synthetic random `g` (the log-decay gate must be ≤ 0) produces garbage that looks like
-kernel bugs.
+The two-stream block-causal gated-delta kernels are **not vendored here**. They are
+**PolyForm Noncommercial 1.0.0** upstream (FLARE/HybridDiffusion), which this Apache-2.0 repo
+cannot redistribute, so the directory ships a pinned fetch-and-patch recipe instead:
+
+```bash
+bash train/block_gated_delta_rule/fetch_kernels.sh
+```
+
+It clones `yuchen-zhu-zyc/HybridDiffusion@6ca547a`, copies the kernel package in, and applies
+`trillion_mods.patch`. Until you run it, the hybrid path (`hf_block_diffusion_hybrid.py`,
+`forward_flare`) will not import. See
+[`block_gated_delta_rule/README.md`](block_gated_delta_rule/README.md) for the by-hand equivalent,
+and `LICENSE.HybridDiffusion` / `NOTICE.HybridDiffusion` / `VENDORED.md` for the license terms —
+the fetched code is noncommercial and not covered by this repo's license.
+
+Once fetched, the kernels are relative-import-only and self-contained (torch + triton + fla). Note
+for anyone debugging them: test through the real model path — synthetic random `g` (the log-decay
+gate must be ≤ 0) produces garbage that looks like kernel bugs.

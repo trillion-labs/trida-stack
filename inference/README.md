@@ -179,6 +179,8 @@ A **self-contained** serve inside a stock **vLLM 0.27.x** install — no fork, n
 ```bash
 pip install vllm==0.27.*
 pip install -e vllm                       # registers the `trida_diffusion` plugin
+# one-time: fetch the block-end readout kernel (PolyForm-NC upstream, not vendored)
+#   -> vllm/vllm_native_diffusion/KERNELS.md
 bash vllm/serve_diffusion.sh                              # trillionlabs/Trida2.0-4B (or $TRIDA_MODEL), self-spec
 MAX_NUM_SEQS=8 bash vllm/serve_diffusion.sh               # batched self-spec (PIECEWISE cuda graphs)
 MODE=causal bash vllm/serve_diffusion.sh                  # AR reference; CKPT=<hf-id-or-local-path> for another checkpoint
@@ -196,6 +198,8 @@ pip install -r requirements.txt
 ```
 
 The **SGLang** backend is not vendored here — build it from its public upstream with the recipe in [`sglang/`](sglang/), then point `SGLANG_PYTHON` at its interpreter. The `shape` step is SGLang-only; vLLM loads the raw architecture directly.
+
+The **vLLM** backend likewise needs one file fetched: `block_causal_readout.py`, the block-end readout kernel, which is PolyForm-Noncommercial upstream. Follow [`vllm/vllm_native_diffusion/KERNELS.md`](vllm/vllm_native_diffusion/KERNELS.md) once; until it is present the plugin will not import.
 
 ## Tests
 
