@@ -1,6 +1,8 @@
 구분,이름,버전,라이선스,사용 위치,획득 경로,획득 방식,담당,취약점 점검일,조치 상태,비고
 직접개발,trida-stack,0.1.0,Apache-2.0,train/ inference/ benchmark/,https://github.com/trillion-labs/trida-stack,first-party,research team,2026-10-01,양호,
 직접개발,vllm-native-diffusion,0.1.0,Apache-2.0,inference/vllm/,https://github.com/trillion-labs/trida-stack,first-party,research team,2026-10-01,양호,아웃오브트리 플러그인. vLLM 포크 아님.
+직접개발,trillionlabs/Trida2.0-4B (모델 가중치),—,Apache-2.0,기본 서빙 모델,https://huggingface.co/trillionlabs/Trida2.0-4B,HF download,research team,2026-10-01,양호,저장소에 미포함. 공개·비게이트. 학습데이터는 내부 자산.
+외부유입,Qwen/Qwen3.5-4B (베이스 모델),—,Apache-2.0,파생 모델의 베이스,https://huggingface.co/Qwen/Qwen3.5-4B,HF download,research team,2026-10-01,양호,사용 제한 조항 없음. 파생물에 전파되는 제약 없음.
 수정포함,HybridDiffusion block_gated_delta_rule,6ca547a,PolyForm-NC-1.0.0,train/block_gated_delta_rule/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,build-time fetch,research team,2026-10-01,양호,저장소에 미포함. trillion_mods.patch 적용. 체크섬 tools/kernel-checksums.txt.
 수정포함,HybridDiffusion sglang backend,6ca547a,PolyForm-NC-1.0.0,inference/sglang/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,build-time fetch,research team,2026-10-01,양호,상위 SGLang은 Apache-2.0. two_stream_diffusion.patch 14개 파일.
 수정포함,HybridDiffusion block_causal_readout,6ca547a,PolyForm-NC-1.0.0,inference/vllm/vllm_native_diffusion/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,build-time fetch,research team,2026-10-01,양호,저장소에 미포함. KERNELS.md 레시피.
