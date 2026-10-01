@@ -52,6 +52,7 @@ recorded hashes additionally detect the history being rewritten under the same r
 | Pinned-commit drift | PR, push | the recorded pin disagreeing with `fetch_kernels.sh` |
 | Dependency advisories | PR, push, weekly | a finding with no unexpired exception |
 | Fetch recipe | weekly | the recipe or its integrity check failing |
+| Published model card | weekly | HF licence or visibility disagreeing with `COMPLIANCE.md` §4b |
 | Release SBOM | on release | invalid SBOM, or a finding with no exception |
 
 ## Licence policy for new dependencies
@@ -103,14 +104,19 @@ our "not affected, here is why" analysis instead of re-deriving it.
 The tarball contains no PolyForm-NC source, because none is committed. The SBOM is
 therefore accurate about what we distribute, and the register covers what gets fetched.
 
+## The model is not in this repository
+
+`COMPLIANCE.md` §4b records the weights' licence and the base model's, and
+`tools/check_model_card.py` checks weekly that those claims still match what Hugging Face
+publishes. The repository cannot fix a wrong model card — it can refuse to go on
+describing it incorrectly.
+
+Apache-2.0 on the weights does not make the serving stack permissive: the diffusion and
+self-speculative decode paths run §1b kernels that are PolyForm Noncommercial, and that
+restriction attaches to whoever runs them. The AR path has no such dependency.
+
 ## Known gaps
 
-- **The published model has no stated licence.** `trillionlabs/Trida2.0-4B` declares
-  `license: other` with no name, link or LICENSE file, so a downloader has no terms.
-  The base models are clean (Qwen3/Qwen3.5 are Apache-2.0, verified 2026-10-01), so
-  nothing restrictive propagates — the gap is our own publication. See
-  [`../../COMPLIANCE.md`](../../COMPLIANCE.md) §4b. This is a decision to publish on the
-  model repository, not something this repository can fix.
 - **No AI-BOM.** Training configuration and evaluation results are not tracked as
   supply-chain artifacts. Training data provenance is deliberately out of scope —
   it is internal and proprietary, as recorded in `data/DATA_CATALOG.md`.
