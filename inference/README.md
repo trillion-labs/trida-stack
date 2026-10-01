@@ -28,8 +28,7 @@ It ships with **[`trillionlabs/Trida2.0-4B`](https://huggingface.co/trillionlabs
 source env.example.sh              # sets SGLANG_PYTHON + cache dirs
 pip install -r requirements.txt
 
-# 2. serve the reference model (trillionlabs/Trida2.0-4B; private during preview — see Model access)
-huggingface-cli login
+# 2. serve the reference model (trillionlabs/Trida2.0-4B, public on Hugging Face)
 python serve.py --port 30000                 # default mode: self-spec
 #    …or any compatible checkpoint: python serve.py <hf-id-or-local-path> --port 30000
 
@@ -46,7 +45,7 @@ That's it — an OpenAI-compatible endpoint at `http://localhost:30000/v1/chat/c
 
 ### Model access
 
-The model is resolved as **positional arg → `$TRIDA_MODEL` → `trillionlabs/Trida2.0-4B`**, and the same rule applies to the vLLM script (`CKPT` → `$TRIDA_MODEL` → default) and the notebook. `trillionlabs/Trida2.0-4B` is **private on Hugging Face during the preview period**: your account needs access to the repo (ask the Trillion Labs team), then authenticate once before the first download —
+The model is resolved as **positional arg → `$TRIDA_MODEL` → `trillionlabs/Trida2.0-4B`**, and the same rule applies to the vLLM script (`CKPT` → `$TRIDA_MODEL` → default) and the notebook. `trillionlabs/Trida2.0-4B` is **public on Hugging Face** and needs no authentication. Its **model licence is separate from this repository's** — see [`COMPLIANCE.md`](../COMPLIANCE.md). For a private checkpoint of your own, authenticate first —
 
 ```bash
 huggingface-cli login            # or: export HF_TOKEN=hf_...

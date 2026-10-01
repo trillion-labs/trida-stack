@@ -105,15 +105,19 @@ therefore accurate about what we distribute, and the register covers what gets f
 
 ## Known gaps
 
-- **Base-model licence.** Trida is derived from Qwen3/Qwen3.5. `COMPLIANCE.md` covers
-  software dependencies and evaluation datasets but does not state the base model's
-  licence or what it implies for the derivative. Derived-model licence propagation is a
-  real question and this is not yet answered anywhere in the repository.
-- **No AI-BOM.** Training data provenance, training configuration and evaluation results
-  are not tracked as supply-chain artifacts.
+- **The published model has no stated licence.** `trillionlabs/Trida2.0-4B` declares
+  `license: other` with no name, link or LICENSE file, so a downloader has no terms.
+  The base models are clean (Qwen3/Qwen3.5 are Apache-2.0, verified 2026-10-01), so
+  nothing restrictive propagates — the gap is our own publication. See
+  [`../../COMPLIANCE.md`](../../COMPLIANCE.md) §4b. This is a decision to publish on the
+  model repository, not something this repository can fix.
+- **No AI-BOM.** Training configuration and evaluation results are not tracked as
+  supply-chain artifacts. Training data provenance is deliberately out of scope —
+  it is internal and proprietary, as recorded in `data/DATA_CATALOG.md`.
+- **Dependency graph is disabled**, so dependency review and Dependabot security updates
+  cannot run. One repository setting.
+- **Code-owner review is not enforced.** `.github/CODEOWNERS` exists, but the branch
+  ruleset has `require_code_owner_review: false` and `required_approving_review_count: 0`,
+  so the file currently documents intent rather than gating anything.
 - **Most dependencies are unpinned** and there is no lockfile, so advisory scanning is
   against declared ranges rather than a resolved set.
-- **Dependency graph is disabled**, so dependency review and Dependabot security
-  updates cannot run. One repository setting.
-- **`CODEOWNERS` names a team that may not exist yet** — it does nothing until the
-  handle is real.
