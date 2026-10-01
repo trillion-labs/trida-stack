@@ -1,0 +1,123 @@
+name: Release SBOM
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to (re)generate SBOMs for
+        required: true
+
+permissions:
+  contents: write      # upload release assets
+  id-token: write      # artifact attestation
+  attestations: write  # artifact attestation
+
+jobs:
+  release-sbom:
+    name: Build, describe and attest the release artifact
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      DIST: dist
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      # An SBOM describes a specific artifact, not a branch. This repository ships
+      # source rather than a binary, so the artifact is the source tarball of the tag --
+      # which is also what the release should have been carrying all along.
+      #
+      # Note what is deliberately NOT in it: the PolyForm-Noncommercial kernels are
+      # never committed, so they are absent from the tarball and therefore absent from
+      # the SBOM. That is correct -- we do not distribute them. COMPLIANCE.md and
+      # docs/supply-chain/asset-register.csv record them as fetched dependencies.
+      - name: Build the release artifact
+        run: |
+          set -euo pipefail
+          mkdir -p "$DIST/package"
+          git archive --format=tar HEAD | tar -x -C "$DIST/package"
+          tar -C "$DIST/package" -czf "$DIST/trida-stack-${TAG}.tar.gz" .
+
+      - name: Create checksums
+        run: |
+          set -euo pipefail
+          cd "$DIST" && sha256sum "trida-stack-${TAG}.tar.gz" > SHA256SUMS
+          cat SHA256SUMS
+
+      # SPDX and CycloneDX from the same scan boundary and the same syft version --
+      # not one converted into the other.
+      - name: Generate SPDX JSON SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist/package
+          format: spdx-json
+          output-file: dist/trida-stack-${{ github.event.release.tag_name || inputs.tag }}.spdx.json
+          upload-release-assets: false
+
+      - name: Generate CycloneDX JSON SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist/package
+          format: cyclonedx-json
+          output-file: dist/trida-stack-${{ github.event.release.tag_name || inputs.tag }}.cdx.json
+          upload-release-assets: false
+
+      # A generator can succeed and still emit an empty or mis-scoped document.
+      - name: Validate SBOM metadata
+        run: |
+          set -euo pipefail
+          SPDX="$DIST/trida-stack-${TAG}.spdx.json"
+          CDX="$DIST/trida-stack-${TAG}.cdx.json"
+          jq -e '.spdxVersion and .creationInfo and (.packages | length > 0)' "$SPDX" > /dev/null
+          jq -e '.bomFormat == "CycloneDX" and .specVersion and (.components | length > 0)' "$CDX" > /dev/null
+          echo "SPDX packages:    $(jq '.packages   | length' "$SPDX")"
+          echo "CycloneDX comps:  $(jq '.components | length' "$CDX")"
+
+      # Scan reports; the exception policy decides. Same gate as the PR workflow.
+      - name: Scan the SBOM
+        uses: anchore/scan-action@v7
+        id: scan
+        with:
+          sbom: dist/trida-stack-${{ github.event.release.tag_name || inputs.tag }}.spdx.json
+          output-format: json
+          fail-build: false
+
+      - name: Enforce the exception policy
+        run: |
+          set -euo pipefail
+          pip install pyyaml
+          python tools/check_advisories.py --grype "${{ steps.scan.outputs.json }}"
+
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/trida-stack-${{ github.event.release.tag_name || inputs.tag }}.tar.gz
+
+      - name: Attest the SPDX SBOM
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/trida-stack-${{ github.event.release.tag_name || inputs.tag }}.tar.gz
+          sbom-path: dist/trida-stack-${{ github.event.release.tag_name || inputs.tag }}.spdx.json
+
+      # Raw scan output is internal; the SBOMs and checksums are what consumers get.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-${{ github.run_id }}
+          path: ${{ steps.scan.outputs.json }}
+          retention-days: 90
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" \
+            "$DIST/trida-stack-${TAG}.tar.gz" \
+            "$DIST/trida-stack-${TAG}.spdx.json" \
+            "$DIST/trida-stack-${TAG}.cdx.json" \
+            "$DIST/SHA256SUMS" \
+            --clobber

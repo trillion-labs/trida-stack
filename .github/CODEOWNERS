@@ -1,0 +1,21 @@
+# Changes to licensing, security policy and CI require a deliberate review.
+#
+# This guards the files where a mistake is quiet and expensive - and, per the
+# supply-chain guideline, keeps an AI coding agent from altering licence or security
+# configuration without a human in the loop.
+#
+# Replace @trillion-labs/maintainers with the real team handle before this takes effect;
+# CODEOWNERS silently does nothing if the owner does not exist.
+
+/LICENSE                      @trillion-labs/maintainers
+/NOTICE                       @trillion-labs/maintainers
+/COMPLIANCE.md                @trillion-labs/maintainers
+/SECURITY.md                  @trillion-labs/maintainers
+/docs/supply-chain/           @trillion-labs/maintainers
+/.github/workflows/           @trillion-labs/maintainers
+/.github/dependabot.yml       @trillion-labs/maintainers
+/tools/                       @trillion-labs/maintainers
+
+# The fetch recipes are the install path for both two-stream code paths.
+/train/block_gated_delta_rule/   @trillion-labs/maintainers
+/inference/sglang/               @trillion-labs/maintainers

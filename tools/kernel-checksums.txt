@@ -1,0 +1,26 @@
+# SHA-256 of the upstream HybridDiffusion kernel sources, BEFORE trillion_mods.patch.
+#
+# Source: github.com/yuchen-zhu-zyc/HybridDiffusion @ 6ca547a
+#         torchtitan/models/qwen3_5/model/block_gated_delta_rule/
+#
+# A pinned commit protects against upstream moving. These hashes additionally detect
+# the upstream repository being rewritten or replaced under the same ref.
+# Verified by tools/verify_fetch.sh (weekly in CI).
+5204f15d7045b678f7df7b360777c9d644026e06b91566090eaf168ab2e19209  __init__.py
+fa265995c9300b7033ba5c562b072c7eb20af774f2153952d8e25ea27f7c1595  _profiling.py
+1adf8e9aca7a192ad2a4893b45799e8c5fe2a6f1bb3b54e1d1a5218ab600d6fd  block_short_conv_ops.py
+457a5a75c81ef11ac661c46d072bb0ff6c074b0f488289ef91af657b725f5fe8  chunk_bwd_dqkwg.py
+2c82f56f7c487d1eda59474b125ca474862b9f85c6e68e818335c7c4b7c150e8  chunk_delta_h.py
+87136d29a26880ae90b41838cce95fe8c9ec2dac8d351a101889a4a34fb8f723  chunk_fla_style_wy.py
+1b57fe4feee7d6e7e1bb5931db91260e6d948b770c6f1e01eeb7b9dc9aa834bd  chunk_local_refine.py
+e6c50d554de2a69e965b16d073ceedf95eeecf9671a93ac2adbc0b50f4fc4850  chunk_o.py
+de12f05c464543453481f989048d36088a935a5a7d45b6aaaa5d3120166589c6  chunk_scaled_dot_kkt.py
+3bc7f58d279577cbeb1c23c12726ad89fe9cead25f5adeb9ed887d8f01d23dc8  chunk_two_stream_wy.py
+994d5fbcde7245d60eb78a7f900dd833e18c425a726d55b5da4852107cc186cd  chunk.py
+d843c63a9d79c62b4cdda3bfb9173e033075bf08ad14e553203b10de27054234  convolution_ops.py
+bd290e446c9041e39eac195e48f59f3e5d3f183d1e766988358e601c1665eb10  convolution.py
+2bbe89817a1f1d168404fabe9c48752751bb8d4792b7a74b5c8354c5e1627044  cumsum.py
+bab24aea48b64782b1b44545742deab2d77f48688c7135cace5c5dd9e0471d9b  fused_recurrent_state.py
+f0c7f1d6df87eae2ba788c01613d71a66df8a184ad820a04662112f5c5a716d7  fused_recurrent.py
+3d4c6f184aaf6f2da104f00c7d8a307211ae2c0bd5c5f81af9e76bbb70ec640a  solve_tril.py
+60a2b6930075a2af4446caebec2c0bd78b4cbfcd71d92171dc836c7509218759  wy_fast.py
