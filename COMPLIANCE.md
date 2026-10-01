@@ -84,27 +84,42 @@ redistributed here.
 | base | [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) | **Apache-2.0** | HF model metadata, 2026-10-01 |
 | base | [Qwen/Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) | **Apache-2.0** | HF model metadata, 2026-10-01 |
 | base | [Qwen/Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B) | **Apache-2.0** | HF model metadata, 2026-10-01 |
-| derived | [trillionlabs/Trida2.0-4B](https://huggingface.co/trillionlabs/Trida2.0-4B) | **`other` — terms not yet published** | HF model card, 2026-10-01 |
+| derived | [trillionlabs/Trida2.0-4B](https://huggingface.co/trillionlabs/Trida2.0-4B) | **Apache-2.0** | HF model card, 2026-10-01 |
 
 **Base models.** All three Qwen checkpoints the trainer targets are Apache-2.0, so no
 use restriction propagates from the base model into a derived checkpoint. This matters
 because a derived model can inherit the base model's terms — Apache-2.0 bases do not
 impose any.
 
-**Derived checkpoint — open item.** The `trillionlabs/Trida2.0-4B` model card declares
-`license: other` with no `license_name`, no `license_link` and no LICENSE file, so a
-downloader currently has no stated terms. That is a decision for Trillion Labs to publish
-on the model repository; this repository can only record the state. Until it is set,
-**do not assume the model carries this repository's Apache-2.0 licence.**
+**Derived checkpoint.** `trillionlabs/Trida2.0-4B` is released under **Apache-2.0**. The
+inputs permit it: the base model is Apache-2.0, and the training data is Trillion Labs'
+own. The weights are public and ungated.
+
+**The decode kernels are licensed separately from the weights.** Apache-2.0 on the
+weights does not make the whole serving stack permissive:
+
+| path | kernels | terms for the operator |
+|---|---|---|
+| `--mode causal` (AR) | stock vLLM, no §1b dependency | Apache-2.0 throughout |
+| `--mode diffusion` / `self-spec` | §1b two-stream kernels | **PolyForm Noncommercial** |
+
+The restriction attaches to *running those kernels*, not to holding the weights. Anyone
+may use the weights; running the diffusion or self-speculative decode paths is
+noncommercial for whoever runs them.
 
 **Training data.** Trida's training data is internal and proprietary to Trillion Labs and
 is out of scope for this inventory — see [`data/DATA_CATALOG.md`](data/DATA_CATALOG.md).
 The datasets listed in §4 above are evaluation data only.
 
-**A note on the noncommercial kernels.** The §1b kernels are *software* used to train and
-serve, under a noncommercial licence. Whether that restricts the resulting weights is a
-legal question about the licence's scope, not a fact this file can settle. Treat it as
-open and route it to legal before any commercial distribution of the weights.
+**Why the kernels do not encumber the weights.** The §1b kernels are *software* used to
+train and serve. The weights are not a derivative work of that source — they derive from
+the base model and the training data — so the noncommercial licence governs use of the
+kernels rather than ownership of their output, in the same way a compiler's licence does
+not reach the binaries it emits.
+
+This is an engineering and compliance reading, not a legal opinion. The scope of
+"noncommercial purpose" in PolyForm-NC is the point a lawyer should initial before any
+commercial distribution of the weights.
 
 ## 5. License summary
 
