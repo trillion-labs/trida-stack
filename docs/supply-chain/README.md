@@ -51,9 +51,26 @@ recorded hashes additionally detect the history being rewritten under the same r
 |---|---|---|
 | Pinned-commit drift | PR, push | the recorded pin disagreeing with `fetch_kernels.sh` |
 | Dependency advisories | PR, push, weekly | a finding with no unexpired exception |
-| Dependency review | PR | new deps at high severity or a denied licence |
 | Fetch recipe | weekly | the recipe or its integrity check failing |
 | Release SBOM | on release | invalid SBOM, or a finding with no exception |
+
+## Licence policy for new dependencies
+
+Not yet enforced in CI — `actions/dependency-review-action` requires **Settings →
+Security → Dependency graph**, which is currently off for this repository, so the check
+could not pass and was left out rather than merged red. Once it is enabled, adding the
+workflow is a small follow-up.
+
+The policy it will enforce, and which applies to review in the meantime:
+
+| | |
+|---|---|
+| fail on | severity `high` or above in newly added dependencies |
+| deny | `GPL-2.0`, `GPL-3.0`, `AGPL-3.0` — copyleft that would propagate into this Apache-2.0 distribution |
+| deny | `SSPL-1.0` and similar source-available licences whose service restrictions do not fit how we distribute |
+
+Note this gate would not see the PolyForm-NC kernels either: they arrive by build-time
+fetch, not through the dependency graph. The pin-drift job covers that path.
 
 ## Why the scanners do not fail the build directly
 
@@ -96,5 +113,7 @@ therefore accurate about what we distribute, and the register covers what gets f
   are not tracked as supply-chain artifacts.
 - **Most dependencies are unpinned** and there is no lockfile, so advisory scanning is
   against declared ranges rather than a resolved set.
+- **Dependency graph is disabled**, so dependency review and Dependabot security
+  updates cannot run. One repository setting.
 - **`CODEOWNERS` names a team that may not exist yet** — it does nothing until the
   handle is real.

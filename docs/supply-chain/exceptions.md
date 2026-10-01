@@ -108,4 +108,23 @@ finding into a decision that comes back around.
     resolution environment.
   approver: Trillion Labs research team
   expires: 2026-12-31
+- id: PYSEC-2026-3740
+  component: nltk
+  status: not_affected
+  reason: >-
+    File sandbox bypass in model import/export helpers - TransitionParser.train/parse,
+    AveragedPerceptron.save/load, PerceptronTagger.save_to_json, save_maxent_params.
+    Not yet patched upstream. The advisory requires the application to enable pathsec
+    enforcement and let untrusted input choose model paths; we do neither.
+  evidence: >-
+    nltk is used only by the vendored IFEval scorer, for word_tokenize,
+    RegexpTokenizer and loading the punkt tokenizer. grep for TransitionParser,
+    AveragedPerceptron, PerceptronTagger, save_maxent_params and pathsec returns
+    0 matches across the repository.
+  note: >-
+    Unrelated to this advisory, instructions_util.py loads punkt via a .pickle. That is
+    NLTK's own downloaded data rather than untrusted input, but it is the kind of
+    deserialization path worth revisiting if the scorer is ever fed external data.
+  approver: Trillion Labs research team
+  expires: 2026-12-31
 ```
