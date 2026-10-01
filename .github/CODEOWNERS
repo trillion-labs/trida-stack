@@ -1,0 +1,23 @@
+# Changes to licensing, security policy and CI require a deliberate review.
+#
+# These are the paths where a mistake is quiet and expensive. Per the supply-chain
+# guideline, this also keeps an AI coding agent from altering licence or security
+# configuration without a human in the loop.
+#
+# Note: these lines only take effect once the branch ruleset sets
+# require_code_owner_review. See docs/supply-chain/README.md.
+
+/LICENSE                         @guks-trl @hongjoonahn-tri @usik-luke
+/NOTICE                          @guks-trl @hongjoonahn-tri @usik-luke
+/COMPLIANCE.md                   @guks-trl @hongjoonahn-tri @usik-luke
+/SECURITY.md                     @guks-trl @hongjoonahn-tri @usik-luke
+/CITATION.cff                    @guks-trl @hongjoonahn-tri @usik-luke
+/docs/supply-chain/              @guks-trl @hongjoonahn-tri @usik-luke
+/.github/workflows/              @guks-trl @hongjoonahn-tri @usik-luke
+/.github/dependabot.yml          @guks-trl @hongjoonahn-tri @usik-luke
+/.github/CODEOWNERS              @guks-trl @hongjoonahn-tri @usik-luke
+/tools/                          @guks-trl @hongjoonahn-tri @usik-luke
+
+# The fetch recipes are the install path for both two-stream code paths.
+/train/block_gated_delta_rule/   @guks-trl @hongjoonahn-tri @usik-luke
+/inference/sglang/               @guks-trl @hongjoonahn-tri @usik-luke

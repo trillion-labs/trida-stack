@@ -73,6 +73,39 @@ None are redistributed from this repo — all are downloaded at eval time. See
 | IFEval | `inference/eval_ifeval.py` | google/IFEval | **Apache-2.0** |
 | benchmark suites | `benchmark/` | each harness's own datasets | per upstream |
 
+## 4b. Model weights — base model and derived checkpoint
+
+Software licences do not carry over to model weights, and the weights this stack serves
+are **not** covered by this repository's Apache-2.0 licence. They are also not
+redistributed here.
+
+| | component | licence | verified |
+|---|---|---|---|
+| base | [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) | **Apache-2.0** | HF model metadata, 2026-10-01 |
+| base | [Qwen/Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) | **Apache-2.0** | HF model metadata, 2026-10-01 |
+| base | [Qwen/Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B) | **Apache-2.0** | HF model metadata, 2026-10-01 |
+| derived | [trillionlabs/Trida2.0-4B](https://huggingface.co/trillionlabs/Trida2.0-4B) | **`other` — terms not yet published** | HF model card, 2026-10-01 |
+
+**Base models.** All three Qwen checkpoints the trainer targets are Apache-2.0, so no
+use restriction propagates from the base model into a derived checkpoint. This matters
+because a derived model can inherit the base model's terms — Apache-2.0 bases do not
+impose any.
+
+**Derived checkpoint — open item.** The `trillionlabs/Trida2.0-4B` model card declares
+`license: other` with no `license_name`, no `license_link` and no LICENSE file, so a
+downloader currently has no stated terms. That is a decision for Trillion Labs to publish
+on the model repository; this repository can only record the state. Until it is set,
+**do not assume the model carries this repository's Apache-2.0 licence.**
+
+**Training data.** Trida's training data is internal and proprietary to Trillion Labs and
+is out of scope for this inventory — see [`data/DATA_CATALOG.md`](data/DATA_CATALOG.md).
+The datasets listed in §4 above are evaluation data only.
+
+**A note on the noncommercial kernels.** The §1b kernels are *software* used to train and
+serve, under a noncommercial licence. Whether that restricts the resulting weights is a
+legal question about the licence's scope, not a fact this file can settle. Treat it as
+open and route it to legal before any commercial distribution of the weights.
+
 ## 5. License summary
 
 All first-party and bundled code is **Apache-2.0**, and the *permissive* runtime

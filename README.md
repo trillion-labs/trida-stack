@@ -87,7 +87,7 @@ The saved checkpoint is a **stock HF causal LM** plus an added `<|mask|>` token 
 algorithm and launches an OpenAI-compatible server; the heavy decode kernels live in the backend.
 One checkpoint, several decode modes:
 ```bash
-huggingface-cli login   # trillionlabs/Trida2.0-4B is private during preview (or export HF_TOKEN)
+# trillionlabs/Trida2.0-4B is public; no login needed. Note its licence differs from this repo's -- see COMPLIANCE.md.
 python inference/serve.py                    --port 30000   # default: self-spec (diffusion draft -> AR verify)
 python inference/serve.py --mode causal     --port 30000   # native AR
 ```
