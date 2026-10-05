@@ -105,6 +105,22 @@ same checkpoint.
   `preprocessor_config.json`; `inference/sglang/tools/shape_for_sglang.py` shapes them for serving
   (text requests; image serving is not wired up yet).
 
+## Typed-decision training (`jev.py`)
+
+`--jev_data <kev-format JSONL files/dirs>` adds a typed-decision objective in kev's scheme
+(https://github.com/jaredpalmer/kev) to the FLARE path: a pointer head on the clean causal stream scores each
+option's `</opt>` state against the question's `<decide>` state, trained with kev's cross-entropy, augmentation and
+none-of-the-above pairs (vendored; encodings are byte-identical to kev's, forward probabilities match kev's model to
+fp32 noise — `train/tools/jev_parity_*.py`).
+
+- **Schedule:** each optimizer step runs `--grad_accum` SFT micro-batches, then `--jev_micro_per_step` Jev
+  micro-batches; the Jev loss is added with `--jev_loss_weight` λ (like `--ar_loss_weight`), SFT gradients keep
+  their scale. Jev rows run with the plain causal kernels (doc-isolated), never the `[x0 ; xt]` two-stream ones.
+- **Data:** kev's training sets (`decision-v7` train, `night2/dates_unknowable`, `round15/joint`); `--jev_max_state`
+  (default 7,552), `--jev_max_tokens` per micro-batch, `--jev_p_none_pair` (0.25).
+- **Output:** each checkpoint also gets `jev_head.pt`; `train/tools/export_kev_checkpoint.py` writes kev's full-weight
+  layout so `kev.benchmark --run` / `kev.serve --run` score and serve it.
+
 ## Flags that matter
 
 - `--bd_size` block length; `--ar_loss_weight` AR aux weight (`loss=(diff+w·ar)/(1+w)`);
