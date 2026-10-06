@@ -12,7 +12,7 @@ huggingface_hub
 python-dotenv
 wandb
 # transformers 4.x only: the released Trida checkpoints' remote code breaks on 5.x.
-transformers>=4.57,<5
+transformers>=5.18.0,<6
 accelerate
 sentencepiece
 tiktoken
