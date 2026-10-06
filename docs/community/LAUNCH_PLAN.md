@@ -1,7 +1,7 @@
 # Discord 커뮤니티 출범 계획
 
 > **상태:** 초안 · **작성일:** 2026-10-06 · **플랫폼:** Discord (확정)
-> **선행 PR:** [#14](https://github.com/trillion-labs/trida-stack/pull/14) (문서·자동화, 머지 대기)
+> **선행 PR:** [#14](https://github.com/trillion-labs/trida-stack/pull/14) (문서·자동화)
 
 GitHub과 Hugging Face의 문의를 Discord에서 받아 대응하되, **답은 기준 시스템에 남기는**
 운영 체계를 세우고 채널을 여는 작업입니다. 실행 순서, 완료 기준, 그리고 **열면 안 되는
@@ -24,7 +24,7 @@ trida-stack은 2026-09-28에 공개됐고 모델(`trillionlabs/Trida2.0-4B`)은 
 
 ## Current State (검증 완료 2026-10-06)
 
-### 준비된 것 — PR #14 (머지 대기)
+### 준비된 것 — PR #14
 
 | 파일 | 역할 |
 |---|---|
@@ -72,6 +72,8 @@ H1이 가장 중요합니다. 행동강령에 신고 주소가 적혀 있는데 
 사고가 났을 때 받을 곳이 없습니다. `community-check.yml`은 **주소가 적혀 있는지만**
 검사하며 메일 도착은 검사할 수 없습니다.
 
+> H1~H3 확인 결과를 이 표에 날짜와 확인자로 기록합니다.
+
 ---
 
 ## Proposed Change
@@ -81,22 +83,21 @@ H1이 가장 중요합니다. 행동강령에 신고 주소가 적혀 있는데 
 ```
 GitHub 이벤트 ─┬─ release, repository_advisory ──[저장소 웹훅]──┐
                │                                                 │
-               └─ help wanted 라벨 ───────────[Actions 필터]──────┼──> Discord #announcements
-                                                                  │     또는 #moderators
-48h 무응답 ────── stale-unanswered.yml (이미 구현) ───────────────┤
+               └─ help wanted 라벨 ───────────[Actions 필터]──────┼──> Discord
+                                                                  │
+48h 무응답 ────── stale-unanswered.yml (구현 완료) ───────────────┤
                                                                   │
 HF Discussion ── HF 웹훅 ─────────────────────[형식 확인 필요]────┘
 
 답장 방향: Discord에서 보고 → GitHub/HF로 이동해서 작성 (플랫폼 제약)
 ```
 
-**중요한 기술적 제약 두 가지:**
+**기술적 제약 두 가지 — 나중에 발견하지 말고 지금 적어 둡니다:**
 
-1. **GitHub 저장소 웹훅은 이벤트 타입으로만 구독합니다. 라벨 필터가 없습니다.**
-   그래서 `help wanted`만 보내려면 웹훅이 아니라 Actions가 필요합니다 (T4).
-2. **채팅에서 GitHub으로 답장하는 건 Discord에서 사실상 안 됩니다.** 알림은 Discord에서
-   보고, 답은 GitHub으로 넘어가서 작성합니다. 이건 우회 불가능한 제약이며, 승격 규율
-   (T7)이 그래서 필요합니다.
+1. **GitHub 저장소 웹훅은 이벤트 타입으로만 구독하며 라벨 필터가 없습니다.**
+   `help wanted`만 보내려면 웹훅이 아니라 Actions가 필요합니다 (T2.3).
+2. **Discord에서 GitHub으로 답장하는 건 사실상 불가능합니다.** 알림은 Discord에서 보고,
+   답은 GitHub으로 넘어가서 작성합니다. 우회 불가능하며, 승격 규율이 그래서 필요합니다.
 
 ### 왜 "승격"이 선택이 아니라 요건인가
 
@@ -122,8 +123,8 @@ HF Discussion ── HF 웹훅 ────────────────�
 | # | 작업 | 담당 | 완료 기준 |
 |---|---|---|---|
 | **T0.1** | PR #14 머지 | usik-luke | `main`에 커뮤니티 문서·워크플로 반영 |
-| **T0.2** | 역할 담당자 3명 배정 | 팀 | 커뮤니티 리드 / 기술 당번 / 모더레이터 / 보안 담당 — 4역할을 3명에 배분, 각 역할 백업 1인 |
-| **T0.3** | **H1** 신고 메일함 테스트 | 보안 담당 | 두 주소에 테스트 발송, 각 2명 이상 수신 확인, 결과를 이 문서에 기록 |
+| **T0.2** | 역할 담당자 배정 | 팀 | 커뮤니티 리드 / 기술 당번 / 모더레이터 / 보안 담당 — 4역할을 3명에 배분, 각 역할 백업 1인 |
+| **T0.3** | **H1** 신고 메일함 테스트 | 보안 담당 | 두 주소에 테스트 발송, 각 2명 이상 수신 확인, 결과를 위 표에 기록 |
 
 T0.3이 실패하면 **T2 이후 전체가 중단**됩니다.
 
@@ -132,7 +133,7 @@ T0.3이 실패하면 **T2 이후 전체가 중단**됩니다.
 | # | 작업 | 완료 기준 |
 |---|---|---|
 | **T1.1** | 서버 생성, 소유권 설정 | 소유자 1 + 관리자 2, 전원 MFA (**H2**) |
-| **T1.2** | 최소 채널 생성 | `CHANNEL_POLICY.md`의 8개 채널. 그 이상 만들지 않음 |
+| **T1.2** | 최소 채널 생성 | `CHANNEL_POLICY.md`의 7개 채널. 그 이상 만들지 않음 |
 | **T1.3** | `#rules` 고정 | `CHANNEL_POLICY.md`의 허용/금지/집행 전문 + 신고 주소 |
 | **T1.4** | 규칙 동의 게이트 | 동의 전 쓰기 불가. 접근성 영향 확인 |
 | **T1.5** | 초대 링크 정책 | 만료·사용범위 결정. 공개 위치는 README와 `COMMUNITY.md`로 **제한** |
@@ -154,7 +155,7 @@ PRIVATE      #moderators
 |---|---|---|---|
 | **T2.1** | 48h 알림 연결 | Discord `#moderators` 웹훅 생성 → 저장소 시크릿 `DISCORD_WEBHOOK_URL` | `gh workflow run stale-unanswered.yml` 실행 시 Discord에 **도착 확인** |
 | **T2.2** | 릴리스·보안 공지 | 저장소 Settings → Webhooks → `<웹훅URL>/github`, 이벤트 **`release`, `repository_advisory`만** | 테스트 릴리스로 도착 확인 |
-| **T2.3** | `help wanted` 알림 | 신규 `.github/workflows/notify-labeled.yml` — `issues: [labeled]` 트리거, 라벨 필터 후 `notify_stale.py`와 같은 웹훅으로 전송 | 라벨 부착 시 1건 도착, 다른 라벨은 무음 |
+| **T2.3** | `help wanted` 알림 | 신규 `.github/workflows/notify-labeled.yml` — `issues: [labeled]` 트리거, 라벨 필터 후 같은 웹훅으로 전송 | 라벨 부착 시 1건 도착, 다른 라벨은 무음 |
 | **T2.4** | HF Discussion 알림 | HF 저장소 Settings → Webhooks | **선행 조사 필요** — HF는 범용 웹훅이라 Discord 형식과 바로 안 맞을 수 있음. 중계가 필요하면 별도 과제로 분리 |
 
 **T2.2에서 이벤트를 전부 켜지 않습니다.** 모든 commit·PR·댓글을 보내면 사람이 읽지
@@ -185,17 +186,17 @@ PRIVATE      #moderators
 ## Acceptance Criteria
 
 1. `gh secret list`에 `DISCORD_WEBHOOK_URL`이 존재한다
-2. `gh workflow run stale-unanswered.yml` 수동 실행 시 Discord `#moderators`에 메시지가 **도착한다** (Actions 로그 출력이 아니라)
+2. `gh workflow run stale-unanswered.yml` 수동 실행 시 Discord에 메시지가 **도착한다** (Actions 로그 출력이 아니라)
 3. 테스트 릴리스 발행 시 `#announcements`에 1건 도착한다
 4. `help wanted` 라벨 부착 시 1건 도착하고, 다른 라벨 부착 시 **아무것도 오지 않는다**
 5. 저장소 웹훅의 구독 이벤트가 `release`, `repository_advisory` **2종뿐이다** (`gh api .../hooks`로 확인)
 6. Discussions Q&A에 답변 표시된 FAQ가 10건 이상이다
 7. `good first issue` 라벨이 붙은 이슈가 3건 이상이고, **각각 다섯 요소를 모두 포함한다**
 8. 로그아웃한 브라우저에서 README → Discord 초대까지 **1클릭**으로 도달한다
-9. `community-check.yml`이 통과한다 (`COMMUNITY.md` 포함 6개 파일 존재 + 신고 경로 명시)
-10. H1·H2·H3가 모두 충족되고 **이 문서에 확인 일자와 확인자가 기록되어 있다**
+9. `community-check.yml`이 통과한다
+10. H1·H2·H3가 모두 충족되고 **위 표에 확인 일자와 확인자가 기록되어 있다**
 11. PR #4의 무응답이 해소되었다
-12. `#help`에 올라온 질문 1건이 thread → GitHub Issue/Discussion으로 **승격된 사례가 있다** (T7 규율의 실동작 확인)
+12. `#help` 질문 1건이 thread → GitHub Issue/Discussion으로 **승격된 사례가 있다** — 아무도 해보지 않은 규칙은 아직 관행이 아닙니다
 
 ---
 
@@ -203,16 +204,16 @@ PRIVATE      #moderators
 
 | 계층 | 무엇을 | 건수 |
 |---|---|---|
-| 단위 | `notify_stale.py` 목적지 선택 (Discord 설정 시 / Slack 설정 시 / 둘 다 없을 때) | +3 |
+| 단위 | `notify_stale.py` 목적지 선택 (Discord 설정 / Slack 설정 / 둘 다 없음) | +3 |
 | 통합 | `workflow_dispatch`로 48h 알림 실제 발송 → Discord 도착 | +1 |
 | 통합 | 테스트 릴리스 → `#announcements` 도착 | +1 |
-| 통합 | `help wanted` 라벨 부착 → 1건 도착 / 다른 라벨 → 0건 | +2 |
+| 통합 | `help wanted` 라벨 → 1건 / 다른 라벨 → 0건 | +2 |
 | E2E | 로그아웃 상태에서 README → 초대 → 규칙 동의 → `#help` 질문 → 승격 | +1 |
 | 수동 | 모의훈련 4종 (`MODERATOR_RUNBOOK.md`) | +4 |
 
 `notify_stale.py`의 목적지 선택 로직은 **현재 테스트가 없습니다.** T2.1 전에
 `tools/test_notify_stale.py`를 추가합니다 — 지금은 웹훅이 없어 "출력만" 경로밖에
-실행되지 않으므로, 전송 경로는 테스트로만 검증 가능합니다.
+실행되지 않으므로, 전송 경로는 테스트로만 검증할 수 있습니다.
 
 ---
 
@@ -222,10 +223,11 @@ PRIVATE      #moderators
 |---|---|
 | 알림이 과도함 | 저장소 Settings에서 웹훅 비활성화. 코드 변경 불필요 |
 | 48h 알림이 시끄러움 | `DISCORD_WEBHOOK_URL` 시크릿 삭제 → 로그 출력으로 되돌아감, 워크플로는 실패하지 않음 |
-| 서버 운영 불가 | 초대 링크 폐기 → `#announcements`에 중단 공지 → 30일 읽기 전용 → 보관. **결정과 FAQ가 GitHub에 남아 있으면 이전 비용이 작습니다** |
+| 서버 운영 불가 | 초대 링크 폐기 → `#announcements`에 중단 공지 → 30일 읽기 전용 → 보관 |
 | 사건 발생 | `MODERATOR_RUNBOOK.md` S1~S4 |
 
-채널을 닫아도 지식이 사라지지 않는 것이 승격 규율의 두 번째 이유입니다.
+채널을 닫아도 **결정과 FAQ가 GitHub에 남아 있으면 이전 비용이 작습니다.** 이것이 승격
+규율의 두 번째 이유입니다.
 
 ---
 
@@ -243,7 +245,7 @@ PRIVATE      #moderators
 Phase 3이 가장 큽니다. FAQ와 첫 기여 이슈는 **실제로 처리 가능한 것**이어야 하므로
 기계적으로 채울 수 없습니다.
 
-T2.3(`notify-labeled.yml`)은 제가 작성 가능합니다 — ~30분.
+T2.3(`notify-labeled.yml`)과 `test_notify_stale.py`는 에이전트 작업 가능 — 합계 ~1h.
 
 ---
 
@@ -266,11 +268,11 @@ T2.3(`notify-labeled.yml`)은 제가 작성 가능합니다 — ~30분.
 ## Out of Scope
 
 - **Slack** — Discord로 확정. `notify_stale.py`의 Slack 분기는 코드에 남지만 사용하지 않습니다
-- **메일링리스트, 별도 포럼** — 가이드 §9.2·9.3. 지금 규모에 불필요
+- **메일링리스트, 별도 포럼** — 지금 규모에 불필요
 - **채팅 → GitHub 양방향 쓰기** — Discord 플랫폼 제약. 승격은 사람이 합니다
 - **음성 채널·오피스아워·밋업** — 운영이 안정된 뒤
-- **`GOVERNANCE.md`** — 별도 과제. 커뮤니티 거버넌스 항목과 연결되지만 채널 출범과 독립
-- **커뮤니티 지표 수집** — 사용자가 직접 관리. `tools/collect_metrics.py`는 GitHub만 읽습니다
+- **`GOVERNANCE.md`** — 별도 과제. 채널 출범과 독립
+- **커뮤니티 지표 수집** — 사용자가 직접 관리
 - **`collect_metrics.py`의 HF Discussion 확장** — 실제 문의가 HF로 들어오기 시작하면 별도 과제
 
 ---
