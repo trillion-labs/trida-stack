@@ -1,0 +1,51 @@
+name: 커뮤니티 논의 전환
+description: 채팅 또는 Discussion에서 확인된 기술 항목을 추적 가능한 Issue로 옮깁니다.
+title: "[Community]: "
+labels: ["community", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        채팅에서 해결된 내용은 스크롤 위로 사라지고 검색되지 않습니다. 이 양식은
+        그 내용을 기준 시스템에 남기기 위한 것입니다 — 승격(promotion)을 기억해서
+        하는 일이 아니라 양식 작업으로 만듭니다.
+
+        **미공개 취약점은 이 양식을 쓰지 마세요.** [SECURITY.md](../../SECURITY.md)의
+        비공개 경로로 보내 주세요.
+  - type: input
+    id: source
+    attributes:
+      label: 원 논의 링크
+      description: 공개 가능한 메시지 또는 Discussion URL. 비공개 채널이면 "비공개 — 채널명"으로만 적습니다.
+      placeholder: https://...
+    validations: {required: true}
+  - type: textarea
+    id: summary
+    attributes:
+      label: 문제와 기대 결과
+      description: 개인정보와 비밀정보를 제거하여 요약하세요. 세 문장이면 충분합니다.
+    validations: {required: true}
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 재현 절차와 환경
+      description: |
+        해당되면 버전을 적어 주세요 — 라이브러리 버전과, 모델 문제라면 **정확한 revision**.
+      placeholder: |
+        - trida-stack: v0.1.0
+        - 모델 revision:
+        - 백엔드: vLLM 0.27.x / SGLang
+        - 재현 절차:
+  - type: textarea
+    id: decision
+    attributes:
+      label: 합의된 다음 행동과 담당자
+      description: 논의에서 무엇을 하기로 했는지와 누가 맡는지.
+    validations: {required: true}
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 공개 확인
+      options:
+        - label: 미공개 취약점·자격증명·개인정보가 포함되지 않았음을 확인했습니다.
+          required: true
