@@ -1,0 +1,34 @@
+name: Published model card
+
+on:
+  # COMPLIANCE.md section 4b states the published model's licence and visibility. A PR
+  # that edits it is a PR that changes those claims, so that is exactly when they must
+  # be checked against what Hugging Face actually publishes.
+  #
+  # Not on every PR: while the card and the repo disagree this check fails, and a red
+  # check on unrelated PRs is how people learn to ignore red checks.
+  pull_request:
+    paths:
+      - "COMPLIANCE.md"
+      - "tools/check_model_card.py"
+      - ".github/workflows/model-card.yml"
+  schedule:
+    # Claims drift without anyone editing a file. The model went public on 2026-09-19
+    # and five files went on telling users to authenticate for two weeks, because
+    # nothing was watching.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  model-card:
+    name: Claims match the published card
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: python tools/check_model_card.py
