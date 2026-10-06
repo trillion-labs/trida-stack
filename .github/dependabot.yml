@@ -1,15 +1,44 @@
-version: 2
-updates:
-  - package-ecosystem: pip
-    directory: "/"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    labels: ["dependencies"]
-
-  # Third-party actions are part of the supply chain too.
-  - package-ecosystem: github-actions
-    directory: "/"
-    schedule:
-      interval: weekly
-    labels: ["dependencies"]
+# Dependabot is PAUSED.
+#
+# Turned off 2026-10-06: it opened 5 PRs within minutes of landing and the mail
+# volume got in the way while we were still patching. The configuration is kept
+# rather than deleted so re-enabling is uncommenting, not rewriting.
+#
+# One of those PRs is worth remembering. #11 proposed
+#   transformers  >=4.57,<5  ->  >=5.18.0,<6
+# which is precisely the pin docs/supply-chain/exceptions.md records as deliberate:
+# the Trida checkpoints' remote code does not run on transformers 5.x. A bot cannot
+# know that, which is the argument for review rather than auto-merge -- and the
+# argument against leaving a noisy bot on until someone starts rubber-stamping it.
+#
+# Dependency *advisories* are unaffected. tools/check_advisories.py still runs on
+# every push, PR and weekly, and still fails on anything without an unexpired
+# exception. Pausing this stops update PRs, not vulnerability detection.
+#
+# Before re-enabling, consider:
+#   - interval: monthly   (weekly is loud for a 3-maintainer project)
+#   - open-pull-requests-limit: 2
+#   - ignore: transformers major, torch major -- both are pinned for reasons
+#     recorded in docs/supply-chain/exceptions.md
+#
+# version: 2
+# updates:
+#   - package-ecosystem: pip
+#     directory: "/"
+#     schedule:
+#       interval: monthly
+#     open-pull-requests-limit: 2
+#     labels: ["dependencies"]
+#     ignore:
+#       - dependency-name: "transformers"
+#         update-types: ["version-update:semver-major"]
+#       - dependency-name: "torch"
+#         update-types: ["version-update:semver-major"]
+#
+#   # Third-party actions are part of the supply chain too.
+#   - package-ecosystem: github-actions
+#     directory: "/"
+#     schedule:
+#       interval: monthly
+#     open-pull-requests-limit: 2
+#     labels: ["dependencies"]
