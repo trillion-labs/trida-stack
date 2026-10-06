@@ -10,6 +10,7 @@
 | [`CHANNEL_POLICY.md`](CHANNEL_POLICY.md) | 채팅 채널 규칙·최소 채널 구조·역할과 권한 |
 | [`MODERATOR_RUNBOOK.md`](MODERATOR_RUNBOOK.md) | 신고 접수, S1~S4 등급, 사건 기록, 승격 절차 |
 | [`LABELS.md`](LABELS.md) | 라벨의 뜻과 종료 기준 |
+| [`LAUNCH_PLAN.md`](LAUNCH_PLAN.md) | **Discord 출범 계획** — 실행 순서, 완료 기준, 출범 보류 조건 |
 
 ## 개설 전 체크리스트
 
