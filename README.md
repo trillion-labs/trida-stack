@@ -158,6 +158,20 @@ Each recipe pins an upstream commit (`yuchen-zhu-zyc/HybridDiffusion@6ca547a`) a
 patch. **The fetched code is noncommercial-licensed and is not covered by this repo's Apache-2.0
 license** — see `NOTICE` and `COMPLIANCE.md`.
 
+## Getting help, contributing, reporting
+
+| | |
+|---|---|
+| 설치·사용 질문 | [Discussions · Q&A](https://github.com/trillion-labs/trida-stack/discussions/categories/q-a) |
+| 재현 가능한 결함 | [Issues](https://github.com/trillion-labs/trida-stack/issues/new/choose) |
+| 기능 아이디어 | [Discussions · Ideas](https://github.com/trillion-labs/trida-stack/discussions/categories/ideas) |
+| 모델 revision 문제 | [Trida2.0-4B Community](https://huggingface.co/trillionlabs/Trida2.0-4B/discussions) |
+| 기여하려면 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| 보안 취약점 | **공개 Issue가 아니라** [SECURITY.md](SECURITY.md)의 비공개 경로 |
+
+채널별 기준과 응답 기대치는 [COMMUNITY.md](COMMUNITY.md), 행동 규범은
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)에 있습니다.
+
 ## License
 See `LICENSE`, plus `NOTICE` and `COMPLIANCE.md` for third-party attribution.
 
