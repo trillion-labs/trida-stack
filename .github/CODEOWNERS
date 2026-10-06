@@ -7,17 +7,17 @@
 # Note: these lines only take effect once the branch ruleset sets
 # require_code_owner_review. See docs/supply-chain/README.md.
 
-/LICENSE                         @guks-trl @hongjoonahn-tri @usik-luke
-/NOTICE                          @guks-trl @hongjoonahn-tri @usik-luke
-/COMPLIANCE.md                   @guks-trl @hongjoonahn-tri @usik-luke
-/SECURITY.md                     @guks-trl @hongjoonahn-tri @usik-luke
-/CITATION.cff                    @guks-trl @hongjoonahn-tri @usik-luke
-/docs/supply-chain/              @guks-trl @hongjoonahn-tri @usik-luke
-/.github/workflows/              @guks-trl @hongjoonahn-tri @usik-luke
-/.github/dependabot.yml          @guks-trl @hongjoonahn-tri @usik-luke
-/.github/CODEOWNERS              @guks-trl @hongjoonahn-tri @usik-luke
-/tools/                          @guks-trl @hongjoonahn-tri @usik-luke
+/LICENSE                         @guks-trl @hongjoonahn-tri @usik-luke-trl
+/NOTICE                          @guks-trl @hongjoonahn-tri @usik-luke-trl
+/COMPLIANCE.md                   @guks-trl @hongjoonahn-tri @usik-luke-trl
+/SECURITY.md                     @guks-trl @hongjoonahn-tri @usik-luke-trl
+/CITATION.cff                    @guks-trl @hongjoonahn-tri @usik-luke-trl
+/docs/supply-chain/              @guks-trl @hongjoonahn-tri @usik-luke-trl
+/.github/workflows/              @guks-trl @hongjoonahn-tri @usik-luke-trl
+/.github/dependabot.yml          @guks-trl @hongjoonahn-tri @usik-luke-trl
+/.github/CODEOWNERS              @guks-trl @hongjoonahn-tri @usik-luke-trl
+/tools/                          @guks-trl @hongjoonahn-tri @usik-luke-trl
 
 # The fetch recipes are the install path for both two-stream code paths.
-/train/block_gated_delta_rule/   @guks-trl @hongjoonahn-tri @usik-luke
-/inference/sglang/               @guks-trl @hongjoonahn-tri @usik-luke
+/train/block_gated_delta_rule/   @guks-trl @hongjoonahn-tri @usik-luke-trl
+/inference/sglang/               @guks-trl @hongjoonahn-tri @usik-luke-trl
