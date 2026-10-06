@@ -5,7 +5,7 @@
 #   uv pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
 # The two-stream training kernels are fetched separately (PolyForm-NC, not bundled);
 # see train/block_gated_delta_rule/README.md.
-torch==2.11.0
+torch==2.14.1
 numpy
 datasets
 huggingface_hub
