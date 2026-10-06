@@ -31,7 +31,30 @@ Two-stream Gated-DeltaNet / ShortConv Triton kernels
   Note:    inference/sglang/ vendors nothing — it builds the backend from upstream
            via a patch; see inference/sglang/NOTICE for that recipe's terms.
 
-The two components above are the third-party source code redistributed in this
+MLX gated-delta Metal kernel (mlx-lm)
+  Copyright © 2023-2026 Apple Inc.
+  License: MIT
+  Source:  https://github.com/ml-explore/mlx-lm (mlx_lm/models/gated_delta.py)
+  Derived: inference/mlx/trida_mlx/kernels.py — the self-spec canvas kernel adapts
+           mlx-lm's gated_delta Metal kernel source (same thread layout and
+           recurrence; adds the block-end readout for MASK rows). See its header.
+
+mlx-vlm Qwen3-VL / Qwen3.5 vision encoder
+  Copyright © 2025 Prince Canuma.
+  License: MIT
+  Source:  https://github.com/Blaizzy/mlx-vlm (mlx_vlm/models/qwen3_vl/vision.py)
+  Derived: inference/mlx/trida_mlx/vision.py — the vision tower (patch embed, interpolated
+           position embedding, 2-D rotary blocks, patch merger) is adapted from mlx-vlm so
+           parameter names match its checkpoints. See its header.
+
+Qwen3.5 chat template (test fixture)
+  Copyright Alibaba Cloud (Qwen team).
+  License: Apache License 2.0
+  Bundled: inference/mlx/tests/fixtures/trida_chat_template.jinja — the chat template
+           shipped with trillionlabs/Trida2.0-4B (inherited from Qwen3.5), unmodified,
+           used only by the offline tests.
+
+The components above are the third-party source code redistributed in this
 repository. They do not share a single license: see COMPLIANCE.md section 1.
 
 ================================================================================
@@ -58,7 +81,8 @@ Referenced, NOT bundled (installed separately)
 ================================================================================
 
 Runtime backends and libraries — PyTorch, Hugging Face Transformers / Datasets /
-Accelerate, SGLang, and optionally vLLM — and the benchmark harnesses invoked from
+Accelerate, SGLang, optionally vLLM, and for inference/mlx Apple MLX and mlx-lm
+(MIT) — and the benchmark harnesses invoked from
 benchmark/ (EleutherAI lm-evaluation-harness, BFCL, tau2-bench, FunctionChat,
 KoAgentBench, SWE-bench, Terminal-Bench) are dependencies, not redistributed here.
 See COMPLIANCE.md for the full inventory and licenses.
