@@ -8,8 +8,8 @@ Three pieces, all MLX / numpy / PIL only:
 * ``VisionTower``     the Qwen3-VL vision encoder: Conv3d patch embed, bilinearly
                       interpolated learned position embedding, 2-D rotary ViT blocks and the
                       2x2 patch merger/projector into the LM hidden size.
-                      Adapted from mlx-vlm's ``qwen3_vl/vision.py`` (MIT, Apple Inc. and
-                      contributors) so the parameter names match HF/mlx-vlm checkpoints.
+                      Adapted from mlx-vlm's ``qwen3_vl/vision.py`` (MIT, © 2025 Prince Canuma)
+                      so the parameter names match HF/mlx-vlm checkpoints.
 * ``mrope_*``         interleaved multimodal RoPE positions for prompts that contain images
                       (text tokens get equal t/h/w positions, i.e. ordinary RoPE).
 """
