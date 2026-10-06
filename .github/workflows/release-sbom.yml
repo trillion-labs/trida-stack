@@ -103,7 +103,7 @@ jobs:
           sbom-path: dist/trida-stack-${{ github.event.release.tag_name || inputs.tag }}.spdx.json
 
       # Raw scan output is internal; the SBOMs and checksums are what consumers get.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: scan-${{ github.run_id }}
