@@ -22,7 +22,7 @@ jobs:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
       DIST: dist
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
 
