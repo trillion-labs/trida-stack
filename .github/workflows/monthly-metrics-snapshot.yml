@@ -1,0 +1,48 @@
+name: Monthly metrics snapshot
+
+on:
+  schedule:
+    # 1st of each month. GitHub's traffic API only retains 14 days, so a monthly
+    # snapshot is what makes any long-run trend possible at all (guideline 4.1).
+    - cron: "20 1 1 * *"
+  workflow_dispatch:
+    inputs:
+      period:
+        description: "Period to (re)collect, YYYY-MM. Blank = current month."
+        required: false
+
+permissions:
+  contents: write     # commits the snapshot
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: metrics-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: Collect and commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Collect
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python tools/collect_metrics.py ${{ inputs.period && format('--period {0}', inputs.period) || '' }}
+
+      - name: Commit the snapshot
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add metrics/snapshots
+          # Re-running in the same month is a no-op rather than an empty commit.
+          git diff --cached --quiet && { echo "no change"; exit 0; }
+          git commit -m "chore(metrics): snapshot $(date -u +%Y-%m)"
+          git push

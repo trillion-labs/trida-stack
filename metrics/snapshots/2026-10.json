@@ -1,0 +1,82 @@
+{
+  "period": "2026-10",
+  "measured_at": "2026-10-06T01:31:07.416773+00:00",
+  "repository": "trillion-labs/trida-stack",
+  "definitions": "docs/metrics/README.md",
+  "observation_period": true,
+  "observation_note": "Public since 2026-09-28. The guideline puts a new project in a 4-8 week observation period confirming data quality rather than setting targets, and wants a 90-day baseline before targets are committed. No target is in force.",
+  "metrics": {
+    "M-001_first_human_response": {
+      "value": null,
+      "status": "no_data",
+      "note": "no external issues or PRs yet (7 first-party items excluded -- see population)"
+    },
+    "M-002_no_response_rate_pct": {
+      "value": null,
+      "status": "no_data",
+      "note": "no external issues or PRs yet (7 first-party items excluded -- see population)"
+    },
+    "M-003_sla_attainment_pct": {
+      "value": null,
+      "status": "no_data",
+      "note": "no external issues or PRs yet (7 first-party items excluded -- see population)"
+    },
+    "C-001_interest_signals": {
+      "value": {
+        "stars": 3,
+        "forks": 0,
+        "watchers": 0
+      },
+      "status": "good",
+      "note": "interest signals, NOT evidence of use (guideline 1.3)"
+    },
+    "C-002_open_issues_including_prs": {
+      "value": 7,
+      "status": "good",
+      "note": "GitHub's open_issues_count includes PRs (guideline 6.3)"
+    }
+  },
+  "population": {
+    "scope": "external contributors only",
+    "external_items": 0,
+    "internal_items_excluded": 7,
+    "responded": 0,
+    "unanswered": 0
+  },
+  "limitations": [
+    "Business hours exclude weekends but NOT public holidays.",
+    "Bots are excluded by account type and a [bot] login suffix; a human account used for automation would not be caught.",
+    "Response means a comment or review by someone other than the author. A fast formal reply does not imply resolution (guideline appendix B).",
+    "Items opened by repository collaborators are excluded as first-party. The split uses the collaborator list, so a contributor who later gains write access changes population between periods."
+  ],
+  "items": [
+    {
+      "number": 12,
+      "population": "internal"
+    },
+    {
+      "number": 6,
+      "population": "internal"
+    },
+    {
+      "number": 5,
+      "population": "internal"
+    },
+    {
+      "number": 4,
+      "population": "internal"
+    },
+    {
+      "number": 3,
+      "population": "internal"
+    },
+    {
+      "number": 2,
+      "population": "internal"
+    },
+    {
+      "number": 1,
+      "population": "internal"
+    }
+  ]
+}

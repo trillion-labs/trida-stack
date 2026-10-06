@@ -48,6 +48,7 @@ pythonpath = ["inference"]
 testpaths = [
   "inference/test_smoke.py",
   "inference/vllm/vllm_native_diffusion/test_two_stream_cpu.py",
+  "tools/test_collect_metrics.py",
 ]
 
 [tool.ruff]
