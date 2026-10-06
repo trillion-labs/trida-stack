@@ -35,11 +35,11 @@ def timeit(fn, iters, warmup=3):
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="trillionlabs/Trida2.0-4B")
-    ap.add_argument("--gen-block", type=int, default=4)
+    ap.add_argument("--gen-block", type=int, default=None, help="N (canvas 2N-1); default 4")
     ap.add_argument("--iters", type=int, default=20)
     a = ap.parse_args(argv)
     eng = Engine(a.model, gen_block=a.gen_block, prompt_cache=False)
-    rt, n, mask = eng.rt, a.gen_block, eng.mask_id
+    rt, n, mask = eng.rt, eng.n, eng.mask_id
     blk = 2 * n - 1
     prompt = eng.encode(eng.render(LONG_PROMPT, enable_thinking=False))
     cache = rt.make_cache()
@@ -83,7 +83,7 @@ def main(argv=None):
 
     def run_canvas(rows_=None, adv=n):
         restore()
-        L = rt.canvas(cache, [11, 12, 13, 14][:n] + [mask] * (n - 1), n, rows=rows_)
+        L = rt.canvas(cache, list(range(11, 11 + n)) + [mask] * (n - 1), n, rows=rows_)
         am = mx.argmax(L, axis=-1)
         mx.eval(am)
         rt.commit(cache, adv)
@@ -102,7 +102,7 @@ def main(argv=None):
     def build_only():
         restore()
         t = time.perf_counter()
-        L = rt.canvas(cache, [11, 12, 13, 14][:n] + [mask] * (n - 1), n)
+        L = rt.canvas(cache, list(range(11, 11 + n)) + [mask] * (n - 1), n)
         dt = time.perf_counter() - t
         mx.eval(L)
         cache.pending = None

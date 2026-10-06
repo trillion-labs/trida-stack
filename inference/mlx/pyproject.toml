@@ -17,6 +17,7 @@ dependencies = [
   "mlx-lm>=0.31",          # Qwen3.5 gated-delta model + Metal kernel we build on
   "transformers>=4.57",    # tokenizer + chat template (tools / enable_thinking)
   "huggingface-hub",
+  "pillow",                # image decoding / resizing for vision checkpoints
 ]
 
 [project.scripts]

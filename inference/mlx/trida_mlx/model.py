@@ -28,12 +28,14 @@ from pathlib import Path
 from typing import Optional
 
 import mlx.core as mx
+import numpy as np
 import mlx.nn as nn
 from mlx_lm.models import qwen3_5
 from mlx_lm.models.cache import KVCache
 from mlx_lm.models.gated_delta import compute_g, gated_delta_kernel, gated_delta_ops
 
 from .kernels import canvas_gdn_fused, fused_available
+from .vision import VisionConfig, VisionTower, apply_mrope, is_vision_key, mrope_cos_sin, sanitize_vision_weights
 
 DEFAULT_MODEL = "trillionlabs/Trida2.0-4B"
 DEFAULT_MASK_ID = 248077
@@ -59,6 +61,8 @@ def resolve_model_path(path_or_id: str) -> Path:
 def _text_config(cfg: dict) -> dict:
     text = dict(cfg.get("text_config", cfg))
     text.pop("architectures", None)
+    if "tie_word_embeddings" not in text and "tie_word_embeddings" in cfg:
+        text["tie_word_embeddings"] = cfg["tie_word_embeddings"]
     return text
 
 
@@ -67,10 +71,11 @@ def build_model(text_cfg: dict) -> qwen3_5.Model:
     return qwen3_5.Model(args)
 
 
-def load_model(path_or_id: str = DEFAULT_MODEL, *, dtype=mx.bfloat16):
+def load_model(path_or_id: str = DEFAULT_MODEL, *, dtype=mx.bfloat16, load_vision: bool = True):
     """Load a raw HF Trida checkpoint or one written by ``convert.py`` (optionally quantized).
 
-    Returns ``(model, config_dict, path)``.
+    Returns ``(model, vision_tower_or_None, config_dict, path)``. The vision tower exists when
+    the checkpoint has a ``vision_config`` and vision weights (kept in bf16, never quantized).
     """
     path = resolve_model_path(path_or_id)
     cfg = json.loads((path / "config.json").read_text())
@@ -80,6 +85,15 @@ def load_model(path_or_id: str = DEFAULT_MODEL, *, dtype=mx.bfloat16):
         weights.update(mx.load(str(f)))
     if not weights:
         raise FileNotFoundError(f"no *.safetensors in {path}")
+    vision_w = {k: weights.pop(k) for k in [k for k in weights if is_vision_key(k)]}
+    vision = None
+    if load_vision and vision_w and "vision_config" in cfg:
+        vision = VisionTower(VisionConfig.from_dict(cfg["vision_config"]))
+        vw = sanitize_vision_weights(vision_w)
+        vw = {k: (v.astype(dtype) if mx.issubdtype(v.dtype, mx.floating) else v) for k, v in vw.items()}
+        vision.load_weights(list(vw.items()), strict=True)
+        mx.eval(vision.parameters())
+        vision.eval()
     quant = cfg.get("quantization")
     if quant:
         nn.quantize(
@@ -109,7 +123,7 @@ def load_model(path_or_id: str = DEFAULT_MODEL, *, dtype=mx.bfloat16):
     model.load_weights(list(weights.items()), strict=True)
     mx.eval(model.parameters())
     model.eval()
-    return model, cfg, path
+    return model, vision, cfg, path
 
 
 def mask_id_of(path: Path, cfg: dict, tokenizer=None) -> int:
@@ -156,6 +170,9 @@ class SeqCache:
     tokens: list = field(default_factory=list)
     pending: Optional[list] = None  # _CanvasGDN per layer after a canvas forward
     canvas_len: int = 0
+    # next RoPE position. == len(tokens) for text; images advance it by max(t, h, w) of
+    # their merged grid instead of their token count (multimodal RoPE)
+    pos: int = 0
 
     @property
     def length(self) -> int:
@@ -168,10 +185,11 @@ class SeqCache:
         return (
             list(self.tokens),
             [l if isinstance(l, GDNState) else l.offset for l in self.layers],
+            self.pos,
         )
 
     def restore(self, snap) -> None:
-        tokens, states = snap
+        tokens, states, pos = snap
         assert self.pending is None
         for i, s in enumerate(states):
             if isinstance(s, GDNState):
@@ -182,6 +200,7 @@ class SeqCache:
                     raise ValueError("cannot restore a KV snapshot longer than the cache")
                 kv.trim(kv.offset - s)
         self.tokens = list(tokens)
+        self.pos = pos
 
     def nbytes(self) -> int:
         n = 0
@@ -202,8 +221,13 @@ def _gdr(q, k, v, g, beta, state):
 
 
 class TridaRuntime:
-    def __init__(self, model: qwen3_5.Model, prefill_chunk: int = 512, fused_gdn: bool = True):
+    def __init__(self, model: qwen3_5.Model, prefill_chunk: int = 512, fused_gdn: bool = True,
+                 vision: Optional[VisionTower] = None, image_token_id: int = 248056):
         self.model = model
+        self.vision = vision
+        self.image_token_id = image_token_id
+        # negative token id (image key) -> {"pixels", "grid", "features"}; see Engine.add_image
+        self.images: dict = {}
         # one Metal launch per GDN layer for the canvas (GPU only; ops fallback elsewhere)
         self.fused_gdn = fused_gdn
         # cold start: LM head on rows 0..N-1 only. Off by default: measured slower on M3 Pro
@@ -235,7 +259,7 @@ class TridaRuntime:
 
     # -- layers -----------------------------------------------------------------
     @staticmethod
-    def _attention(attn, x, kv: KVCache, mask):
+    def _attention(attn, x, kv: KVCache, mask, offset: int, mrope=None):
         B, L, _ = x.shape
         qo = attn.q_proj(x)
         queries, gate = mx.split(qo.reshape(B, L, attn.num_attention_heads, -1), 2, axis=-1)
@@ -244,8 +268,11 @@ class TridaRuntime:
         queries = attn.q_norm(queries).transpose(0, 2, 1, 3)
         keys = attn.k_norm(keys.reshape(B, L, attn.num_key_value_heads, -1)).transpose(0, 2, 1, 3)
         values = values.reshape(B, L, attn.num_key_value_heads, -1).transpose(0, 2, 1, 3)
-        queries = attn.rope(queries, offset=kv.offset)
-        keys = attn.rope(keys, offset=kv.offset)
+        if mrope is not None:
+            queries, keys = apply_mrope(queries, *mrope), apply_mrope(keys, *mrope)
+        else:
+            queries = attn.rope(queries, offset=offset)
+            keys = attn.rope(keys, offset=offset)
         keys, values = kv.update_and_fetch(keys, values)
         out = mx.fast.scaled_dot_product_attention(queries, keys, values, scale=attn.scale, mask=mask)
         out = out.transpose(0, 2, 1, 3).reshape(B, L, -1)
@@ -307,8 +334,9 @@ class TridaRuntime:
         return self.lm.lm_head(h)
 
     def _forward(self, ids: mx.array, cache: SeqCache, attn_mask, n_clean, last_only: bool,
-                 rows: Optional[int] = None):
-        h = self.backbone.embed_tokens(ids)
+                 rows: Optional[int] = None, embeds: Optional[mx.array] = None, mrope=None):
+        h = self.backbone.embed_tokens(ids) if embeds is None else embeds
+        offset = cache.pos
         recs = [] if n_clean is not None else None
         for i, layer in enumerate(self.backbone.layers):
             x = layer.input_layernorm(h)
@@ -320,7 +348,7 @@ class TridaRuntime:
                 if recs is not None:
                     recs.append(rec)
             else:
-                r = self._attention(layer.self_attn, x, c, attn_mask)
+                r = self._attention(layer.self_attn, x, c, attn_mask, offset, mrope)
                 if recs is not None:
                     recs.append(None)
             h = h + r
@@ -333,26 +361,83 @@ class TridaRuntime:
         return self._lm_head(h), recs
 
     # -- public forwards --------------------------------------------------------
+    def _image_layout(self, cache: SeqCache, tokens: list):
+        """For a token list with image keys (negative ids): (3 x L positions, feature rows,
+        next position). Each image's key run must lie entirely inside ``tokens``."""
+        m = self.vision.cfg.spatial_merge_size
+        pos3 = np.zeros((3, len(tokens)), dtype=np.int64)
+        feats, p, i = [], cache.pos, 0
+        while i < len(tokens):
+            t = tokens[i]
+            if t >= 0:
+                pos3[:, i] = p
+                p += 1
+                i += 1
+                continue
+            ent = self.images.get(t)
+            if ent is None:
+                raise KeyError(f"image {t} is not registered")
+            gt, gh, gw = ent["grid"]
+            lt, lh, lw = gt, gh // m, gw // m
+            n = lt * lh * lw
+            if tokens[i : i + n] != [t] * n:
+                raise ValueError("an image's tokens must be prefilled in one call")
+            ti, hi, wi = np.meshgrid(np.arange(lt), np.arange(lh), np.arange(lw), indexing="ij")
+            pos3[:, i : i + n] = np.stack([ti.reshape(-1), hi.reshape(-1), wi.reshape(-1)]) + p
+            p += max(lt, lh, lw)
+            if ent.get("features") is None:
+                ent["features"] = self.vision(mx.array(ent["pixels"]), [ent["grid"]])
+                mx.eval(ent["features"])
+            feats.append(ent["features"])
+            i += n
+        return pos3, (mx.concatenate(feats, axis=0) if feats else None), p
+
     def prefill(self, cache: SeqCache, tokens: list) -> mx.array:
         """Causal prefill of ``tokens`` after whatever ``cache`` already holds.
+        Negative ids are image keys (see ``self.images``): their rows take the vision
+        features and the whole call uses multimodal RoPE positions.
         Returns the float32 logits [V] of the last token."""
         assert cache.pending is None and tokens
+        has_image = any(t < 0 for t in tokens)
+        if has_image:
+            if self.vision is None:
+                raise ValueError("this checkpoint has no vision encoder")
+            pos3, feats, next_pos = self._image_layout(cache, tokens)
+            dims = int(self.args.head_dim * self.args.partial_rotary_factor)
+            section = (self.args.rope_scaling or {}).get("mrope_section", [11, 11, 10])
+            feat_row = 0
         logits = None
         for s in range(0, len(tokens), self.prefill_chunk):
             chunk = tokens[s : s + self.prefill_chunk]
-            ids = mx.array([chunk], dtype=mx.int32)
             mask = "causal" if len(chunk) > 1 else None
-            logits, _ = self._forward(ids, cache, mask, None, last_only=True)
+            if has_image:
+                real = [self.image_token_id if t < 0 else t for t in chunk]
+                ids = mx.array([real], dtype=mx.int32)
+                emb = self.backbone.embed_tokens(ids)
+                img_idx = [j for j, t in enumerate(chunk) if t < 0]
+                if img_idx:
+                    rows = feats[feat_row : feat_row + len(img_idx)].astype(emb.dtype)
+                    emb[0, mx.array(img_idx)] = rows
+                    feat_row += len(img_idx)
+                cos, sin = mrope_cos_sin(pos3[:, s : s + len(chunk)], dims, self.args.rope_theta, section)
+                logits, _ = self._forward(ids, cache, mask, None, last_only=True, embeds=emb, mrope=(cos, sin))
+            else:
+                ids = mx.array([chunk], dtype=mx.int32)
+                logits, _ = self._forward(ids, cache, mask, None, last_only=True)
+                cache.pos += len(chunk)
             cache.tokens.extend(chunk)
             if s + self.prefill_chunk < len(tokens):
                 mx.eval([l.ssm if isinstance(l, GDNState) else l.keys for l in cache.layers])
                 if self.progress_cb is not None:
                     self.progress_cb(len(chunk))
+        if has_image:
+            cache.pos = next_pos
         return logits[0, -1].astype(mx.float32)
 
     def ar_step(self, cache: SeqCache, token: int) -> mx.array:
         logits, _ = self._forward(mx.array([[token]], dtype=mx.int32), cache, None, None, last_only=True)
         cache.tokens.append(token)
+        cache.pos += 1
         return logits[0, -1].astype(mx.float32)
 
     def _canvas_mask(self, prefix_len: int, blk: int, n_clean: int) -> mx.array:
@@ -399,5 +484,6 @@ class TridaRuntime:
                               rec.g[:, :adv], rec.beta[:, :adv], rec.prev.ssm)
             cache.layers[i] = GDNState(conv=conv, ssm=ssm)
         cache.tokens.extend(self._canvas_tokens[:adv])
+        cache.pos += adv
         cache.pending = None
         cache.canvas_len = 0

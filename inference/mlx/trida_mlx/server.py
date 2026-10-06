@@ -18,6 +18,7 @@ import json
 import queue
 import sys
 import threading
+from typing import Optional
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -40,27 +41,64 @@ def _sampling(body: dict) -> SamplingParams:
     )
 
 
-def _text_of(content) -> str:
-    if isinstance(content, list):
-        return "".join(p.get("text", "") for p in content if isinstance(p, dict) and "text" in p)
-    return "" if content is None else str(content)
+def _image_source(part: dict):
+    """The image reference of an OpenAI / Responses / plain content part, or None."""
+    if not isinstance(part, dict):
+        return None
+    t = part.get("type")
+    if t in ("image_url", "input_image") or "image_url" in part:
+        u = part.get("image_url")
+        return u.get("url") if isinstance(u, dict) else u
+    if t == "image" or "image" in part:
+        u = part.get("image")
+        return u.get("url") if isinstance(u, dict) else u
+    return None
 
 
-def _normalize_messages(messages: list) -> list:
-    """OpenAI -> the Trida (Qwen3.5) chat template's contract:
-    * content parts -> text (no vision here), None -> ""
+def _content(content, images: Optional[list]):
+    """Template content for one message. With ``images`` (a list to append sources to) image
+    parts stay as ``{"type": "image"}`` items so the chat template emits its vision
+    placeholder; without it they become a short text marker (no vision encoder)."""
+    if content is None:
+        return ""
+    if not isinstance(content, list):
+        return str(content)
+    items, has_image = [], False
+    for p in content:
+        src = _image_source(p)
+        if src is not None:
+            if images is not None:
+                images.append(src)
+                items.append({"type": "image"})
+                has_image = True
+            else:
+                items.append({"type": "text", "text": "[image omitted: this model has no vision encoder]"})
+        elif isinstance(p, dict) and "text" in p:
+            items.append({"type": "text", "text": p.get("text") or ""})
+    if not has_image:
+        return "".join(i["text"] for i in items)
+    return items
+
+
+def _normalize_messages(messages: list, vision: bool = False):
+    """OpenAI -> the Trida (Qwen3.5) chat template's contract. Returns (messages, image_sources).
+    * text parts joined; image parts kept as template image items (in order) when ``vision``
     * ``developer`` -> ``system``; all leading system messages merged into one; a system message
       later in the conversation (harness nudges, compaction notes) becomes a user turn, because
-      the template only accepts a system message first
+      the template only accepts a system message first (images in system messages are dropped)
     * assistant ``tool_calls[].function.arguments`` as dicts (the template iterates them)
     """
-    out, sys_parts, seen_non_system = [], [], False
+    out, sys_parts, seen_non_system, images = [], [], False, []
     for m in messages:
         m = dict(m)
         role = m.get("role")
         if role == "developer":
             role = m["role"] = "system"
-        m["content"] = _text_of(m.get("content"))
+        if role in ("system", "assistant"):
+            c = _content(m.get("content"), None)
+            m["content"] = c if isinstance(c, str) else ""
+        else:
+            m["content"] = _content(m.get("content"), images if vision else None)
         if role == "system":
             if not seen_non_system:
                 sys_parts.append(m["content"])
@@ -86,7 +124,7 @@ def _normalize_messages(messages: list) -> list:
         out.append(m)
     if sys_parts:
         out.insert(0, {"role": "system", "content": "\n\n".join(p for p in sys_parts if p)})
-    return out
+    return out, images
 
 
 def _thinking(body: dict) -> bool:
@@ -104,6 +142,10 @@ def _thinking(body: dict) -> bool:
 
 
 class ContextOverflow(Exception):
+    pass
+
+
+class BadRequest(Exception):
     pass
 
 
@@ -245,7 +287,9 @@ class Handler(BaseHTTPRequestHandler):
     def _model_card(self):
         ctx = DEFAULTS["context_length"]
         return {"id": DEFAULTS["served_name"], "object": "model", "owned_by": "trillionlabs", "created": 0,
-                "context_length": ctx, "max_model_len": ctx, "root": str(ENGINE.path)}
+                "context_length": ctx, "max_model_len": ctx, "root": str(ENGINE.path),
+                "supports_vision": ENGINE.supports_vision,
+                "input_modalities": ["text", "image"] if ENGINE.supports_vision else ["text"]}
 
     def do_GET(self):
         path = self.path.split("?")[0].rstrip("/")
@@ -277,6 +321,8 @@ class Handler(BaseHTTPRequestHandler):
             if route in ("/v1/completions", "/completions"):
                 return self._completion(body)
             return self._json(404, {"error": {"message": f"no route {self.path}"}})
+        except BadRequest as e:
+            return self._json(400, {"error": {"message": str(e), "type": "invalid_request_error"}})
         except ContextOverflow as e:
             return self._json(400, {"error": {"message": str(e), "type": "invalid_request_error",
                                               "param": "messages", "code": "context_length_exceeded"}})
@@ -331,11 +377,15 @@ class Handler(BaseHTTPRequestHandler):
                 "trida": stats.as_dict()}
 
     def _chat(self, body: dict):
-        messages = _normalize_messages(body.get("messages") or [])
+        messages, image_srcs = _normalize_messages(body.get("messages") or [], vision=ENGINE.supports_vision)
         tools = body.get("tools") if body.get("tool_choice") != "none" else None
         kw = {k: v for k, v in (body.get("chat_template_kwargs") or {}).items() if k != "enable_thinking"}
         prompt_text = ENGINE.render(messages, tools=tools, enable_thinking=_thinking(body), **kw)
-        prompt = ENGINE.encode(prompt_text)
+        try:
+            images = [ENGINE.add_image(src) for src in image_srcs]
+        except Exception as e:  # noqa: BLE001
+            raise BadRequest(f"could not load image: {type(e).__name__}: {e}")
+        prompt = ENGINE.encode(prompt_text, images)
         self._budget(prompt, body)  # 400 before any streaming starts
         started_in_think = prompt_text.rstrip().endswith("<think>")
         rid, created = f"chatcmpl-{uuid.uuid4().hex[:24]}", int(time.time())
@@ -421,7 +471,7 @@ def main(argv=None):
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--mode", default="self-spec", choices=["self-spec", "causal"])
-    ap.add_argument("--gen-block", type=int, default=4, help="N: tokens per self-spec step (canvas 2N-1)")
+    ap.add_argument("--gen-block", type=int, default=None, help="N tokens per self-spec step (canvas 2N-1); default 4 (fastest on Apple Silicon)")
     ap.add_argument("--prefill-chunk", type=int, default=512)
     ap.add_argument("--no-prompt-cache", action="store_true")
     ap.add_argument("--temperature", type=float, default=1.0)
@@ -432,6 +482,8 @@ def main(argv=None):
                     help="advertised + enforced context window (Hermes needs >= 64000)")
     ap.add_argument("--served-model-name", default="trida2.0-4b")
     ap.add_argument("--log-requests", default=None, metavar="DIR", help="dump every POST body as JSON (debugging)")
+    ap.add_argument("--max-image-pixels", type=int, default=1024 * 1024,
+                    help="resize budget per image (every 32x32 px = 1 LM token; 1024*1024 -> <=1024 tokens)")
     ap.add_argument("--cache-slots", type=int, default=3,
                     help="conversations whose prompt cache is kept (main loop + side requests)")
     ap.add_argument("--no-think", action="store_true", help="default enable_thinking=false")
@@ -443,13 +495,14 @@ def main(argv=None):
     print(f"[trida-mlx] loading {a.model} ...", flush=True)
     WORKER = _Worker(dict(model=a.model, mode=a.mode, gen_block=a.gen_block, prefill_chunk=a.prefill_chunk,
                           prompt_cache=not a.no_prompt_cache, fused_gdn=not a.no_fused_gdn,
-                          cache_slots=a.cache_slots))
+                          cache_slots=a.cache_slots, max_image_pixels=a.max_image_pixels))
     WORKER.start()
     WORKER.ready.wait()
     if WORKER.error is not None:
         raise WORKER.error
-    print(f"[trida-mlx] ready in {ENGINE.load_s:.1f}s  mode={a.mode} N={a.gen_block} mask_id={ENGINE.mask_id} "
-          f"eos={sorted(ENGINE.eos_ids)} ctx={a.context_length} model={a.served_model_name!r}  ->  "
+    print(f"[trida-mlx] ready in {ENGINE.load_s:.1f}s  mode={a.mode} N={ENGINE.n} mask_id={ENGINE.mask_id} "
+          f"eos={sorted(ENGINE.eos_ids)} ctx={a.context_length} vision={ENGINE.supports_vision} "
+          f"model={a.served_model_name!r}  ->  "
           f"http://{a.host}:{a.port}/v1", flush=True)
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
     try:

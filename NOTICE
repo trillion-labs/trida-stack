@@ -39,6 +39,14 @@ MLX gated-delta Metal kernel (mlx-lm)
            mlx-lm's gated_delta Metal kernel source (same thread layout and
            recurrence; adds the block-end readout for MASK rows). See its header.
 
+mlx-vlm Qwen3-VL / Qwen3.5 vision encoder
+  Copyright © 2025 Prince Canuma.
+  License: MIT
+  Source:  https://github.com/Blaizzy/mlx-vlm (mlx_vlm/models/qwen3_vl/vision.py)
+  Derived: inference/mlx/trida_mlx/vision.py — the vision tower (patch embed, interpolated
+           position embedding, 2-D rotary blocks, patch merger) is adapted from mlx-vlm so
+           parameter names match its checkpoints. See its header.
+
 The components above are the third-party source code redistributed in this
 repository. They do not share a single license: see COMPLIANCE.md section 1.
 

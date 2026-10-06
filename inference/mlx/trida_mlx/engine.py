@@ -21,6 +21,7 @@ import mlx.core as mx
 
 from .decode import DecodeStats, SamplingParams, ar_generate, selfspec_generate
 from .model import DEFAULT_MODEL, TridaRuntime, load_model, mask_id_of
+from .vision import ImageProcessorConfig, image_key, load_image, preprocess
 
 
 class IncrementalDetokenizer:
@@ -56,17 +57,26 @@ class Engine:
     harness interleaves its main loop with side requests (titles, summaries, memory review);
     with one slot every side request would evict the main conversation's cache."""
 
-    def __init__(self, model: str = DEFAULT_MODEL, *, mode: str = "self-spec", gen_block: int = 4,
+    def __init__(self, model: str = DEFAULT_MODEL, *, mode: str = "self-spec", gen_block: Optional[int] = None,
                  prefill_chunk: int = 512, prompt_cache: bool = True, fused_gdn: bool = True,
-                 cache_slots: int = 3):
+                 cache_slots: int = 3, max_image_pixels: int = 1024 * 1024, image_cache: int = 16):
         from transformers import AutoTokenizer
 
         t = time.perf_counter()
-        self.model, self.cfg, self.path = load_model(model)
+        self.model, self.vision, self.cfg, self.path = load_model(model)
         self.tokenizer = AutoTokenizer.from_pretrained(str(self.path))
         self.mask_id = mask_id_of(self.path, self.cfg, self.tokenizer)
-        self.rt = TridaRuntime(self.model, prefill_chunk=prefill_chunk, fused_gdn=fused_gdn)
-        self.mode, self.n = mode, gen_block
+        self.image_token_id = int(self.cfg.get("image_token_id", 248056))
+        self.image_pad = self.tokenizer.convert_tokens_to_ids("<|image_pad|>")
+        self.image_proc = ImageProcessorConfig.from_files(self.path, max_image_pixels)
+        self.image_cache = image_cache
+        self.rt = TridaRuntime(self.model, prefill_chunk=prefill_chunk, fused_gdn=fused_gdn,
+                               vision=self.vision, image_token_id=self.image_token_id)
+        # N tokens per self-spec step (canvas 2N-1). Default 4: on an M3 Pro (q8, Trida-2.0-4B-1006)
+        # N=8 accepts more per step (2.72 vs 2.40 tok/fwd) but its 15-token canvas costs 1.64x an
+        # AR step vs 1.18x for N=4, so N=4 decodes faster (52.4 vs 43.0 tok/s). On GPUs, where
+        # extra canvas rows are nearly free, the checkpoint's bd_size (8, the b15_g8 config) wins.
+        self.mode, self.n = mode, gen_block or 4
         self.model_id = model
         self.eos_ids = self._eos_ids()
         self.im_start = self.tokenizer.convert_tokens_to_ids("<|im_start|>")
@@ -115,8 +125,47 @@ class Engine:
             enable_thinking=enable_thinking, **template_kwargs,
         )
 
-    def encode(self, text: str) -> list:
-        return self.tokenizer.encode(text, add_special_tokens=False)
+    def encode(self, text: str, images: Optional[list] = None) -> list:
+        """Token ids; each ``<|image_pad|>`` the template emitted is expanded into the
+        image's key repeated once per merged patch (see ``add_image``)."""
+        ids = self.tokenizer.encode(text, add_special_tokens=False)
+        if not images:
+            return ids
+        if self.vision is None:
+            raise ValueError("this checkpoint has no vision encoder; images are not supported")
+        n_pads = sum(1 for t in ids if t == self.image_pad)
+        if n_pads != len(images):
+            raise ValueError(f"prompt has {n_pads} image placeholders but {len(images)} images")
+        out, it = [], iter(images)
+        for t in ids:
+            if t == self.image_pad:
+                key, n = next(it)
+                out.extend([key] * n)
+            else:
+                out.append(t)
+        return out
+
+    @property
+    def supports_vision(self) -> bool:
+        return self.vision is not None
+
+    def add_image(self, src) -> tuple:
+        """Decode + preprocess one image (any thread). Returns ``(key, n_tokens)``; the vision
+        features are computed lazily on the worker at prefill time and cached by content."""
+        img, data = load_image(src)
+        key = image_key(data, self.image_proc)
+        ent = self.rt.images.get(key)
+        if ent is None:
+            pixels, grid = preprocess(img, self.image_proc)
+            ent = {"pixels": pixels, "grid": grid, "features": None}
+            self.rt.images[key] = ent
+            while len(self.rt.images) > self.image_cache:  # drop the oldest entry
+                self.rt.images.pop(next(iter(self.rt.images)))
+        else:  # refresh LRU position
+            self.rt.images[key] = self.rt.images.pop(key)
+        t, h, w = ent["grid"]
+        m = self.image_proc.merge_size
+        return key, t * (h // m) * (w // m)
 
     # -- prompt cache -----------------------------------------------------------
     def _position_cache(self, prompt: list) -> None:

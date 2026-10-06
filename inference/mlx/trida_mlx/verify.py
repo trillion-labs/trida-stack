@@ -27,19 +27,32 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="trillionlabs/Trida2.0-4B")
     ap.add_argument("--max-tokens", type=int, default=256)
-    ap.add_argument("--gen-block", type=int, default=4)
+    ap.add_argument("--gen-block", type=int, default=None, help="N (canvas 2N-1); default 4")
+    ap.add_argument("--image", default=None, help="also run the checks on an image prompt (path or URL)")
     a = ap.parse_args(argv)
     eng = Engine(a.model, gen_block=a.gen_block, prompt_cache=False)
-    rt, n = eng.rt, a.gen_block
+    rt, n = eng.rt, eng.n
     args = rt.args
     n_lin = sum(l.is_linear for l in rt.backbone.layers)
     print(f"model {a.model}: {args.num_hidden_layers} layers ({n_lin} gated-delta, {args.num_hidden_layers - n_lin} "
           f"full-attn), hidden {args.hidden_size}, vocab {args.vocab_size}, tied={args.tie_word_embeddings}, "
           f"quant={eng.cfg.get('quantization')}")
     print(f"mask_id={eng.mask_id} ({eng.tokenizer.convert_ids_to_tokens(eng.mask_id)!r})  eos={sorted(eng.eos_ids)}  "
-          f"load {eng.load_s:.1f}s  device={mx.default_device()}")
+          f"load {eng.load_s:.1f}s  device={mx.default_device()}  N={n} (canvas {2 * n - 1})  "
+          f"vision={'yes' if eng.supports_vision else 'no'}")
 
-    prompt = eng.encode(eng.render(PROMPT, enable_thinking=False))
+    if a.image:
+        if not eng.supports_vision:
+            raise SystemExit("--image given but this checkpoint has no vision encoder")
+        t = time.perf_counter()
+        key, n_img = eng.add_image(a.image)
+        msgs = [{"role": "user", "content": [{"type": "image"},
+                                             {"type": "text", "text": "Describe this image in two sentences."}]}]
+        prompt = eng.encode(eng.render(msgs, enable_thinking=False), [(key, n_img)])
+        print(f"[image] {a.image}: grid {eng.rt.images[key]['grid']} -> {n_img} tokens "
+              f"(preprocess {time.perf_counter() - t:.2f}s)")
+    else:
+        prompt = eng.encode(eng.render(PROMPT, enable_thinking=False))
     sp = SamplingParams(temperature=0.0)
 
     # 1) AR reference with margins

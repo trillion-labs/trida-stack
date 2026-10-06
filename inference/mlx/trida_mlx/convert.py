@@ -25,7 +25,11 @@ from mlx.utils import tree_flatten
 from .model import _text_config, load_model
 
 CARRY = ["tokenizer.json", "tokenizer_config.json", "chat_template.jinja", "generation_config.json",
-         "block_diffusion.json", "special_tokens_map.json", "vocab.json", "merges.txt", "added_tokens.json"]
+         "block_diffusion.json", "special_tokens_map.json", "vocab.json", "merges.txt", "added_tokens.json",
+         "preprocessor_config.json", "processor_config.json", "video_preprocessor_config.json"]
+# multimodal config keys carried next to the (flattened) text config
+VISION_KEYS = ["vision_config", "image_token_id", "video_token_id", "vision_start_token_id",
+               "vision_end_token_id"]
 
 
 def main(argv=None):
@@ -39,11 +43,18 @@ def main(argv=None):
     ap.add_argument("--shard-gb", type=float, default=4.0)
     a = ap.parse_args(argv)
 
-    model, cfg, src = load_model(a.model)
+    model, vision, cfg, src = load_model(a.model)
     text = _text_config(cfg)
     out_cfg = dict(text)
     out_cfg["model_type"] = "qwen3_5"
     out_cfg["architectures"] = ["Qwen3_5ForCausalLM"]
+    # transformers >= 5 treats a local tokenizer whose config.json lacks transformers_version as a
+    # possible old Mistral one and prints a (false) "incorrect regex pattern" warning
+    out_cfg.setdefault("transformers_version", cfg.get("transformers_version", text.get("transformers_version", "5.12.1")))
+    if vision is not None:  # the vision tower stays bf16 (small, and the most quant-sensitive part)
+        for k in VISION_KEYS:
+            if k in cfg:
+                out_cfg[k] = cfg[k]
     if a.bits:
         def pred(path, m):
             if not hasattr(m, "to_quantized"):
@@ -57,6 +68,8 @@ def main(argv=None):
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     weights = dict(tree_flatten(model.parameters()))
+    if vision is not None:
+        weights.update({f"vision_tower.{k}": v for k, v in tree_flatten(vision.parameters())})
     shards, cur, cur_bytes = [], {}, 0
     limit = int(a.shard_gb * (1 << 30))
     for k, v in weights.items():
@@ -78,7 +91,8 @@ def main(argv=None):
             shutil.copy2(src / name, out / name)
     gb = index["metadata"]["total_size"] / 1e9
     print(f"wrote {out}  ({gb:.2f} GB, {len(shards)} shard(s), "
-          f"{'bf16' if not a.bits else f'q{a.bits} g{a.group_size}'})")
+          f"{'bf16' if not a.bits else f'q{a.bits} g{a.group_size}'}"
+          f"{', + bf16 vision tower' if vision is not None else ''})")
 
 
 if __name__ == "__main__":

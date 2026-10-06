@@ -68,7 +68,7 @@ def main(argv=None):
     ap.add_argument("--model", default="trillionlabs/Trida2.0-4B")
     ap.add_argument("--prompts", default=None)
     ap.add_argument("--modes", default="causal,self-spec")
-    ap.add_argument("--gen-block", type=int, default=4)
+    ap.add_argument("--gen-block", type=int, default=None, help="N (canvas 2N-1); default 4")
     ap.add_argument("--max-tokens", type=int, default=512)
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--top-k", type=int, default=50)
