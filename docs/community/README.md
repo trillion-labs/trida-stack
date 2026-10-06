@@ -50,6 +50,11 @@
   FAQ로 제거할 질문을 고르고, 사용하지 않는 채널과 과도한 봇 권한을 정리
 - **분기** — 정책·연락처·초대 링크·운영자 권한 재검증
 
-`stale-unanswered.yml` 이 평일 아침마다 48시간 이상 응답 없는 항목을 채팅으로 보냅니다.
-웹훅 시크릿(`DISCORD_WEBHOOK_URL` 또는 `SLACK_WEBHOOK_URL`)이 설정되면 동작하고,
-없으면 로그에 출력만 하고 실패하지 않습니다.
+두 가지가 채팅으로 자동 전송됩니다.
+
+- `stale-unanswered.yml` — 평일 아침, 48시간 이상 사람 응답이 없는 항목
+- `notify-labeled.yml` — `help wanted` 또는 `good first issue` 라벨이 붙는 즉시
+
+둘 다 웹훅 시크릿(`DISCORD_WEBHOOK_URL` 또는 `SLACK_WEBHOOK_URL`)이 설정되면 동작하고,
+없으면 로그에 출력만 하고 **실패하지 않습니다.** 목적지 선택은 `tools/chat.py` 한 곳에
+있습니다.

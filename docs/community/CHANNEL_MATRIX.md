@@ -49,7 +49,7 @@ revision을 고정**합니다. 여러 모델에서 같은 API 오류가 재현�
 - 새 릴리스와 중요한 호환성 변경
 - 새 보안 공지, 지원 버전 변경
 - **48시간 이상 담당자가 없는 질문** (자동 — `stale-unanswered.yml`)
-- `help wanted` 또는 커뮤니티 리뷰 요청
+- `help wanted` 또는 `good first issue` (자동 — `notify-labeled.yml`)
 - 모델·데이터 카드의 중대한 변경
 
 **양방향 자동 복제 봇은 쓰지 않습니다.** 삭제·편집·차단 상태와 개인정보가 어긋납니다.
