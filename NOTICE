@@ -47,6 +47,13 @@ mlx-vlm Qwen3-VL / Qwen3.5 vision encoder
            position embedding, 2-D rotary blocks, patch merger) is adapted from mlx-vlm so
            parameter names match its checkpoints. See its header.
 
+Qwen3.5 chat template (test fixture)
+  Copyright Alibaba Cloud (Qwen team).
+  License: Apache License 2.0
+  Bundled: inference/mlx/tests/fixtures/trida_chat_template.jinja — the chat template
+           shipped with trillionlabs/Trida2.0-4B (inherited from Qwen3.5), unmodified,
+           used only by the offline tests.
+
 The components above are the third-party source code redistributed in this
 repository. They do not share a single license: see COMPLIANCE.md section 1.
 

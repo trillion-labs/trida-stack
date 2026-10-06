@@ -153,6 +153,24 @@ system block, and one just before the last `<|im_start|>` of the previous prompt
 turn's re-rendered history still agrees with it). A follow-up turn then only prefills the new messages; `usage.prompt_tokens_details.cached_tokens`
 shows the reuse.
 
+## Tests
+
+```bash
+uv run pytest                 # all offline tests (~30 s)
+uv run python tests/test_tiny.py   # decoder invariants on a tiny random Qwen3.5-hybrid (CPU or GPU)
+uv run python tests/test_e2e.py    # tiny raw-HF checkpoint: loader, convert q8, prompt cache, server, parsing
+uv run pytest tests/test_vision.py  # tiny multimodal checkpoint: image input end to end
+```
+
+Pinned: chunked prefill = one-shot; canvas clean rows = AR logits; MASK rows read the block-end GDN
+state (independent per-token re-derivation); `commit(adv)` = AR state for every `adv`; greedy
+self-spec = greedy AR (also with oracle drafts that exercise the accept path, ~3 tok/forward);
+top-k/top-p matches the reference sampler; sampled self-spec reproduces the AR sampling
+distribution; snapshot/restore = fresh prefill; server non-stream / SSE / completions round trip;
+with an image: greedy self-spec = greedy AR, chunked prefill = one-shot, MRoPE positions, no prompt-cache
+reuse across different images, convert keeps the vision tower bit-identical, server `image_url` round trip.
+On a Mac the same tests run on the GPU and therefore also cover the Metal kernel path.
+
 ## Notes and limits
 
 - **bf16/quantized numerics.** The canvas runs 7-row matmuls and the AR step 1-row matmuls, which

@@ -13,6 +13,7 @@ model-card license.
 | IFEval scorer | `inference/ifeval_lib/` | [google-research · instruction_following_eval](https://github.com/google-research/google-research/tree/master/instruction_following_eval) | **Apache-2.0** |
 | mlx-vlm Qwen3-VL vision encoder (adapted) | `inference/mlx/trida_mlx/vision.py` | [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) `mlx_vlm/models/qwen3_vl/vision.py` | **MIT** |
 | MLX gated-delta Metal kernel (adapted) | `inference/mlx/trida_mlx/kernels.py` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) `mlx_lm/models/gated_delta.py` | **MIT** |
+| Qwen3.5 / Trida chat template (test fixture) | `inference/mlx/tests/fixtures/trida_chat_template.jinja` | shipped with `trillionlabs/Trida2.0-4B` (from Qwen3.5) | **Apache-2.0** |
 
 These are the only third-party source code redistributed in the repository (see
 [`NOTICE`](NOTICE)). Everything else below is installed or fetched separately.
