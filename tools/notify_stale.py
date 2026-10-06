@@ -24,10 +24,14 @@ import argparse
 import datetime as dt
 import json
 import os
+import pathlib
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from chat import post  # noqa: E402
 
 API = "https://api.github.com"
 DEFAULT_REPO = "trillion-labs/trida-stack"
@@ -59,24 +63,6 @@ def answered_by_someone_else(repo: str, number: int, author: str) -> bool:
         if not is_bot(c.get("user")) and c.get("user", {}).get("login") != author:
             return True
     return False
-
-
-def post(text: str, blocks_title: str) -> None:
-    discord = os.environ.get("DISCORD_WEBHOOK_URL")
-    slack = os.environ.get("SLACK_WEBHOOK_URL")
-    if discord:
-        payload, url = {"content": text}, discord
-    elif slack:
-        payload, url = {"text": f"*{blocks_title}*\n{text}"}, slack
-    else:
-        print("no DISCORD_WEBHOOK_URL or SLACK_WEBHOOK_URL set; printing instead:\n")
-        print(text)
-        return
-    req = urllib.request.Request(
-        url, data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=30) as r:
-        print(f"posted ({r.status})")
 
 
 def main() -> int:
