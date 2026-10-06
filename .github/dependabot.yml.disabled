@@ -1,4 +1,14 @@
-# Dependabot is PAUSED.
+# Dependabot is PAUSED -- this file is .disabled, not .yml.
+#
+# Commenting the config out was not enough: Dependabot's own validator reads
+# .github/dependabot.yml and fails a check on a file with no `version` key, so an
+# all-comments config produced a permanently red check on every PR. A check that is
+# always red teaches people to ignore red checks, which is the failure this repo
+# argues against elsewhere (docs/supply-chain/README.md, on why pip-audit is gated by
+# a policy file rather than left on continue-on-error).
+#
+# Dependabot only reads `.github/dependabot.yml`. Renaming is how you turn it off
+# while keeping the configuration verbatim: rename back to re-enable.
 #
 # Turned off 2026-10-06: it opened 5 PRs within minutes of landing and the mail
 # volume got in the way while we were still patching. The configuration is kept
