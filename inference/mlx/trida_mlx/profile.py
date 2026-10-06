@@ -5,7 +5,7 @@
 Times, at the same KV length: the AR step (1 token) vs the self-spec canvas step
 (2N-1 tokens), each split into LM head / MLPs / full attention / gated-delta, plus the
 Python graph-build time and the commit, and A/Bs the step optimizations (fused canvas GDN
-kernel, LM-head row skipping on cold starts). Medians over --iters runs, GPU-synchronized.
+kernel, LM-head row skipping on cold starts, and how much a cheaper canvas mask could save). Medians over --iters runs, GPU-synchronized.
 """
 from __future__ import annotations
 
@@ -37,11 +37,16 @@ def main(argv=None):
     ap.add_argument("--model", default="trillionlabs/Trida2.0-4B")
     ap.add_argument("--gen-block", type=int, default=None, help="N (canvas 2N-1); default 4")
     ap.add_argument("--iters", type=int, default=20)
+    ap.add_argument("--context", type=int, default=0,
+                    help="prefix length in tokens (default ~400); agent prompts are 14K-33K")
     a = ap.parse_args(argv)
     eng = Engine(a.model, gen_block=a.gen_block, prompt_cache=False)
     rt, n, mask = eng.rt, eng.n, eng.mask_id
     blk = 2 * n - 1
     prompt = eng.encode(eng.render(LONG_PROMPT, enable_thinking=False))
+    if a.context > len(prompt):
+        body = prompt[3:-6]
+        prompt = prompt[:3] + (body * (a.context // len(body) + 1))[: a.context - 9] + prompt[-6:]
     cache = rt.make_cache()
     rt.prefill(cache, prompt)
     mx.eval([l.ssm if isinstance(l, GDNState) else l.keys for l in cache.layers])
@@ -94,6 +99,14 @@ def main(argv=None):
     t_cv_unfused = timeit(run_canvas, a.iters)
     rt.fused_gdn = True
     t_cv = timeit(run_canvas, a.iters)
+    # Upper bounds for a cheaper canvas mask (both give wrong logits; timing only):
+    # no mask at all, and MLX's built-in "causal" mask (no mask array read by the kernel).
+    real_mask = rt._canvas_mask
+    rt._canvas_mask = lambda *_: None
+    t_cv_nomask = timeit(run_canvas, a.iters)
+    rt._canvas_mask = lambda *_: "causal"
+    t_cv_causal = timeit(run_canvas, a.iters)
+    rt._canvas_mask = real_mask
     t_cold = timeit(lambda: run_canvas(rows_=n, adv=1), a.iters)
     t_cold_all = timeit(lambda: run_canvas(rows_=None, adv=1), a.iters)
     t_rej = timeit(lambda: run_canvas(adv=2), a.iters)
@@ -125,7 +138,7 @@ def main(argv=None):
                 if not l.is_linear:
                     kv = cache.layers[i]
                     m = rt._canvas_mask(kv.offset, L, n) if L > 1 else None
-                    outs.append(rt._attention(l.self_attn, x, kv, m))
+                    outs.append(rt._attention(l.self_attn, x, kv, m, kv.offset))
                     kv.trim(L)
             return outs
         t_attn = timeit(attn, a.iters)
@@ -154,6 +167,8 @@ def main(argv=None):
     print(f"\ncanvas variants:")
     print(f"  verify step, fused GDN            {t_cv:7.2f} ms")
     print(f"  verify step, unfused GDN          {t_cv_unfused:7.2f} ms   (GDN component {c7u[3]:.2f} ms vs fused {c7[3]:.2f} ms)")
+    print(f"  verify step, no attention mask    {t_cv_nomask:7.2f} ms   (bound; wrong output)")
+    print(f"  verify step, built-in causal mask {t_cv_causal:7.2f} ms   (bound; wrong output)")
     print(f"  cold step, LM head rows 0..{n - 1}      {t_cold:7.2f} ms")
     print(f"  cold step, LM head all rows       {t_cold_all:7.2f} ms")
     print(f"  verify + reject (commit adv=2)    {t_rej:7.2f} ms   (commit recompute cost {t_rej - t_cv:+.2f} ms)")

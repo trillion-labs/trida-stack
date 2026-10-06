@@ -21,6 +21,7 @@ import mlx.core as mx
 
 from .decode import DecodeStats, SamplingParams
 from .engine import Engine
+from .server import _normalize_messages
 
 BUILTIN = [
     {"name": "gsm8k", "messages": [{"role": "user", "content":
@@ -94,9 +95,14 @@ def main(argv=None):
             pass
     results = []
     for it in items:
-        text = it.get("prompt") or eng.render(it["messages"], tools=it.get("tools"),
-                                              enable_thinking=not a.no_think)
-        pids = eng.encode(text)
+        images = []
+        if it.get("prompt"):
+            text = it["prompt"]
+        else:  # OpenAI-style messages (e.g. captured with server --log-requests), normalized like the server
+            msgs, srcs = _normalize_messages(it["messages"], vision=eng.supports_vision)
+            images = [eng.add_image(s) for s in srcs]
+            text = eng.render(msgs, tools=it.get("tools"), enable_thinking=not a.no_think)
+        pids = eng.encode(text, images)
         row = {"name": it.get("name", f"p{len(results)}"), "prompt_tokens": len(pids), "runs": {}}
         outs = {}
         for m in modes:
