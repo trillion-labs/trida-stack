@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `metrics/` and `docs/metrics/reviews/` — the response metrics are now collected in
+  the repository on a weekly snapshot, with a written review per period recording what
+  was measured, what it showed and what was decided. The external series is `no_data`
+  because there are no outside contributors yet; a separate internal series measures
+  maintainer response time so a period with no external items still produces a number
+  rather than a row of nulls. The internal series carries a count, never a rate.
+
 ### Removed
 
 - `docs/community/LAUNCH_PLAN.md`. It was an internal execution plan — phase tables
