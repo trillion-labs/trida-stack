@@ -29,6 +29,16 @@ jobs:
 
       # A code of conduct whose report address does not work is not operational evidence.
       # This cannot test delivery, only that an address is still stated.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      # CODEOWNERS ignores unknown handles silently. Two owners renamed in one week and
+      # both breakages were found by accident; this makes the third one loud.
+      - name: CODEOWNERS handles resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/check_codeowners.py
+
       - name: Reporting routes are still stated
         run: |
           set -uo pipefail
