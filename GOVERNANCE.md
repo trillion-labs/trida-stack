@@ -87,7 +87,9 @@ A decision that lives only in someone's memory is not a decision anyone can audi
 |---|---|
 | Why a change landed | the PR thread and the squashed commit message |
 | What shipped in a version | [`CHANGELOG.md`](CHANGELOG.md) |
-| Why a third-party component was adopted | [`docs/supply-chain/asset-register.csv`](docs/supply-chain/asset-register.csv) |
+| Why a third-party component was adopted, and what we would accept instead | [`docs/oss/INTAKE_REGISTER.csv`](docs/oss/INTAKE_REGISTER.csv) and the record under [`docs/oss/intake/`](docs/oss/intake/) |
+| What third-party code is in the product | [`docs/supply-chain/asset-register.csv`](docs/supply-chain/asset-register.csv) |
+| Which licences may enter at all | [`docs/oss/LICENSE_POLICY.md`](docs/oss/LICENSE_POLICY.md) |
 | What we decided about a vulnerability with no fix | [`docs/supply-chain/exceptions.md`](docs/supply-chain/exceptions.md) — with an approver and an expiry date that CI enforces |
 | Licence obligations and the noncommercial boundary | [`COMPLIANCE.md`](COMPLIANCE.md) and [`NOTICE`](NOTICE) |
 | Which channel an issue belongs in | [`COMMUNITY.md`](COMMUNITY.md) |

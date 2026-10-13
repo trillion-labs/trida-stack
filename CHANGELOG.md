@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `docs/oss/` — project evaluation records: the licence policy (allowed /
+  conditional / prohibited), a five-criteria selection scorecard, an intake register,
+  and the evaluation record behind each of the eight components already adopted.
+  The records postdate the decisions they describe and say so.
+
 - `GOVERNANCE.md` — roles, how a decision is made, where decisions are recorded,
   the release procedure, and how maintainers join or step down. States plainly that
   `require_code_owner_review` is not yet enabled, so CODEOWNERS is advisory today.
