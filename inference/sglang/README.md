@@ -19,6 +19,27 @@ Qwen3.5 two-stream checkpoint — i.e. the `LowConfidenceShiftHybridDiffusion` a
 registration, the dllm decode algorithms + scheduler mixin, the GDN attention
 backend, the Qwen3.5 model/logits path, and the CUDA-graph / KV-cache plumbing).
 
+It also fixes two bugs in the upstream fast decode loop. That loop lets a new
+request prefill inside a batch that is already decoding (inline absorb):
+
+- **Corrupted requests.** Re-initialising the batch flipped requests that were
+  already decoding back to the prefill phase. On the next step self-spec emitted
+  nothing for them, skipped their KV trim, and wrote the MASK/draft block into
+  their KV cache and GDN state. Their outputs drifted and dropped spans whenever
+  requests arrived while others were decoding, i.e. under any concurrent load.
+  With the fix, self-spec matches AR again. On a 4B checkpoint, BFCL in
+  self-spec went from 66.1 to 80.5, against 81.0 for AR at the same sampling
+  settings.
+- **Crash.** The absorbed request's radix-cache node was never locked, so
+  releasing it underflowed the lock count
+  (`AssertionError: dec_lock_ref ... mamba_lock_ref=0`).
+
+Rebuild the backend from the current patch if you built it before this fix.
+
+Known limitation: a long prompt that joins a running batch computes full-vocabulary
+logits for every prompt token. With multi-thousand-token prompts this can run out
+of memory. Serving with `--mem-fraction 0.7` avoids it.
+
 ## Recipe
 
 ### 1. Clone the pinned upstream
