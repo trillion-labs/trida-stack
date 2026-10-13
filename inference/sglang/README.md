@@ -36,9 +36,23 @@ request prefill inside a batch that is already decoding (inline absorb):
 
 Rebuild the backend from the current patch if you built it before this fix.
 
-Known limitation: a long prompt that joins a running batch computes full-vocabulary
-logits for every prompt token. With multi-thousand-token prompts this can run out
-of memory. Serving with `--mem-fraction 0.7` avoids it.
+Known limitation: when self-spec samples (temperature > 0), a prompt that joins a
+running batch gets full-vocabulary logits computed for every prompt token, although
+only the last one is used. The spike is predictable from prompt length: about
+1.5 MB per prompt token for the Qwen3.5 vocabulary (248k entries as bf16, then as
+fp32), summed over every prompt absorbed in the same step.
+
+| prompt tokens absorbed in one step | logits spike |
+|---|---|
+| 4k | ~6 GB |
+| 8k | ~12 GB |
+| 16k | ~24 GB |
+
+The spike has to fit outside the static pool. `serve.py --mem-fraction` (default 0.8)
+leaves about 16 GB of an 80 GB GPU outside it, enough for roughly 8k absorbed prompt
+tokens after CUDA-graph and activation overhead. `--mem-fraction 0.7` leaves about
+24 GB, enough for roughly 12–16k. Greedy self-spec (temperature 0) takes a tiled
+argmax path and is not affected.
 
 ## Recipe
 
