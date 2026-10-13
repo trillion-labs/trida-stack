@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-10-13
+
+A security dependency bump, and the supply-chain plumbing that v0.1.1 was cut thirty
+minutes too early to include.
+
+### Changed
+
+- `datasets` floored at `>=5.0.1` (GHSA-379c-qx7v-6h59, path traversal in
+  folder-based builders). Unpinned it resolved to 2.14.4; we do not use those
+  builders, but nothing held us at an old version either.
+- `SECURITY.md` states the support window: the latest release only. This is also the
+  denominator of the SBOM-coverage metric, so older tags are out of scope by policy
+  rather than counted as gaps.
+
+### Fixed
+
+- Vulnerability exceptions now carry every id a finding is known by. pip-audit leads
+  with PYSEC and grype with GHSA, so an exception keyed to one silently failed to
+  cover the other -- all eight approved exceptions were blocking the release.
+- The release workflow no longer passes `--clobber`. Replacing an SBOM already
+  published against a tag rewrites what consumers were told it contains; the upload
+  now fails if the tag already has assets.
+
 ## [0.1.1] — 2026-10-13
 
 Supply-chain and community operations. No change to the training or serving code --
@@ -95,6 +118,7 @@ Trillion Labs' **Trida** two-stream block-diffusion language models
   **PolyForm Noncommercial 1.0.0** — the two-stream training and diffusion-serving
   paths are **noncommercial-only**. See [`COMPLIANCE.md`](COMPLIANCE.md) §1b.
 
-[Unreleased]: https://github.com/trillion-labs/trida-stack/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/trillion-labs/trida-stack/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/trillion-labs/trida-stack/releases/tag/v0.1.2
 [0.1.1]: https://github.com/trillion-labs/trida-stack/releases/tag/v0.1.1
 [0.1.0]: https://github.com/trillion-labs/trida-stack/releases/tag/v0.1.0
