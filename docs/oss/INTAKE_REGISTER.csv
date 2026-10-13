@@ -1,0 +1,9 @@
+번호,컴포넌트,버전/범위,구분,라이선스,총점,결정,조건,평가 기록일,재평가 예정,기록
+0001,vLLM,">=0.27,<0.28",외부유입,Apache-2.0,92,채택,,2026-10-13,2027-10-13,intake/0001-vllm.md
+0002,SGLang,pinned upstream + patch,외부유입,Apache-2.0,85,채택,,2026-10-13,2027-10-13,intake/0002-sglang.md
+0003,MLX / mlx-lm,latest,외부유입,MIT,86,채택,코어 의존성이 아닌 선택적 백엔드로 유지,2026-10-13,2027-10-13,intake/0003-mlx.md
+0004,mlx-vlm (적응),adapted,수정포함,MIT,78,조건부 채택,PR #4의 테스트 동반 + 적응 출처 표기 수정,2026-10-13,PR #4 머지 시 또는 2027-04-13,intake/0004-mlx-vlm.md
+0005,IFEval scorer,vendored snapshot,외부유입,Apache-2.0,82,채택,스냅샷 고정 — 스캐너가 못 보므로 자산목록 행이 유일한 점검 지점,2026-10-13,2027-10-13,intake/0005-ifeval-scorer.md
+0006,Qwen3.5-4B (베이스),as released,외부유입,Apache-2.0,83,채택,,2026-10-13,2027-10-13,intake/0006-qwen35-4b.md
+0007,torch,2.11.0,외부유입,BSD-3-Clause,85,채택,정확 고정 — 드라이버/CUDA 변경 시 재검토,2026-10-13,2027-10-13,intake/0007-torch.md
+0008,transformers,">=4.57,<5",외부유입,Apache-2.0,84,조건부 채택,체크포인트 remote code가 5.x에서 비호환 — 상한 유지,2026-10-13,2027-04-13,intake/0008-transformers.md

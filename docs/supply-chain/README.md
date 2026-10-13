@@ -9,6 +9,7 @@ repository rather than reproducing it.
 | [`asset-register.csv`](asset-register.csv) | 통합자산목록 — one row per component, 직접개발 / 외부유입 / 수정포함 |
 | [`exceptions.md`](exceptions.md) | approved vulnerability exceptions; CI enforces them |
 | [`../../COMPLIANCE.md`](../../COMPLIANCE.md) | the licence narrative and redistribution obligations |
+| [`../oss/`](../oss/) | 프로젝트 평가 — licence policy, selection scorecard, and the intake record behind each adopted component |
 
 The register and the SBOM are not duplicates. A generated SBOM carries components and
 versions; it cannot carry why something was adopted, who owns it, or what was decided
