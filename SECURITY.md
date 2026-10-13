@@ -3,6 +3,25 @@
 We take the security of `trida-stack` seriously. Thank you for helping keep the
 project and its users safe.
 
+## Supported versions
+
+**The latest release only.** Older tags receive no fixes, no advisories and no SBOM.
+
+| Version | Supported |
+|---|---|
+| latest release | yes |
+| anything older | no |
+
+This is a research project with a small maintainer group, and a support window we
+cannot honour is worse than a narrow one stated plainly. If you need a fix on an
+older tag, open an issue and say why -- we would rather have that conversation than
+imply a guarantee.
+
+This line also defines a measured quantity. The supply-chain guideline computes
+SBOM coverage as *releases with a valid SBOM / supported releases*, so "supported"
+is the denominator: with the latest release carrying its SBOM, coverage is 100%,
+and the un-described older tags are out of scope by policy rather than by omission.
+
 ## Reporting a vulnerability
 
 **Please do not report security vulnerabilities through public GitHub issues,

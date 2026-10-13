@@ -122,14 +122,26 @@ jobs:
           path: ${{ steps.scan.outputs.json }}
           retention-days: 90
 
+      # No --clobber. Replacing an SBOM already published against a tag rewrites what
+      # consumers were told that tag contains, and leaves no trace that it changed.
+      # If a release needs a corrected SBOM, that is a new patch release, not a quiet
+      # overwrite -- so this fails loudly when assets are already there.
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          existing=$(gh release view "$TAG" --json assets --jq '.assets | length')
+          if [ "$existing" -gt 0 ]; then
+            echo "::error::${TAG} already has ${existing} asset(s)."
+            echo "Published SBOMs are not overwritten. Cut a patch release instead;"
+            echo "if these assets are wrong and nothing consumed them, delete them by"
+            echo "hand first and re-run."
+            gh release view "$TAG" --json assets --jq '.assets[] | "  " + .name'
+            exit 1
+          fi
           gh release upload "$TAG" \
             "$DIST/trida-stack-${TAG}.tar.gz" \
             "$DIST/trida-stack-${TAG}.spdx.json" \
             "$DIST/trida-stack-${TAG}.cdx.json" \
-            "$DIST/SHA256SUMS" \
-            --clobber
+            "$DIST/SHA256SUMS"
