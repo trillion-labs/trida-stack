@@ -170,7 +170,8 @@ license** — see `NOTICE` and `COMPLIANCE.md`.
 | 보안 취약점 | **공개 Issue가 아니라** [SECURITY.md](SECURITY.md)의 비공개 경로 |
 
 채널별 기준과 응답 기대치는 [COMMUNITY.md](COMMUNITY.md), 행동 규범은
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)에 있습니다.
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), 누가 무엇을 결정하고 그 결정이 어디에
+기록되는지는 [GOVERNANCE.md](GOVERNANCE.md)에 있습니다.
 
 ## License
 See `LICENSE`, plus `NOTICE` and `COMPLIANCE.md` for third-party attribution.
