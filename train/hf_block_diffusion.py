@@ -26,7 +26,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForImageTextToText, AutoTokenizer
 
 # segment tags used by the flex mask_mod
 _PAD, _SHARED, _XT, _X0 = 0, 1, 2, 3
@@ -114,9 +114,17 @@ class HFBlockDiffusion(nn.Module):
         self._attn_impl_active = None    # set by _set_attn_impl on the first packed-AR forward
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=trust_remote_code)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_id, dtype=dtype, trust_remote_code=trust_remote_code
-        )
+        # Vision-language checkpoints (Qwen3.5 / train/tools/compose_vl_checkpoint.py) load WITH their
+        # vision tower; `tm` (the text decoder) and `lm_head` resolve the same way for both.
+        config = AutoConfig.from_pretrained(model_id, trust_remote_code=trust_remote_code)
+        self.is_vl = getattr(config, "vision_config", None) is not None
+        auto_cls = AutoModelForImageTextToText if self.is_vl else AutoModelForCausalLM
+        self.model = auto_cls.from_pretrained(model_id, dtype=dtype, trust_remote_code=trust_remote_code)
+        self.image_token_id = getattr(config, "image_token_id", None) if self.is_vl else None
+        if self.is_vl:
+            # Frozen vision encoder: only the projector (merger) trains with the language model.
+            for name, p in self.visual.named_parameters():
+                p.requires_grad = name.startswith("merger.")
 
         if not ar_only:
             # Add the learned block-diffusion [MASK] token and grow the embedding / lm_head by one row.
@@ -135,8 +143,7 @@ class HFBlockDiffusion(nn.Module):
 
         if not ar_only:
             # Inject flex attention so we can pass a block-diffusion BlockMask as the attention mask.
-            self.model.config._attn_implementation = "flex_attention"
-            self.tm.config._attn_implementation = "flex_attention"
+            self._set_text_attn_impl("flex_attention")
 
             if compile_layers:
                 layers = self.tm.layers
@@ -159,6 +166,34 @@ class HFBlockDiffusion(nn.Module):
     @property
     def tm(self):  # the base decoder (LlamaModel/Qwen3Model): embed_tokens/rotary_emb/layers/norm
         return self.model.get_decoder()
+
+    @property
+    def visual(self):  # the vision tower (encoder blocks + merger) of a VL checkpoint, else None
+        return self.model.model.visual if self.is_vl else None
+
+    def param_groups(self, projector_lr_scale=1.0):
+        """Trainable parameters as optimizer groups, each tagged with an ``lr_scale`` relative to the
+        base LR (the trainer applies ``schedule * lr_scale`` every step): the vision projector
+        (``visual.merger``) at ``projector_lr_scale``, the language model at 1. The vision encoder is
+        frozen, so it appears in neither group."""
+        backbone, projector = [], []
+        for name, p in self.named_parameters():
+            if not p.requires_grad:
+                continue
+            if ".visual." in name and ".visual.merger." not in name:
+                raise RuntimeError(f"vision encoder parameter {name} is trainable; expected it frozen")
+            (projector if ".visual.merger." in name else backbone).append(p)
+        groups = [{"params": backbone, "lr_scale": 1.0}]
+        if projector:
+            groups.append({"params": projector, "lr_scale": projector_lr_scale})
+        return groups
+
+    def _set_text_attn_impl(self, impl):
+        """Attention backend for the TEXT decoder only. On a VL config the top-level setter recurses
+        into ``vision_config`` too, and the vision tower must keep its own (default) attention."""
+        if not self.is_vl:
+            self.model.config._attn_implementation = impl
+        self.tm.config._attn_implementation = impl
 
     # ------------------------------------------------------------------
     # noising: two complementary views of the response, stacked -> [2B, L]
@@ -802,8 +837,7 @@ class HFBlockDiffusion(nn.Module):
         preceded it (i.e. always, since a run uses one collator)."""
         if impl is None or getattr(self, "_attn_impl_active", None) == impl:
             return
-        self.model.config._attn_implementation = impl
-        self.tm.config._attn_implementation = impl
+        self._set_text_attn_impl(impl)
         self._attn_impl_active = impl
 
     def _ar_shift_loss(self, hidden, labels, return_logits: bool = False):

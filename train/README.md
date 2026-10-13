@@ -75,6 +75,36 @@ for a later one (buffered first-fit for `--pack --multiturn`), so only conversat
 `--max_length` are skipped; `--micro_batch_size` is the number of rows per forward. Verified: perturbing one packed document changes the
 other's logits by exactly 0.
 
+Assistant turns without reasoning render an empty `<think>\n\n</think>` block and train with it
+(Qwen's no-think format); turns with reasoning are supervised exactly as before.
+
+## Images (vision-language checkpoints)
+
+A checkpoint whose config has a `vision_config` (Qwen3.5) loads with its vision tower, and
+`--pack --multiturn` conversations may then carry images. Text-only data trains unchanged on the
+same checkpoint.
+
+- **Data:** image parts in message `content`, in any role but `system`:
+  `{"type": "image", "image": "imgs/0001.png"}` (a path relative to the JSONL file, an absolute
+  path, or a `data:` URI) next to `{"type": "text", "text": "..."}`. Images only — video parts make
+  a conversation unusable for now.
+- **What trains:** the vision encoder is frozen; its projector (`visual.merger`) trains with the
+  language model at `--projector_lr_scale` × `--lr` (default 0.1×, following the same warmup/cosine
+  schedule). Image tokens are context, never prediction targets.
+- **Size:** images above `--max_image_pixels` (default 1024×1024) are downscaled; an image costs
+  ~pixels / 32² tokens, which count toward `--max_length`. A record's own `"max_image_pixels"` field
+  overrides the cap for its images (e.g. 4 MP for dense diagrams whose small text must stay legible).
+- **Positions:** image tokens get Qwen's 3-D (t, h, w) RoPE positions per document; text-only
+  documents get plain positions, so text-only training is numerically unchanged.
+- **From a text-only checkpoint:** our trained checkpoints have no vision weights. Attach the base
+  model's vision tower once, then train from the result:
+  `python train/tools/compose_vl_checkpoint.py --text <ckpt> --vision <Qwen3.5-4B dir> --out <ckpt>-vl`.
+  Its projector was trained against the original Qwen3.5 text model, so expect to need image data
+  before image inputs work well.
+- Saved checkpoints keep the VL layout (`model.language_model.*`, `model.visual.*`) plus
+  `preprocessor_config.json`; `inference/sglang/tools/shape_for_sglang.py` shapes them for serving
+  (text requests; image serving is not wired up yet).
+
 ## Flags that matter
 
 - `--bd_size` block length; `--ar_loss_weight` AR aux weight (`loss=(diff+w·ar)/(1+w)`);

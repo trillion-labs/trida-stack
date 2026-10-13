@@ -9,6 +9,10 @@ used for text). A *raw* training checkpoint instead ships a flat
 implementation for — serving it fails at load (``causal``) or at the first
 decode block (``diffusion``: "missing the decode seed").
 
+A vision-language training checkpoint (``Qwen3_5ForConditionalGeneration``, real vision
+weights — see ``train/tools/compose_vl_checkpoint.py``) already has the wrapper layout; for it only
+the architecture name is swapped and the real ``vision_config`` is kept.
+
 This tool produces a lightweight *shim* directory: a rewritten ``config.json``
 plus symlinks (or copies) of the weights and tokenizer. The weights themselves
 are unchanged — only the config that tells SGLang how to load them is swapped.
@@ -70,11 +74,16 @@ CARRY = [
     "special_tokens_map.json",
     "vocab.json",
     "merges.txt",
+    "preprocessor_config.json",
+    "video_preprocessor_config.json",
 ]
 
 
 def shape_config(raw: dict) -> dict:
-    """Nest a raw Qwen3_5ForCausalLM text config into the DLLM VL wrapper."""
+    """Nest a raw Qwen3_5ForCausalLM text config into the DLLM VL wrapper (a VL checkpoint keeps
+    its own vision config; only the architecture changes)."""
+    if "vision_config" in raw:
+        return {**raw, "architectures": ["Qwen3_5DLLMForConditionalGeneration"]}
     text_config = dict(raw)
     text_config.pop("architectures", None)
     text_config.setdefault("model_type", "qwen3_5_text")
@@ -121,7 +130,8 @@ def main() -> int:
     (out_dir / "config.json").write_text(json.dumps(shape_config(raw_cfg), indent=2))
 
     carried = []
-    for name in CARRY:
+    shards = sorted(p.name for p in raw_dir.glob("*.safetensors") if p.name not in CARRY)
+    for name in CARRY + shards:
         src = raw_dir / name
         if not src.exists():
             continue
@@ -136,7 +146,7 @@ def main() -> int:
         sys.exit(f"no weights (*.safetensors) found in {raw_dir}")
 
     print(f"shaped: {out_dir}")
-    print(f"  arch : Qwen3_5ForCausalLM -> Qwen3_5DLLMForConditionalGeneration")
+    print(f"  arch : {arch[0] if arch else '?'} -> Qwen3_5DLLMForConditionalGeneration")
     print(f"  files: config.json (rewritten) + {len(carried)} "
           f"{'copied' if args.copy else 'symlinked'} ({', '.join(carried)})")
     print(f"  serve: python inference/serve.py {out_dir} --mode diffusion --port 30000")

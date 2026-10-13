@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Image+text training for Qwen3.5 vision-language checkpoints. Conversations under
+  `--pack --multiturn` may carry image parts. The vision encoder is frozen and the
+  projector trains at `--projector_lr_scale` × `--lr`. Images above
+  `--max_image_pixels` are downscaled, and image tokens get Qwen's 3-D RoPE
+  positions. `train/tools/compose_vl_checkpoint.py` attaches the base vision tower
+  to a text-only checkpoint. `shape_for_sglang.py` passes VL checkpoints through.
+  The FSDP ranks stay in lockstep when a batch has no images.
+
 ### Changed
+
+- `--model_id` now defaults to `Qwen/Qwen3.5-4B` (was `Qwen/Qwen3-4B`).
+- Assistant turns without reasoning now train with their empty
+  `<think>\n\n</think>` block. They were previously left unsupervised.
 
 - `--pack --multiturn` now packs conversations with buffered first-fit
   (`PackedMultiTurnRowDataset`). A conversation that doesn't fit the current row

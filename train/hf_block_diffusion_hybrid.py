@@ -555,8 +555,7 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
         if not self.ar_only:
             # attn_impl controls only the FULL-attention layers: flex BlockMask (prod, GPU) or a
             # dense additive mask (CPU tests — FlexAttention has no CPU backward).
-            self.model.config._attn_implementation = attn_impl
-            self.tm.config._attn_implementation = attn_impl
+            self._set_text_attn_impl(attn_impl)
 
         self._check_linear_kernels(require_kernels)
         if self.ar_only:
@@ -917,12 +916,47 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
                     hidden = run(layer, hidden)
         return hidden
 
+    def _scatter_image_features(self, input_ids, x0, ids_r, xt, xt_tok, V, pixel_values, image_grid_thw):
+        """Put the vision tower's features at every ``<|image_pad|>`` position of the clean stream AND
+        of each noisy view (image tokens are prompt tokens, so they are never masked and the views
+        keep them). Row r of ``ids_r`` is input row ``r % B`` (the parity layout duplicates rows)."""
+        feats = self.visual(pixel_values.to(x0.dtype), grid_thw=image_grid_thw).pooler_output.to(x0.dtype)
+        per_row_in = (input_ids == self.image_token_id).sum(1)
+        if int(per_row_in.sum()) != feats.shape[0]:
+            raise ValueError(f"{int(per_row_in.sum())} image tokens but {feats.shape[0]} image features")
+        rows = feats.split(per_row_in.tolist())
+        B = input_ids.shape[0]
+        per_row = [rows[r % B] for r in range(ids_r.shape[0])]
+        x0 = x0.masked_scatter((ids_r == self.image_token_id)[..., None], torch.cat(per_row))
+        xt = xt.masked_scatter((xt_tok == self.image_token_id)[..., None],
+                               torch.cat([f for f in per_row for _ in range(V)]))
+        return x0, xt
+
+    def _touch_vision_tower(self, x0):
+        """Run the vision tower on a 1-token dummy image and add ``0 * features`` to ``x0``. Under FSDP
+        every rank must execute the same modules: a rank whose batch has no images would otherwise skip
+        the vision blocks' all-gathers and the projector's gradient reduce-scatter while ranks with
+        images wait for them (observed: NCCL watchdog timeout in a backward reduce-scatter). Exact
+        no-op on the loss; the projector gets an all-zero gradient from this rank."""
+        cfg = self.visual.config
+        m = cfg.spatial_merge_size
+        dim = cfg.in_channels * cfg.temporal_patch_size * cfg.patch_size ** 2
+        grid = torch.tensor([[1, m, m]], device=x0.device)
+        pixels = torch.zeros(m * m, dim, device=x0.device, dtype=x0.dtype)
+        feats = self.visual(pixels, grid_thw=grid).pooler_output
+        return x0 + 0.0 * feats.sum().to(x0.dtype)
+
     def forward_flare(self, input_ids, labels, attention_mask, seg_id=None, resp_block=None,
-                      turn_id=None, return_logits: bool = False):
+                      turn_id=None, pixel_values=None, image_grid_thw=None, mrope_pos=None,
+                      return_logits: bool = False):
         """Two-stream block-diffusion forward on ``[x0_full ; xt_full]`` (FLARE method). Handles
         single-turn AND multi-turn uniformly: ``answer_pos`` (labels != -100) marks the response
         tokens to diffuse, contiguous or scattered across turns. Loss = diff CE on the noisy (xt)
-        head over masked response tokens + AR CE on the clean (x0) head over response tokens."""
+        head over masked response tokens + AR CE on the clean (x0) head over response tokens.
+
+        Images (VL checkpoints): ``pixel_values`` / ``image_grid_thw`` feed the vision tower, whose
+        features replace the ``<|image_pad|>`` embeddings in every stream; ``mrope_pos`` [B, 3, L]
+        (3-D RoPE positions from the collator) drives the rotary embedding instead of 1-D positions."""
         device = input_ids.device
         B, L = input_ids.shape
         valid = attention_mask.bool()
@@ -955,13 +989,22 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
         S = 1 + V
         x0 = self.tm.embed_tokens(ids_r)                         # [R, L, D]
         xt = self.tm.embed_tokens(xt_tok)                        # [R, V*L, D]
+        if pixel_values is not None:
+            x0, xt = self._scatter_image_features(input_ids, x0, ids_r, xt, xt_tok, V,
+                                                  pixel_values, image_grid_thw)
+        elif self.is_vl:  # keep FSDP collectives in lockstep with ranks that do have images
+            x0 = self._touch_vision_tower(x0)
         combined = torch.cat([x0, xt], dim=1)                    # [R, S*L, D]
         if seg_r is not None:                                    # packed: per-doc position reset
             pos1 = _positions_from_seg(seg_r)
         else:
             pos1 = torch.arange(L, device=device)[None, :].expand(R, -1)
         position_ids = pos1.repeat(1, S)                         # every stream shares positions
-        pos_emb = self.tm.rotary_emb(combined, position_ids=position_ids)
+        if mrope_pos is not None:                                # 3-D RoPE ids [3, R, S*L]
+            rope_ids = mrope_pos.permute(1, 0, 2).repeat(1, R // B, 1).repeat(1, 1, S)
+        else:
+            rope_ids = position_ids
+        pos_emb = self.tm.rotary_emb(combined, position_ids=rope_ids)
 
         # packing: per-doc cu_seqlens (flat over the [R, L] clean half) isolates docs in the GDN
         # recurrence + conv; doc_ids isolate them in the full-attention mask. L is a bd_size multiple
@@ -1169,7 +1212,11 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
 
     # ------------------------------------------------------------------
     def forward(self, input_ids, labels, attention_mask, seg_id=None, resp_pos=None,
-                resp_block=None, turn_id=None, return_logits: bool = False):
+                resp_block=None, turn_id=None, pixel_values=None, image_grid_thw=None,
+                mrope_pos=None, return_logits: bool = False):
+        if pixel_values is not None and (self.ar_only or self.linear_block_mode != "bidirectional"):
+            raise NotImplementedError("image inputs are supported only by the FLARE two-stream path "
+                                      "(--pack --multiturn --linear_block_mode bidirectional)")
         # AR-only short-circuits the diffusion machinery. seg_id MUST be routed through: with
         # sequence packing the AR forward needs the document-isolated causal mask + linear-layer
         # state reset, else packed documents silently cross-attend (and leak recurrent state).
@@ -1182,6 +1229,8 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
             # single-turn, multi-turn, AND packed multi-turn (seg_id -> per-doc cu_seqlens isolation).
             return self.forward_flare(input_ids, labels, attention_mask, seg_id=seg_id,
                                       resp_block=resp_block, turn_id=turn_id,
+                                      pixel_values=pixel_values, image_grid_thw=image_grid_thw,
+                                      mrope_pos=mrope_pos,
                                       return_logits=return_logits)
         if resp_block is not None or turn_id is not None:
             raise NotImplementedError(
