@@ -88,6 +88,17 @@ and CI fails when an entry expires.
 That last part is the point. It turns an accepted risk from a note that outlives its
 own reasoning into a decision that comes back around.
 
+## Supported versions, and why it is a number
+
+[`SECURITY.md`](../../SECURITY.md) supports **the latest release only**. That is the
+denominator of the guideline's SBOM-coverage metric -- *releases with a valid SBOM /
+supported releases* -- so the older tags that predate this machinery are out of scope
+by policy rather than counted as gaps.
+
+Published assets are never overwritten: `release-sbom.yml` fails if the tag already
+has any. A corrected SBOM means a patch release, because replacing one in place
+rewrites what consumers were told a tag contains and leaves no trace.
+
 ## What the release carries
 
 `release-sbom.yml` builds a source tarball of the tag, checksums it, generates SPDX and
