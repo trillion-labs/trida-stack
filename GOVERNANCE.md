@@ -39,8 +39,7 @@ fetch recipes.
 Community-facing duty roles — community lead, technical duty, moderator, security
 duty — are defined in
 [`docs/community/CHANNEL_POLICY.md`](docs/community/CHANNEL_POLICY.md). They are
-**not yet assigned by name**, which is why the chat channel has not launched; see
-[`docs/community/LAUNCH_PLAN.md`](docs/community/LAUNCH_PLAN.md).
+**not yet assigned by name**, which is why the chat channel has not launched.
 
 ---
 

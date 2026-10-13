@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `docs/community/LAUNCH_PLAN.md`. It was an internal execution plan — phase tables
+  with owners, acceptance criteria, a rollback plan, and a readiness checklist whose
+  rows still read ❌ — published where only rules and expectations belong. It had also
+  started to rot: three references to a file that is not in this repository, and two
+  claims that stopped being true this week. A public document that is wrong is worse
+  than no public document. The rules it referenced stay in `docs/community/`.
+
 ### Added
 
 - `docs/oss/` — project evaluation records: the licence policy (allowed /
