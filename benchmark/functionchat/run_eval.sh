@@ -3,7 +3,8 @@
 # point FunctionChat at it (--model inhouse), run the subsets, collect scores.
 #
 # Env knobs: NUM_GPUS (8), MODEL, PORT, BLOCK_SIZE, THRESHOLD, SUBSETS ("dialog singlecall common"),
-#            SAMPLE (small-run cap, optional), FCBENCH_DIR.
+#            SAMPLE (small-run cap, optional), FCBENCH_DIR,
+#            FC_FRESH (1; set 0 to resume an interrupted run of the SAME checkpoint from its cache).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,8 +45,13 @@ maybe_limit() {                      # $1 = raw data filename -> echoes the inpu
 
 # FunctionChat caches responses AND judge results per served-model name under $FCBENCH_DIR/output/$SANITIZED and
 # resumes from them. Every checkpoint is served under the same name, so a stale cache mixed earlier models'
-# grades into new runs (it only graded the items past the cached count). Start every run clean.
-rm -rf "$FCBENCH_DIR/output/$SANITIZED"
+# grades into new runs (it only graded the items past the cached count). Start every run clean unless
+# FC_FRESH=0, which keeps the cache to resume an interrupted run of the same checkpoint.
+if [ "${FC_FRESH:-1}" = 1 ]; then
+    rm -rf "$FCBENCH_DIR/output/$SANITIZED"
+else
+    echo "[run] FC_FRESH=0: resuming from $FCBENCH_DIR/output/$SANITIZED (must be the same checkpoint)"
+fi
 
 source "$REPO/benchmark/serving/pool.sh"
 launch_pool                          # exports REMOTE_OPENAI_BASE_URL

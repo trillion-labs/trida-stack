@@ -72,7 +72,8 @@ class TridaFCHandler(QwenFCHandler):
             prompt = tok.apply_chat_template(
                 messages, tools=tools, add_generation_prompt=True, tokenize=False)
             # the Qwen3.5 template already opens the reasoning block; don't add a second one
-            return prompt if prompt.endswith("<think>\n") else prompt + "<think>\n"
+            head = prompt.rstrip()
+            return head + "\n" if head.endswith("<think>") else prompt + "<think>\n"
         except Exception as e:
             print(f"[trida_handler] apply_chat_template failed ({e}); falling back to QwenFC format", flush=True)
             return super()._format_prompt(messages, function)
@@ -117,14 +118,12 @@ class TridaFCHandler(QwenFCHandler):
                             return None
         return None
 
-    # Language of the test being decoded. XML <parameter> values are plain text, so their type has to
-    # be recovered here: BFCL's Java/JavaScript checkers expect every value as a string, while Python
-    # expects real literals (True, 5, [1, 2]).
-    _xml_language = "python"
-
+    # XML <parameter> values are plain text, so their type has to be recovered from the test's
+    # language: BFCL's Java/JavaScript checkers expect every value as a string, while Python expects
+    # real literals (True, 5, [1, 2]).
     @staticmethod
-    def _xml_value(v):
-        if TridaFCHandler._xml_language != "python":
+    def _xml_value(v, language="python"):
+        if language != "python":
             return v
         try:
             return json.loads(v)
@@ -137,15 +136,13 @@ class TridaFCHandler(QwenFCHandler):
 
     @override
     def decode_ast(self, result, language, has_tool_call_tag):
-        TridaFCHandler._xml_language = getattr(language, "value", str(language)).lower()
-        try:
-            return super().decode_ast(result, language, has_tool_call_tag)
-        finally:
-            TridaFCHandler._xml_language = "python"
+        # QwenFCHandler.decode_ast, with the test language passed down to the parser.
+        lang = getattr(language, "value", str(language)).lower()
+        return [{c["name"]: dict(c["arguments"])} for c in self._extract_tool_calls(result, lang)]
 
     @staticmethod
     @override
-    def _extract_tool_calls(input_string):
+    def _extract_tool_calls(input_string, language="python"):
         """Robust superset of Qwen's `<tool_call>` parser. Beyond the inherited normalization
         (missing ``arguments`` / ``arguments`` as a JSON string), this re-parses each
         ``<tool_call>`` block with a brace-balancing loader so the model's frequent extra-trailing-
@@ -160,7 +157,7 @@ class TridaFCHandler(QwenFCHandler):
             for fm in re.finditer(r"<function=([^>\s]+)\s*>(.*?)</function>", block, re.DOTALL):
                 a = {}
                 for k, v in re.findall(r"<parameter=([^>]+?)\s*>\s*(.*?)\s*</parameter>", fm.group(2), re.DOTALL):
-                    a[k.strip()] = TridaFCHandler._xml_value(v.strip())
+                    a[k.strip()] = TridaFCHandler._xml_value(v.strip(), language)
                 raw.append({"name": fm.group(1).strip(), "arguments": a})
         if not raw:  # no tag-wrapped calls parsed -> defer to the inherited extractor
             raw = QwenFCHandler._extract_tool_calls(input_string)
