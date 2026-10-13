@@ -7,7 +7,9 @@
 # see train/block_gated_delta_rule/README.md.
 torch==2.11.0
 numpy
-datasets
+# >=5.0.1: GHSA-379c-qx7v-6h59 path traversal in folder-based builders.
+# Unpinned, this resolved to 2.14.4.
+datasets>=5.0.1
 huggingface_hub
 python-dotenv
 wandb

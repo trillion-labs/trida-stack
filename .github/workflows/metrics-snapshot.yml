@@ -1,0 +1,76 @@
+name: Metrics snapshot
+
+on:
+  schedule:
+    # Every Monday, 01:20 UTC. Weekly during the observation period: Lv3 wants the same
+    # measurement over at least two periods with a decision attached, and a quantity you
+    # check monthly takes a quarter to show you the collection itself is wrong. Drops to
+    # monthly once a 90-day baseline exists. Weekly also stays inside the 14-day window
+    # GitHub's traffic API retains.
+    - cron: "20 1 * * 1"
+  workflow_dispatch:
+    inputs:
+      period:
+        description: "Period to (re)collect, e.g. 2026-W42. Blank = the current ISO week."
+        required: false
+
+permissions:
+  # Enough to push a snapshot BRANCH and open a PR -- never to write the default
+  # branch. A weekly bot commit is not worth standing write access to main, and the
+  # ruleset on main requires a pull request anyway: a direct push is rejected, so the
+  # old version of this job would simply have failed.
+  contents: write          # create and push the snapshot branch
+  pull-requests: write     # open the PR
+  issues: read
+
+concurrency:
+  group: metrics-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: Collect and open a PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Collect
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python tools/collect_metrics.py ${{ inputs.period && format('--period {0}', inputs.period) || '' }}
+
+      - name: Open a PR with the snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          period=$(ls -t metrics/snapshots | head -1 | sed 's/\.json$//')
+          branch="metrics/snapshot-${period}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add metrics/snapshots
+          # Re-running inside the same period is a no-op rather than an empty commit.
+          git diff --cached --quiet && { echo "no change for ${period}"; exit 0; }
+
+          if gh pr list --head "$branch" --state open --json number --jq 'length' | grep -qv '^0$'; then
+            echo "a PR for ${period} is already open; leaving it alone"
+            exit 0
+          fi
+
+          git switch -c "$branch"
+          git commit -m "chore(metrics): snapshot ${period}"
+          git push -u origin "$branch"
+
+          gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" \
+            --title "chore(metrics): snapshot ${period}" \
+            --body "$(printf '%s\n' \
+              "Automated weekly snapshot for \`${period}\`." \
+              "" \
+              "Definitions: \`docs/metrics/README.md\`. Numbers are aggregate; individuals are not measured." \
+              "" \
+              "**This needs a period review.** Add \`docs/metrics/reviews/${period}.md\` to this PR before merging -- what was measured, what it showed, what was decided. A snapshot without one is a number nobody acted on, which is the gap Lv3 asks about.")"

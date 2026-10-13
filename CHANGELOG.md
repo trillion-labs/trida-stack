@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The metrics workflow opens a pull request instead of pushing to the default
+  branch. Two reasons, and the second one is that the old version could not have
+  worked: the ruleset on main requires a pull request and only an organization
+  admin bypasses it, so a direct push from `github-actions[bot]` is rejected. The
+  first is that a weekly bot commit does not justify standing write access to main.
+  The PR body also asks for the period review to be added before merging.
+
+- The four community duty roles are assigned across all three maintainers, each
+  with a backup who is not the person holding it. Moderator and security contact
+  are deliberately different people: of the four, that is the pair whose overlap
+  carries the sharpest conflict, since a report about the security contact would
+  otherwise be received by its subject. This closes launch-hold condition H3 and
+  makes the conduct recusal in `GOVERNANCE.md` executable -- whoever a report is
+  about, someone is left to handle it.
+
+- `docs/community/README.md`: the pre-launch checklist names the three participant
+  types and where each one's question is meant to end up, which was the last item on
+  it that nobody could close by writing something down. Its metrics line also said
+  the numbers are not kept in this repository, which stopped being true when the
+  weekly snapshots landed.
+
+- Conduct reports go to `admin@trillionlabs.co` (was `conduct@`). Both reporting
+  addresses are role aliases rather than an individual, so neither depends on one
+  person reading their mail. `CODE_OF_CONDUCT.md` now also states that a report about
+  a maintainer should be sent anyway, because the recusal that makes that safe is
+  written into `GOVERNANCE.md`.
+
 ### Added
 
 - `inference/mlx/`: on-device (Apple Silicon, MLX) serving of Trida2.0-4B with lossless
@@ -15,6 +44,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `inference/mlx/`: image input for vision-language checkpoints (Trida-2.0-4B-1006): Qwen3.5 vision
   encoder + projector, HF-identical preprocessing, multimodal RoPE, image-aware prompt cache,
   OpenAI `image_url` parts in the server.
+- `metrics/` and `docs/metrics/reviews/` — the response metrics are now collected in
+  the repository on a weekly snapshot, with a written review per period recording what
+  was measured, what it showed and what was decided. The external series is `no_data`
+  because there are no outside contributors yet; a separate internal series measures
+  maintainer response time so a period with no external items still produces a number
+  rather than a row of nulls. The internal series carries a count, never a rate.
+
+### Removed
+
+- `docs/community/LAUNCH_PLAN.md`. It was an internal execution plan — phase tables
+  with owners, acceptance criteria, a rollback plan, and a readiness checklist whose
+  rows still read ❌ — published where only rules and expectations belong. It had also
+  started to rot: three references to a file that is not in this repository, and two
+  claims that stopped being true this week. A public document that is wrong is worse
+  than no public document. The rules it referenced stay in `docs/community/`.
+
+### Added
+
+- `docs/oss/` — project evaluation records: the licence policy (allowed /
+  conditional / prohibited), a five-criteria selection scorecard, an intake register,
+  and the evaluation record behind each of the eight components already adopted.
+  The records postdate the decisions they describe and say so.
+
+- `GOVERNANCE.md` — roles, how a decision is made, where decisions are recorded,
+  the release procedure, and how maintainers join or step down. States plainly that
+  `require_code_owner_review` is not yet enabled, so CODEOWNERS is advisory today.
+
+## [0.1.2] — 2026-10-13
+
+A security dependency bump, and the supply-chain plumbing that v0.1.1 was cut thirty
+minutes too early to include.
+
+### Changed
+
+- `datasets` floored at `>=5.0.1` (GHSA-379c-qx7v-6h59, path traversal in
+  folder-based builders). Unpinned it resolved to 2.14.4; we do not use those
+  builders, but nothing held us at an old version either.
+- `SECURITY.md` states the support window: the latest release only. This is also the
+  denominator of the SBOM-coverage metric, so older tags are out of scope by policy
+  rather than counted as gaps.
+
+### Fixed
+
+- Vulnerability exceptions now carry every id a finding is known by. pip-audit leads
+  with PYSEC and grype with GHSA, so an exception keyed to one silently failed to
+  cover the other -- all eight approved exceptions were blocking the release.
+- The release workflow no longer passes `--clobber`. Replacing an SBOM already
+  published against a tag rewrites what consumers were told it contains; the upload
+  now fails if the tag already has assets.
 
 ## [0.1.1] — 2026-10-13
 
@@ -104,6 +182,7 @@ Trillion Labs' **Trida** two-stream block-diffusion language models
   **PolyForm Noncommercial 1.0.0** — the two-stream training and diffusion-serving
   paths are **noncommercial-only**. See [`COMPLIANCE.md`](COMPLIANCE.md) §1b.
 
-[Unreleased]: https://github.com/trillion-labs/trida-stack/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/trillion-labs/trida-stack/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/trillion-labs/trida-stack/releases/tag/v0.1.2
 [0.1.1]: https://github.com/trillion-labs/trida-stack/releases/tag/v0.1.1
 [0.1.0]: https://github.com/trillion-labs/trida-stack/releases/tag/v0.1.0

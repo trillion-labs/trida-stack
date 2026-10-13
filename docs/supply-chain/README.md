@@ -9,6 +9,7 @@ repository rather than reproducing it.
 | [`asset-register.csv`](asset-register.csv) | 통합자산목록 — one row per component, 직접개발 / 외부유입 / 수정포함 |
 | [`exceptions.md`](exceptions.md) | approved vulnerability exceptions; CI enforces them |
 | [`../../COMPLIANCE.md`](../../COMPLIANCE.md) | the licence narrative and redistribution obligations |
+| [`../oss/`](../oss/) | 프로젝트 평가 — licence policy, selection scorecard, and the intake record behind each adopted component |
 
 The register and the SBOM are not duplicates. A generated SBOM carries components and
 versions; it cannot carry why something was adopted, who owns it, or what was decided
@@ -87,6 +88,17 @@ and CI fails when an entry expires.
 
 That last part is the point. It turns an accepted risk from a note that outlives its
 own reasoning into a decision that comes back around.
+
+## Supported versions, and why it is a number
+
+[`SECURITY.md`](../../SECURITY.md) supports **the latest release only**. That is the
+denominator of the guideline's SBOM-coverage metric -- *releases with a valid SBOM /
+supported releases* -- so the older tags that predate this machinery are out of scope
+by policy rather than counted as gaps.
+
+Published assets are never overwritten: `release-sbom.yml` fails if the tag already
+has any. A corrected SBOM means a patch release, because replacing one in place
+rewrites what consumers were told a tag contains and leaves no trace.
 
 ## What the release carries
 

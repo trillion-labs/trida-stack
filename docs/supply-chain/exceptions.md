@@ -9,6 +9,10 @@ finding into a decision that comes back around.
 
 **Rules**
 
+- An exception lists every id the finding is known by. Scanners disagree on which is
+  primary -- pip-audit leads with PYSEC, grype with GHSA -- and an exception keyed to
+  one of them silently fails to cover the other. All eight entries here were already
+  approved and still blocked a release because of exactly that.
 - An exception needs a reason, an approver and an expiry; `affected` entries also need
   a mitigation. "No impact" on its own is not an exception — environments change and
   the note outlives the judgement that produced it.
@@ -23,6 +27,7 @@ finding into a decision that comes back around.
 
 ```yaml
 - id: PYSEC-2026-2289
+  aliases: [GHSA-29pf-2h5f-8g72, CVE-2026-4372]
   component: transformers
   status: affected
   reason: >-
@@ -41,6 +46,7 @@ finding into a decision that comes back around.
   expires: 2026-12-31
 
 - id: PYSEC-2026-3929
+  aliases: [GHSA-xrqw-3rrv-vx5w, CVE-2026-9856]
   component: transformers
   status: affected
   reason: >-
@@ -53,6 +59,7 @@ finding into a decision that comes back around.
   expires: 2026-12-31
 
 - id: PYSEC-2026-2288
+  aliases: [GHSA-69w3-r845-3855, CVE-2026-1839]
   component: transformers
   status: not_affected
   reason: >-
@@ -65,6 +72,7 @@ finding into a decision that comes back around.
   expires: 2026-12-31
 
 - id: PYSEC-2025-217
+  aliases: [GHSA-x9r9-c232-4q39, CVE-2026-80047]
   component: transformers
   status: not_affected
   reason: X-CLIP checkpoint conversion path. We do not use X-CLIP.
@@ -73,6 +81,7 @@ finding into a decision that comes back around.
   expires: 2026-12-31
 
 - id: PYSEC-2026-2290
+  aliases: [GHSA-fgcw-684q-jj6r, CVE-2026-5241]
   component: transformers
   status: not_affected
   reason: LightGlue model loading path. We do not use LightGlue.
@@ -81,6 +90,7 @@ finding into a decision that comes back around.
   expires: 2026-12-31
 
 - id: PYSEC-2025-194
+  aliases: [GHSA-rrmf-rvhw-rf47, CVE-2025-3000]
   component: torch
   status: affected
   reason: >-
@@ -95,6 +105,7 @@ finding into a decision that comes back around.
   expires: 2026-12-31
 
 - id: PYSEC-2026-3447
+  aliases: [GHSA-h35f-9h28-mq5c, CVE-2026-59890]
   component: setuptools
   status: not_affected
   reason: >-
@@ -109,6 +120,7 @@ finding into a decision that comes back around.
   approver: Trillion Labs research team
   expires: 2026-12-31
 - id: PYSEC-2026-3740
+  aliases: [GHSA-8mgp-746c-j5xp, CVE-2026-81726]
   component: nltk
   status: not_affected
   reason: >-

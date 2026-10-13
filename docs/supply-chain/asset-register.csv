@@ -7,7 +7,7 @@
 외부유입,IFEval scorer,vendored snapshot,Apache-2.0,inference/ifeval_lib/,https://github.com/google-research/google-research,vendored,research team,2026-10-01,조치중,저장소에 포함된 유일한 3rd-party 소스. 버전 미고정.
 외부유입,torch,2.11.0,BSD-3-Clause,전체,https://github.com/pytorch/pytorch,pip,research team,2026-10-01,조치중,PYSEC-2025-194 — exceptions.md 참조.
 외부유입,transformers,">=4.57,<5",Apache-2.0,train/ inference/,https://github.com/huggingface/transformers,pip,research team,2026-10-01,수정보류+사유,PYSEC-2026-2289/3929 — 5.x 핀 제약. exceptions.md 참조.
-외부유입,datasets,unpinned,Apache-2.0,inference/ eval,https://github.com/huggingface/datasets,pip,research team,2026-10-01,양호,버전 미고정.
+외부유입,datasets,">=5.0.1",Apache-2.0,inference/ eval,https://github.com/huggingface/datasets,pip,research team,2026-10-13,수정,GHSA-379c-qx7v-6h59 (경로 순회) 때문에 하한 설정. 미고정일 때 2.14.4로 해석되던 것을 PR #26에서 상향.
 외부유입,huggingface_hub,unpinned,Apache-2.0,모델 다운로드,https://github.com/huggingface/huggingface_hub,pip,research team,2026-10-01,양호,버전 미고정.
 외부유입,accelerate,unpinned,Apache-2.0,train/,https://github.com/huggingface/accelerate,pip,research team,2026-10-01,양호,버전 미고정.
 외부유입,wandb,unpinned,MIT,train/ 로깅,https://github.com/wandb/wandb,pip,research team,2026-10-01,조치중,노출된 API 키 교체 미완료.

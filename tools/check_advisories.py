@@ -27,6 +27,8 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 EXCEPTIONS = ROOT / "docs" / "supply-chain" / "exceptions.md"
 REQUIRED = ("id", "component", "status", "reason", "approver", "expires")
+# Scanners disagree on which id is primary: pip-audit leads with PYSEC, grype with
+# GHSA. An exception therefore declares every id the same finding is known by.
 
 
 def load_exceptions() -> tuple[dict, list[str]]:
@@ -66,7 +68,10 @@ def load_exceptions() -> tuple[dict, list[str]]:
             problems.append(f"{eid}: status 'affected' requires a 'mitigation'")
         if eid in by_id:
             problems.append(f"{eid}: duplicate entry")
-        by_id[eid] = e
+        for alias in [eid] + list(e.get("aliases") or []):
+            if alias in by_id and by_id[alias] is not e:
+                problems.append(f"{alias}: declared by more than one exception")
+            by_id[alias] = e
 
     # Entries sitting outside the fence are invisible to this gate, which is exactly
     # the kind of silent failure an exception list must not have.
