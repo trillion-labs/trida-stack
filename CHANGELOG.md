@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The metrics workflow opens a pull request instead of pushing to the default
+  branch. Two reasons, and the second one is that the old version could not have
+  worked: the ruleset on main requires a pull request and only an organization
+  admin bypasses it, so a direct push from `github-actions[bot]` is rejected. The
+  first is that a weekly bot commit does not justify standing write access to main.
+  The PR body also asks for the period review to be added before merging.
+
 - The four community duty roles are assigned across all three maintainers, each
   with a backup who is not the person holding it. Moderator and security contact
   are deliberately different people: of the four, that is the pair whose overlap
