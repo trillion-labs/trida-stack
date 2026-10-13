@@ -119,5 +119,8 @@ therefore accurate about what we distribute, and the register covers what gets f
 - **Code-owner review is not enforced.** `.github/CODEOWNERS` exists, but the branch
   ruleset has `require_code_owner_review: false` and `required_approving_review_count: 0`,
   so the file currently documents intent rather than gating anything.
-- **Most dependencies are unpinned** and there is no lockfile, so advisory scanning is
-  against declared ranges rather than a resolved set.
+- Dependencies are declared as ranges in `requirements.txt`; the resolved set lives in
+  `requirements-lock.txt` (85 packages) and `inference/requirements-lock.txt` (49).
+  Regenerate with the command in each file's header -- the flags matter, since the
+  resolution is platform-specific. Advisory scanning still reads the declared ranges;
+  the lockfiles exist so the release SBOM describes something real.
