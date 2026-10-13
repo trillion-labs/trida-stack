@@ -22,9 +22,16 @@ jobs:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
       DIST: dist
     steps:
+      # Check out the DEFAULT branch, not the tag. The artifact must come from the
+      # tag, but the tooling that describes it (tools/check_advisories.py, the
+      # exception policy) lives on main and did not exist at older tags -- checking
+      # out v0.1.0 gave a tree with no tools/ at all, and the gate failed with
+      # "can't open file .../tools/check_advisories.py".
+      #
+      # fetch-depth: 0 so `git archive <tag>` below can reach the tag's tree.
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          fetch-depth: 0
 
       # An SBOM describes a specific artifact, not a branch. This repository ships
       # source rather than a binary, so the artifact is the source tarball of the tag --
@@ -34,12 +41,17 @@ jobs:
       # never committed, so they are absent from the tarball and therefore absent from
       # the SBOM. That is correct -- we do not distribute them. COMPLIANCE.md and
       # docs/supply-chain/asset-register.csv record them as fetched dependencies.
+      # The artifact is the tag's tree, produced by `git archive <tag>` rather than by
+      # checking the tag out -- so the describing tooling above stays at main.
       - name: Build the release artifact
         run: |
           set -euo pipefail
+          git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null \
+            || { echo "tag ${TAG} not found"; exit 1; }
           mkdir -p "$DIST/package"
-          git archive --format=tar HEAD | tar -x -C "$DIST/package"
+          git archive --format=tar "$TAG" | tar -x -C "$DIST/package"
           tar -C "$DIST/package" -czf "$DIST/trida-stack-${TAG}.tar.gz" .
+          echo "artifact built from tag ${TAG} ($(git rev-parse --short "$TAG"))"
 
       - name: Create checksums
         run: |
