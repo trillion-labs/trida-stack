@@ -6,9 +6,9 @@
 # CACHE_ROOT to a fast local/scratch disk with room for weights + JIT artifacts.
 
 # Checkpoint served when serve.py / serve_diffusion.sh get no explicit model.
-# The reference model is private on Hugging Face during preview: once your account
-# has access, authenticate once
-# with `huggingface-cli login`, or export HF_TOKEN=hf_... here.
+# The reference model is public on Hugging Face -- no authentication needed. For a
+# private checkpoint of your own, authenticate once with `huggingface-cli login`,
+# or export HF_TOKEN=hf_... here.
 export TRIDA_MODEL="${TRIDA_MODEL:-trillionlabs/Trida2.0-4B}"
 # export HF_TOKEN=hf_...
 

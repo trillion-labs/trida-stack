@@ -1,0 +1,37 @@
+name: Labeled item alert
+
+on:
+  issues:
+    types: [labeled]
+  # `issues: [labeled]` does not fire for pull requests, and `pull_request` from a
+  # fork has no access to secrets, so the webhook would be empty exactly when an
+  # outside contribution gets marked help wanted.
+  #
+  # pull_request_target is the usual footgun -- it runs with secrets. It is safe here
+  # because actions/checkout with no `ref` checks out the BASE commit, not the pull
+  # request's head, so no code from the PR executes. Do not add `ref:` to that
+  # checkout, and do not build or install anything from the PR in this workflow.
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    name: Announce watched labels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      # Repository webhooks subscribe by event type and cannot filter on labels, so
+      # "tell the channel when something is marked help wanted" has to run here, where
+      # the label is in the event payload. Unwatched labels exit quietly -- a channel
+      # that announces every label change is one people mute.
+      - name: Notify
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python tools/notify_labeled.py

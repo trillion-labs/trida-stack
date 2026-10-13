@@ -16,7 +16,7 @@ Usage:
 The model is the optional positional argument; when omitted it falls back to
 the TRIDA_MODEL env var, then to the default `trillionlabs/Trida2.0-4B`. It is
 passed straight to the backend's --model-path, so a Hugging Face repo id is
-auto-downloaded; a local checkpoint directory works too. Private HF repos (the default is private during preview) need `huggingface-cli login` or HF_TOKEN in the environment first.
+auto-downloaded; a local checkpoint directory works too. Private HF repos need `huggingface-cli login` or HF_TOKEN in the environment first; the default model is public.
 
 Dependency seam: this wraps the diffusion-serving SGLang backend. Point
 SGLANG_PYTHON at the interpreter that has it installed (defaults to current python).

@@ -1,0 +1,25 @@
+구분,이름,버전,라이선스,사용 위치,획득 경로,획득 방식,담당,취약점 점검일,조치 상태,비고
+직접개발,trida-stack,0.1.0,Apache-2.0,train/ inference/ benchmark/,https://github.com/trillion-labs/trida-stack,first-party,research team,2026-10-01,양호,
+직접개발,vllm-native-diffusion,0.1.0,Apache-2.0,inference/vllm/,https://github.com/trillion-labs/trida-stack,first-party,research team,2026-10-01,양호,아웃오브트리 플러그인. vLLM 포크 아님.
+수정포함,HybridDiffusion block_gated_delta_rule,6ca547a,PolyForm-NC-1.0.0,train/block_gated_delta_rule/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,build-time fetch,research team,2026-10-01,양호,저장소에 미포함. trillion_mods.patch 적용. 체크섬 tools/kernel-checksums.txt.
+수정포함,HybridDiffusion sglang backend,6ca547a,PolyForm-NC-1.0.0,inference/sglang/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,build-time fetch,research team,2026-10-01,양호,상위 SGLang은 Apache-2.0. two_stream_diffusion.patch 14개 파일.
+수정포함,HybridDiffusion block_causal_readout,6ca547a,PolyForm-NC-1.0.0,inference/vllm/vllm_native_diffusion/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,build-time fetch,research team,2026-10-01,양호,저장소에 미포함. KERNELS.md 레시피.
+외부유입,IFEval scorer,vendored snapshot,Apache-2.0,inference/ifeval_lib/,https://github.com/google-research/google-research,vendored,research team,2026-10-01,조치중,저장소에 포함된 유일한 3rd-party 소스. 버전 미고정.
+외부유입,torch,2.11.0,BSD-3-Clause,전체,https://github.com/pytorch/pytorch,pip,research team,2026-10-01,조치중,PYSEC-2025-194 — exceptions.md 참조.
+외부유입,transformers,">=4.57,<5",Apache-2.0,train/ inference/,https://github.com/huggingface/transformers,pip,research team,2026-10-01,수정보류+사유,PYSEC-2026-2289/3929 — 5.x 핀 제약. exceptions.md 참조.
+외부유입,datasets,unpinned,Apache-2.0,inference/ eval,https://github.com/huggingface/datasets,pip,research team,2026-10-01,양호,버전 미고정.
+외부유입,huggingface_hub,unpinned,Apache-2.0,모델 다운로드,https://github.com/huggingface/huggingface_hub,pip,research team,2026-10-01,양호,버전 미고정.
+외부유입,accelerate,unpinned,Apache-2.0,train/,https://github.com/huggingface/accelerate,pip,research team,2026-10-01,양호,버전 미고정.
+외부유입,wandb,unpinned,MIT,train/ 로깅,https://github.com/wandb/wandb,pip,research team,2026-10-01,조치중,노출된 API 키 교체 미완료.
+외부유입,numpy,unpinned,BSD-3-Clause,전체,https://github.com/numpy/numpy,pip,research team,2026-10-01,양호,
+외부유입,sentencepiece,unpinned,Apache-2.0,토크나이저,https://github.com/google/sentencepiece,pip,research team,2026-10-01,양호,
+외부유입,tiktoken,unpinned,MIT,토크나이저,https://github.com/openai/tiktoken,pip,research team,2026-10-01,양호,
+외부유입,fsspec,unpinned,BSD-3-Clause,파일시스템,https://github.com/fsspec/filesystem_spec,pip,research team,2026-10-01,양호,
+외부유입,python-dotenv,unpinned,BSD-3-Clause,설정,https://github.com/theskumar/python-dotenv,pip,research team,2026-10-01,양호,
+외부유입,requests,unpinned,Apache-2.0,inference/ 클라이언트,https://github.com/psf/requests,pip,research team,2026-10-01,양호,
+외부유입,absl-py,unpinned,Apache-2.0,eval_ifeval.py,PyPI,pip,research team,2026-10-01,양호,
+외부유입,immutabledict,unpinned,MIT,eval_ifeval.py,PyPI,pip,research team,2026-10-01,양호,
+외부유입,langdetect,unpinned,Apache-2.0,eval_ifeval.py,PyPI,pip,research team,2026-10-01,양호,
+외부유입,nltk,unpinned,Apache-2.0,eval_ifeval.py,PyPI,pip,research team,2026-10-01,양호,punkt 토크나이저 별도 다운로드.
+외부유입,vLLM,">=0.27,<0.28",Apache-2.0,inference/vllm/ (선택),https://github.com/vllm-project/vllm,pip,research team,2026-10-01,양호,stock wheel.
+외부유입,setuptools,">=83",MIT,빌드 백엔드,https://github.com/pypa/setuptools,build,research team,2026-10-01,양호,PYSEC-2026-3447 대응으로 하한 상향.

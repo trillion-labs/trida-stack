@@ -1,0 +1,40 @@
+name: Community files check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify community health files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # The repository checklist is judged from a logged-out browser: a newcomer has to
+      # find how to ask, report, contribute and disclose. These files are that path, and
+      # a file that gets deleted or emptied fails quietly otherwise.
+      - name: Required files are present and non-empty
+        run: |
+          set -uo pipefail
+          required=(README.md LICENSE CONTRIBUTING.md CODE_OF_CONDUCT.md SECURITY.md COMMUNITY.md)
+          failed=0
+          for file in "${required[@]}"; do
+            if [[ ! -s "$file" ]]; then echo "missing or empty: $file"; failed=1; fi
+          done
+          exit "$failed"
+
+      # A code of conduct whose report address does not work is not operational evidence.
+      # This cannot test delivery, only that an address is still stated.
+      - name: Reporting routes are still stated
+        run: |
+          set -uo pipefail
+          failed=0
+          grep -q "security@trillionlabs.co" SECURITY.md || { echo "SECURITY.md: no reporting address"; failed=1; }
+          grep -q "conduct@trillionlabs.co" CODE_OF_CONDUCT.md || { echo "CODE_OF_CONDUCT.md: no reporting address"; failed=1; }
+          grep -q "SECURITY.md" README.md || { echo "README.md: no path to SECURITY.md"; failed=1; }
+          grep -q "CONTRIBUTING.md" README.md || { echo "README.md: no path to CONTRIBUTING.md"; failed=1; }
+          exit "$failed"

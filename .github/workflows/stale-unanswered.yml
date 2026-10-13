@@ -1,0 +1,35 @@
+name: Unanswered questions
+
+on:
+  schedule:
+    # Weekday mornings, Asia/Seoul (00:00 UTC == 09:00 KST), matching stated hours.
+    - cron: "0 0 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  notify:
+    name: Report items with no human response
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      # Of everything the guideline says is worth sending to chat, this is the one that
+      # cannot be a GitHub notification: it is the absence of an event, not an event.
+      # It also backstops promotion -- an item answered only in chat keeps appearing
+      # here until someone records it where it can be found.
+      #
+      # Whichever webhook secret is set decides the destination, so the Discord/Slack
+      # choice does not block this. With neither set it prints and does not fail.
+      - name: Notify
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python tools/notify_stale.py

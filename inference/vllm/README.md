@@ -38,8 +38,9 @@ CKPT=<hf-repo-id-or-local-path> bash inference/vllm/serve_diffusion.sh   # any o
 ```
 
 `CKPT` (an HF repo id or a local checkpoint path) falls back to `$TRIDA_MODEL`,
-then to `trillionlabs/Trida2.0-4B` — private on Hugging Face during preview, so (with repo access) run
-`huggingface-cli login` or export `HF_TOKEN` before the first download. Everything
+then to `trillionlabs/Trida2.0-4B`, which is public on Hugging Face — no authentication
+needed. Its model licence differs from this repository's Apache-2.0; see
+[`COMPLIANCE.md`](../../COMPLIANCE.md). Everything
 else is env-driven with sane defaults:
 
 | env | default | meaning |
