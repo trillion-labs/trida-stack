@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Conduct reports go to `admin@trillionlabs.co` (was `conduct@`). Both reporting
+  addresses are role aliases rather than an individual, so neither depends on one
+  person reading their mail. `CODE_OF_CONDUCT.md` now also states that a report about
+  a maintainer should be sent anyway, because the recusal that makes that safe is
+  written into `GOVERNANCE.md`.
+
 ### Added
 
 - `metrics/` and `docs/metrics/reviews/` — the response metrics are now collected in

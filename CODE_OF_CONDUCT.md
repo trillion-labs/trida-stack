@@ -60,11 +60,15 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement at
-[conduct@trillionlabs.co](mailto:conduct@trillionlabs.co).
+[admin@trillionlabs.co](mailto:admin@trillionlabs.co).
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the
 reporter of any incident.
+
+If your report concerns a maintainer, send it anyway. A maintainer who is the
+subject of a report takes no part in handling it, and that recusal is written into
+[`GOVERNANCE.md`](GOVERNANCE.md) rather than left to goodwill.
 
 ## Enforcement Guidelines
 

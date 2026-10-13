@@ -18,7 +18,7 @@ everyone equally, maintainers included.
 | Reviewer | any maintainer, or a contributor invited to a specific review | reviews PRs, approves or requests changes |
 | Maintainer | the people listed below | merges PRs, cuts releases, owns the protected paths |
 | Security contact | [security@trillionlabs.co](mailto:security@trillionlabs.co) | receives private vulnerability reports ([SECURITY.md](SECURITY.md)) |
-| Conduct contact | [conduct@trillionlabs.co](mailto:conduct@trillionlabs.co) | receives conduct reports ([CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)) |
+| Conduct contact | [admin@trillionlabs.co](mailto:admin@trillionlabs.co) | receives conduct reports ([CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)) |
 
 A role is a set of responsibilities, not a rank. The same person usually holds
 several.
@@ -144,7 +144,7 @@ PR themselves.
 
 The [Code of Conduct](CODE_OF_CONDUCT.md) applies in every project space, including
 pull requests, issues, discussions and any chat channel we open. Reports go to
-[conduct@trillionlabs.co](mailto:conduct@trillionlabs.co), not to a public thread.
+[admin@trillionlabs.co](mailto:admin@trillionlabs.co), not to a public thread.
 A maintainer who is the subject of a report recuses themselves from handling it.
 
 ---
