@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The four community duty roles are assigned across all three maintainers, each
+  with a backup who is not the person holding it. Moderator and security contact
+  are deliberately different people: of the four, that is the pair whose overlap
+  carries the sharpest conflict, since a report about the security contact would
+  otherwise be received by its subject. This closes launch-hold condition H3 and
+  makes the conduct recusal in `GOVERNANCE.md` executable -- whoever a report is
+  about, someone is left to handle it.
+
 - `docs/community/README.md`: the pre-launch checklist names the three participant
   types and where each one's question is meant to end up, which was the last item on
   it that nobody could close by writing something down. Its metrics line also said
