@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `docs/community/README.md`: the pre-launch checklist names the three participant
+  types and where each one's question is meant to end up, which was the last item on
+  it that nobody could close by writing something down. Its metrics line also said
+  the numbers are not kept in this repository, which stopped being true when the
+  weekly snapshots landed.
+
 - Conduct reports go to `admin@trillionlabs.co` (was `conduct@`). Both reporting
   addresses are role aliases rather than an individual, so neither depends on one
   person reading their mail. `CODE_OF_CONDUCT.md` now also states that a report about
