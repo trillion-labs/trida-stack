@@ -42,6 +42,11 @@ maybe_limit() {                      # $1 = raw data filename -> echoes the inpu
 
 [ -x "$FC_PY" ] || { echo "FunctionChat venv missing; run benchmark/functionchat/register_functionchat.sh"; exit 1; }
 
+# FunctionChat caches responses AND judge results per served-model name under $FCBENCH_DIR/output/$SANITIZED and
+# resumes from them. Every checkpoint is served under the same name, so a stale cache mixed earlier models'
+# grades into new runs (it only graded the items past the cached count). Start every run clean.
+rm -rf "$FCBENCH_DIR/output/$SANITIZED"
+
 source "$REPO/benchmark/serving/pool.sh"
 launch_pool                          # exports REMOTE_OPENAI_BASE_URL
 trap cleanup_pool EXIT

@@ -18,6 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the release procedure, and how maintainers join or step down. States plainly that
   `require_code_owner_review` is not yet enabled, so CODEOWNERS is advisory today.
 
+### Fixed
+
+- BFCL handler (`benchmark/bfcl_v4/trida_handler.py`): every prompt silently fell
+  back to the QwenFC JSON format. The handler imported `inference.bd_generate`, which
+  is not in this repo, from a placeholder path. It now loads the served checkpoint's
+  own chat template. It also stops adding a second `<think>` prefill and types XML
+  tool-call values per test language (Python literals for Python; strings for
+  Java/JavaScript, which BFCL checks as strings).
+- FunctionChat runner: it resumed from a per-model-name response and grade cache, so
+  new checkpoints were partly graded with earlier models' results. Each run now starts
+  clean.
+
 ## [0.1.2] — 2026-10-13
 
 A security dependency bump, and the supply-chain plumbing that v0.1.1 was cut thirty
