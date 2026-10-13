@@ -44,7 +44,7 @@ jobs:
           set -uo pipefail
           failed=0
           grep -q "security@trillionlabs.co" SECURITY.md || { echo "SECURITY.md: no reporting address"; failed=1; }
-          grep -q "conduct@trillionlabs.co" CODE_OF_CONDUCT.md || { echo "CODE_OF_CONDUCT.md: no reporting address"; failed=1; }
+          grep -q "admin@trillionlabs.co" CODE_OF_CONDUCT.md || { echo "CODE_OF_CONDUCT.md: no reporting address"; failed=1; }
           grep -q "SECURITY.md" README.md || { echo "README.md: no path to SECURITY.md"; failed=1; }
           grep -q "CONTRIBUTING.md" README.md || { echo "README.md: no path to CONTRIBUTING.md"; failed=1; }
           exit "$failed"

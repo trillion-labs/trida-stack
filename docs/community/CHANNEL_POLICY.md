@@ -73,7 +73,7 @@ PRIVATE
 운영자는 사안과 반복성에 따라 **안내 → 경고 → 콘텐츠 제한 → 일시 제한 → 영구 차단**을
 적용합니다. 등급별 기준은 [MODERATOR_RUNBOOK.md](MODERATOR_RUNBOOK.md)에 있습니다.
 
-- 행동강령 신고: [`conduct@trillionlabs.co`](mailto:conduct@trillionlabs.co)
+- 행동강령 신고: [`admin@trillionlabs.co`](mailto:admin@trillionlabs.co)
 - 보안 취약점: [`security@trillionlabs.co`](mailto:security@trillionlabs.co)
 - 이의제기: 조치 통지로부터 14일 이내, 같은 주소로
 
