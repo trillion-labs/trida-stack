@@ -38,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `inference/mlx/`: on-device (Apple Silicon, MLX) serving of Trida2.0-4B with lossless
+  self-speculative decoding (`bd_bidir_shift` b7/g4 semantics), an OpenAI-compatible server with
+  tool calls and a prompt cache, a minimal agent loop, MLX quantization, and offline tests.
+- `inference/mlx/`: image input for vision-language checkpoints (Trida-2.0-4B-1006): Qwen3.5 vision
+  encoder + projector, HF-identical preprocessing, multimodal RoPE, image-aware prompt cache,
+  OpenAI `image_url` parts in the server.
 - `metrics/` and `docs/metrics/reviews/` — the response metrics are now collected in
   the repository on a weekly snapshot, with a written review per period recording what
   was measured, what it showed and what was decided. The external series is `no_data`
