@@ -18,8 +18,8 @@ def build_parser():
                         "--resume). Needs GPU headroom for the gather. Without it, checkpoints are HF "
                         "weights only -> warm-restart via --model_id <ckpt> --start_step N.")
     p.add_argument("--trust_remote_code", action="store_true")
-    p.add_argument("--dataset", required=True,
-                   help="HF Hub dataset id or local dir of *.jsonl chat records "
+    p.add_argument("--dataset", default="",
+                   help="(required unless --jev_only) HF Hub dataset id or local dir of *.jsonl chat records "
                         "(each line: {\"messages\": [...], \"tools\": [...]})")
     p.add_argument("--bd_size", type=int, default=32)
     p.add_argument("--max_length", type=int, default=16384)
@@ -91,6 +91,25 @@ def build_parser():
                         "with x0-causal (ar_loss_weight>0) + linear_block_mode=causal the model is "
                         "globally causal (vLLM-servable). Default off = original BD behavior.")
     p.add_argument("--max_segments", type=int, default=0, help="max segments per packed row (0=unlimited)")
+    p.add_argument("--jev_data", default="",
+                   help="comma-separated kev-format JSONL files/dirs: adds Jev decision training (train/jev.py) — a "
+                        "pointer head on the clean causal stream, trained jointly with the SFT objective")
+    p.add_argument("--jev_only", action="store_true",
+                   help="train only the Jev decision objective (no SFT data, no diffusion loss): each optimizer "
+                        "step is --jev_micro_per_step Jev micro-batches")
+    p.add_argument("--jev_loss_weight", type=float, default=1.0,
+                   help="weight of the Jev loss relative to the SFT loss (like --ar_loss_weight)")
+    p.add_argument("--jev_micro_per_step", type=int, default=1,
+                   help="Jev micro-batches per optimizer step, after the --grad_accum SFT micro-batches")
+    p.add_argument("--jev_max_tokens", type=int, default=32768, help="row tokens per Jev micro-batch")
+    p.add_argument("--jev_max_variant_tokens", type=int, default=0,
+                   help="a longer record runs as its own micro-batch up to this many tokens (0 = --jev_max_tokens)")
+    p.add_argument("--jev_max_state", type=int, default=7552, help="Jev state tokens kept (kev's joint-stage limit)")
+    p.add_argument("--jev_p_none_pair", type=float, default=0.25, help="share of records also trained as none-pairs")
+    p.add_argument("--jev_head_dim", type=int, default=256)
+    p.add_argument("--jev_head_lr_scale", type=float, default=1.0,
+                   help="the Jev pointer head's LR as a multiple of --lr (it trains from scratch; kev's full fine-tune "
+                        "uses head 1e-4 over backbone 2e-6 = 50)")
     p.add_argument("--projector_lr_scale", type=float, default=0.1,
                    help="VL checkpoints: the vision projector's LR as a multiple of --lr (the vision "
                         "encoder is frozen)")
@@ -106,6 +125,10 @@ def build_parser():
     p.add_argument("--warmup", type=int, default=50)
     p.add_argument("--lr_min_ratio", type=float, default=0.1)
     p.add_argument("--weight_decay", type=float, default=0.0)
+    p.add_argument("--adam_beta2", type=float, default=0.95)
+    p.add_argument("--fp32_master", action="store_true",
+                   help="keep the trainable weights and AdamW state in fp32 (FSDP still gathers + computes in bf16); "
+                        "needed at small LRs, where a bf16 weight can't represent the update. Checkpoints stay bf16")
     p.add_argument("--grad_clip", type=float, default=1.0)
     p.add_argument("--num_workers", type=int, default=2)
     p.add_argument("--seed", type=int, default=42)

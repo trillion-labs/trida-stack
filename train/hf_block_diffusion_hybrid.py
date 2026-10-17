@@ -40,6 +40,7 @@ path in ``causal`` linear mode (``forward_packed_hybrid``), and pure-AR (``--ar_
 and bidirectional/merged-views packing raise ``NotImplementedError``.
 """
 
+import contextlib
 import functools
 import os
 import sys
@@ -408,6 +409,14 @@ def _flare_block_diff_mask_mod(b, h, q_idx, kv_idx, *, block_size, n, causal_x0,
     return mask | (q_idx == kv_idx)   # self-diagonal so no row softmaxes over an empty key set
 
 
+def _kernel_switch(two_stream, plain, plain_getter):
+    """Per-call choice between a linear layer's two-stream kernel and a plain causal one."""
+    @torch._dynamo.disable
+    def fn(*args, **kwargs):
+        return (plain if plain_getter() else two_stream)(*args, **kwargs)
+    return fn
+
+
 def _torch_causal_conv1d_varlen(x, weight, bias=None, activation=None, seq_idx=None, **_):
     """Torch ``causal_conv1d_fn`` replacement that honors ``seq_idx`` (document reset). ``x``:
     ``[B, dim, T]``; ``weight``: ``[dim, width]``; ``seq_idx``: ``[B, T]`` int or ``None``. With
@@ -537,12 +546,22 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
         linear_block_mode: str = "causal",
         attn_impl: str = "flex_attention",
         require_kernels: bool | None = None,
+        jev_head_dim: int = 0,
         **kwargs,
     ):
         assert linear_block_mode in ("causal", "bidirectional"), linear_block_mode
         # Reuse the dense setup verbatim (model load, <|mask|> add + untied resize, flex-impl
         # injection, optional per-layer compile). Nothing dense-specific is changed.
         super().__init__(*args, **kwargs)
+        # Jev decision training (train/jev.py): a pointer head over the clean causal stream, trained
+        # from scratch; it lives in the root FSDP unit, in the backbone's dtype (FSDP2 shards a unit's
+        # params at one dtype).
+        self._jev_plain = False
+        self.jev_head = None
+        if jev_head_dim:
+            from train.jev import PointerHead
+            self.jev_head = PointerHead(self.tm.config.hidden_size, dp=jev_head_dim).to(
+                self.tm.embed_tokens.weight.dtype)
 
         self.linear_block_mode = linear_block_mode
         self.attn_impl = attn_impl
@@ -654,6 +673,7 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
                 continue
             la = layer.linear_attn
             la._orig_chunk = la.chunk_gated_delta_rule
+            orig_conv = la.causal_conv1d_fn
             # torch._dynamo.disable: when the GDN layer is torch.compiled (compile_glue), dynamo
             # graph-breaks cleanly around the kernel wrappers instead of tracing into the vendored
             # kernels' Python glue (which specialises on the data-dependent `cu_seqlens`). No-op
@@ -663,6 +683,13 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
                 causal_mode_clean=cmc, causal_mode_noisy=cmn, nviews_getter=nv))
             la.causal_conv1d_fn = torch._dynamo.disable(_make_two_stream_conv(
                 self.bd_size, cu_getter=lambda s=self: s._flare_cu, nviews_getter=nv))
+            # Jev rows are ordinary causal text: route them to the plain kernels (doc-isolated via
+            # cu_seqlens / seq_idx, as the packed AR path) instead of the [x0 ; xt] kernels above.
+            plain = lambda s=self: s._jev_plain
+            la.chunk_gated_delta_rule = _kernel_switch(
+                la.chunk_gated_delta_rule, _make_varlen_gdr(la._orig_chunk, fused=_is_fused_gdr(la)), plain)
+            la.causal_conv1d_fn = _kernel_switch(
+                la.causal_conv1d_fn, orig_conv if orig_conv is not None else _torch_causal_conv1d_varlen, plain)
             n += 1
         # Fail loud: rebinding zero layers would silently fall back to the standard causal kernel.
         assert n > 0, (
@@ -806,7 +833,7 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
     # pure-AR (--ar_only) packed forward — document-isolated causal, both layer types
     # ------------------------------------------------------------------
     def _run_decoder_stack_ar(self, hidden, position_ids, pos_emb, full_mask, valid2d,
-                              cu=None, seq_idx=None, gc_active=False):
+                              cu=None, seq_idx=None, gc_active=False, plain_linear=False):
         """Plain-causal hybrid stack over ONE ``[B, T]`` region (the pure-AR layout — no noised
         views, no A/B region split, no diffusion mask). Full layers consume ``full_mask`` (a flex
         ``BlockMask`` or a dense additive mask, block-diagonal causal); linear layers get the 2-D
@@ -832,6 +859,12 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
         offload = (torch.autograd.graph.save_on_cpu(pin_memory=True)
                    if (getattr(self, "activation_offload", False) and gc_active)
                    else contextlib.nullcontext())
+        if plain_linear:   # selected inside each layer call, so checkpoint recompute selects it too
+            run_linear_two_stream = run_linear
+
+            def run_linear(layer, h):
+                with self._plain_linear_kernels():
+                    return run_linear_two_stream(layer, h)
         with offload:
             for layer in self.tm.layers:
                 fn = run_full if layer.layer_type == "full_attention" else run_linear
@@ -840,6 +873,42 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
                 else:
                     hidden = fn(layer, hidden)
         return hidden
+
+    @contextlib.contextmanager
+    def _plain_linear_kernels(self):
+        prev, self._jev_plain = self._jev_plain, True
+        try:
+            yield
+        finally:
+            self._jev_plain = prev
+
+    def forward_jev(self, jev):
+        """Jev decision loss on a packed batch from ``train.jev.pack_jev``: every question row (state +
+        question + options + <decide>) is one document of a single causal row [1, T] — full-attention
+        layers get the block-diagonal causal mask, linear layers the plain kernels with a state / conv
+        reset at each row (never the two-stream ones). The pointer head scores each </opt> state
+        against its row's <decide> state; the loss is kev's (``train.jev.jev_loss``)."""
+        from train.jev import jev_loss
+        if self.jev_head is None:
+            raise RuntimeError("jev batch given but the model was built without a Jev head (jev_head_dim=0)")
+        ids, segid = jev["input_ids"], jev["seg_id"]                  # [1, T]; every token belongs to a row
+        T = ids.shape[1]
+        full_mask, impl = self._ar_doc_mask(segid, dtype=self.compute_dtype)
+        cu, seqidx = _cu_seqlens_from_seg(segid), _seq_idx_from_seg(segid)
+        hidden = self.tm.embed_tokens(ids)
+        if self.is_vl:   # run the vision tower too (exact no-op): in joint training the Jev micro-step is the one
+            hidden = self._touch_vision_tower(hidden)   # that syncs grads, so the projector must reduce-scatter in it
+        position_ids = _positions_from_seg(segid)                     # positions restart per row (kev's rows)
+        pos_emb = self.tm.rotary_emb(hidden, position_ids=position_ids)
+        gc = self.grad_checkpoint and self.training and T >= self.gc_min_len
+        self._set_attn_impl(impl)
+        hidden = self._run_decoder_stack_ar(hidden, position_ids, pos_emb, full_mask, torch.ones_like(ids).bool(),
+                                            cu=cu, seq_idx=seqidx, gc_active=gc, plain_linear=True)
+        h = self.tm.norm(hidden)[0]
+        z = self.jev_head(h[jev["decide"]], h[jev["opts"]], jev["owner"])
+        loss, acc = jev_loss(z, jev)
+        return loss, {"jev_loss": loss.detach(), "jev_acc": acc, "jev_questions": len(jev["questions"]),
+                      "jev_tokens": T}
 
     # ================= FLARE two-stream forward ([x0 ; xt], single + multi-turn) =================
     def _make_flare_views(self, input_ids, labels, answer_pos, eps: float = 1e-3):
@@ -1084,7 +1153,7 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
         device = input_ids.device
         B, L = input_ids.shape
         segid = self.ar_segid(attention_mask, seg_id)                  # [B, L] int, -1 = pad
-        full_mask, impl = self._ar_doc_mask(segid, dtype=self.tm.embed_tokens.weight.dtype)
+        full_mask, impl = self._ar_doc_mask(segid, dtype=self.compute_dtype)
         valid2d = attention_mask.bool()
         cu = _cu_seqlens_from_seg(segid)                                # gated-delta state reset
         seqidx = _seq_idx_from_seg(segid)                               # causal-conv window reset
@@ -1213,7 +1282,9 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
     # ------------------------------------------------------------------
     def forward(self, input_ids, labels, attention_mask, seg_id=None, resp_pos=None,
                 resp_block=None, turn_id=None, pixel_values=None, image_grid_thw=None,
-                mrope_pos=None, return_logits: bool = False):
+                mrope_pos=None, jev=None, return_logits: bool = False):
+        if jev is not None:   # a Jev decision micro-batch (train/jev.py); routed through forward for FSDP's hooks
+            return self.forward_jev(jev)
         if pixel_values is not None and (self.ar_only or self.linear_block_mode != "bidirectional"):
             raise NotImplementedError("image inputs are supported only by the FLARE two-stream path "
                                       "(--pack --multiturn --linear_block_mode bidirectional)")
