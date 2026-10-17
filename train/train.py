@@ -39,10 +39,11 @@ from torch.utils.data import DataLoader
 from train.data.text_sft_data import (
     JsonlAgenticDataset,
     MultiTurnTextSftCollator,
-    PackedMultiTurnCollator,
+    PackedMultiTurnRowDataset,
     PackedRowDataset,
     PackedTextSftCollator,
     StreamPackedCollator,
+    StreamPackedMultiTurnCollator,
     TextSftCollator,
     download_jsonl_paths,
 )
@@ -195,22 +196,25 @@ def main():
         paths = download_jsonl_paths(repo_id=args.dataset)
     dataset = JsonlAgenticDataset(paths, rank=rank(), world=world_size(), seed=args.seed)
     if args.pack and args.multiturn:
-        # Packed MULTI-TURN (FLARE two-stream): bin-pack whole conversations (every assistant turn
-        # supervised), each block-aligned + doc-isolated via seg_id. Map-style: pull pack_examples
-        # raw convos per step, pack into <=max_length rows. Requires linear_block_mode=bidirectional.
+        # Packed MULTI-TURN (FLARE two-stream): the dataset bin-packs whole conversations (every
+        # assistant turn supervised), each block-aligned + doc-isolated via seg_id, and yields one
+        # <=max_length row at a time via buffered first-fit — a conversation that doesn't fit waits
+        # for the next row instead of being dropped. Each micro-batch is `micro_batch_size` rows.
+        # Requires linear_block_mode=bidirectional.
         assert args.linear_block_mode == "bidirectional", \
             "--pack --multiturn is the FLARE two-stream path; needs --linear_block_mode bidirectional"
-        collate = PackedMultiTurnCollator(
-            tokenizer, bd_size=args.bd_size, max_length=args.max_length,
+        dataset = PackedMultiTurnRowDataset(
+            dataset, tokenizer, bd_size=args.bd_size, max_length=args.max_length,
             max_response_length=args.max_response_length,
-            length_buckets=parse_int_list(args.length_buckets),
-            max_segments=args.max_segments, max_packed_rows=args.max_packed_rows,
-            keep_all_reasoning=args.keep_all_reasoning)
-        batch_size = args.pack_examples
+            keep_all_reasoning=args.keep_all_reasoning, max_segments=args.max_segments)
+        collate = StreamPackedMultiTurnCollator(
+            tokenizer, bd_size=args.bd_size, max_length=args.max_length,
+            length_buckets=parse_int_list(args.length_buckets))
+        batch_size = args.micro_batch_size
     elif args.pack:
         # Streaming first-fit packer with carry-over: the dataset yields one <=max_length row at a
         # time (overflow sample starts the next row; nothing dropped), so each micro-batch is exactly
-        # `micro_batch_size` packed rows. No pack_examples / max_packed_rows.
+        # `micro_batch_size` packed rows.
         dataset = PackedRowDataset(
             dataset, tokenizer, max_length=args.max_length,
             max_response_length=args.max_response_length,

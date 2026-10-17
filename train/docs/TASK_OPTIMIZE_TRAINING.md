@@ -82,7 +82,7 @@ Net for the production recipe: **≈1.5× from the sync removal alone**; packing
 New defaults in `train/tools/draftalign/train_2node.sbatch`: `TRIDA_BLOCK_CONV_CHECK=0`, `BUCKETS=32768`,
 `PACK_EXAMPLES=20`, `--compile_mlp` (`COMPILE_MLP=0` to disable). Caveat: `max_packed_rows=1` DROPS the
 conversations that do not fit the first row — with pack 20 that is more data skipped per step (a data-efficiency
-issue, not a speed one). Fix = carry leftovers to the next step in `PackedMultiTurnCollator` (round 2).
+issue, not a speed one). Fix = carry leftovers to the next step in `PackedMultiTurnCollator` (round 2). *(Done: `PackedMultiTurnRowDataset` replaced the collator; `--pack_examples` / `--max_packed_rows` were removed.)*
 
 ## Round 2 (not started): where the remaining 3× lives
 

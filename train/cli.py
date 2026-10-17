@@ -90,10 +90,7 @@ def build_parser():
                    help="make x_t within-block attention token-causal instead of bidirectional; "
                         "with x0-causal (ar_loss_weight>0) + linear_block_mode=causal the model is "
                         "globally causal (vLLM-servable). Default off = original BD behavior.")
-    p.add_argument("--pack_examples", type=int, default=16,
-                   help="raw samples pulled per packed step (DataLoader batch_size when --pack)")
     p.add_argument("--max_segments", type=int, default=0, help="max segments per packed row (0=unlimited)")
-    p.add_argument("--max_packed_rows", type=int, default=0, help="OOM-safety cap on rows/step (0=off)")
     p.add_argument("--max_steps", type=int, default=2000)
     p.add_argument("--start_step", type=int, default=0,
                    help="initial global_step (warm-start continuation): continues the cosine LR "

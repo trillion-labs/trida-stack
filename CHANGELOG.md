@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `--pack --multiturn` now packs conversations with buffered first-fit
+  (`PackedMultiTurnRowDataset`). A conversation that doesn't fit the current row
+  waits for a later one instead of being dropped; only conversations longer than
+  `--max_length` are skipped. `--micro_batch_size` is again the number of rows per
+  forward. **Removed:** `--pack_examples` and `--max_packed_rows`.
+
 - The metrics workflow opens a pull request instead of pushing to the default
   branch. Two reasons, and the second one is that the old version could not have
   worked: the ruleset on main requires a pull request and only an organization
