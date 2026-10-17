@@ -41,6 +41,7 @@ noncommercial code.
 | HF Transformers | model loading (≥ 4.57) | [huggingface/transformers](https://github.com/huggingface/transformers) | **Apache-2.0** |
 | HF Datasets | eval-data loading | [huggingface/datasets](https://github.com/huggingface/datasets) | **Apache-2.0** |
 | HF Accelerate | training | [huggingface/accelerate](https://github.com/huggingface/accelerate) | **Apache-2.0** |
+| Pillow | image loading for image+text training | [python-pillow/Pillow](https://github.com/python-pillow/Pillow) | **MIT-CMU (HPND)** |
 | SGLang | diffusion serving backend | [sgl-project/sglang](https://github.com/sgl-project/sglang) | **Apache-2.0** |
 | vLLM | optional AR serving backend | [vllm-project/vllm](https://github.com/vllm-project/vllm) | **Apache-2.0** |
 
