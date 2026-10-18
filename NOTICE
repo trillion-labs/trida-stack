@@ -18,6 +18,14 @@ IFEval — Instruction-Following Eval
            the eval_ifeval.py benchmark. See inference/NOTICE for the folder-local
            notice.
 
+kev — decision request format
+  Copyright 2026 Jared Palmer.
+  License: Apache License 2.0
+  Source:  https://github.com/jaredpalmer/kev
+  Derived: inference/decide_request.py — the request rendering and token-row
+           encoding follow kev's, so that requests are encoded exactly as decision
+           checkpoints are trained.
+
 Two-stream Gated-DeltaNet / ShortConv Triton kernels
   From HybridDiffusion (yuchen-zhu-zyc/HybridDiffusion @ 6ca547a), itself a fork of
   SGLang (Apache-2.0).

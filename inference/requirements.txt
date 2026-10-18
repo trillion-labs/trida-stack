@@ -10,3 +10,6 @@ absl-py
 immutabledict
 langdetect
 nltk        # needs the 'punkt' tokenizer: python -c "import nltk; nltk.download('punkt')"
+
+# serve_decide.py (decision server) runs inside a stock SGLang env instead:
+#   pip install "sglang>=0.5.22" fastapi uvicorn

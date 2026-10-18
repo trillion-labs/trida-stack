@@ -51,3 +51,27 @@ scheme needs its own config — copy one in `configs/` and pass `--config`.
 
 If all five pass, the eval harness (`eval.py`, `eval_ifeval.py`) will score it with
 no changes.
+
+## Decision checkpoints (`serve_decide.py`)
+
+The decision server has its own, smaller contract. It serves a checkpoint causally
+on stock SGLang ≥ 0.5.22, so no diffusion architecture or mask token is needed:
+
+1. **An architecture stock SGLang serves** (e.g. `Qwen3_5ForConditionalGeneration`)
+   and a chat template, in Hugging Face layout as above. A vision checkpoint also
+   ships `preprocessor_config.json`; without it, requests with an image are refused.
+2. **`jev_head.pt`** — the pointer head, saved with `torch.save`:
+
+   ```python
+   {"head": {"q.weight": [256, d], "q.bias": [256], "k.weight": [256, d], "k.bias": [256]},
+    "head_dim": 256}          # d = the backbone's hidden size
+   ```
+
+   An option's logit is `<k(h_option), q(h_decide)> / sqrt(head_dim)`, where the `h`
+   are last-layer hidden states at the option's `</opt>` and at `<decide>` in the
+   request row (`decide_request.py`). The training format's control tokens reuse the
+   tokenizer's `<|fim_prefix|>` (state), `<|fim_middle|>` (question), `<|box_start|>` /
+   `<|box_end|>` (option) and `<|fim_suffix|>` (decide).
+3. **`temperature.json`** (optional) — serving temperatures, `{"text": T, "image": T}`:
+   option logits are divided by T before the softmax. Fit T on held-out data the
+   checkpoint was not trained on; without the file, T = 1.

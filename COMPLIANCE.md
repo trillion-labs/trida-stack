@@ -11,8 +11,9 @@ model-card license.
 | Component | Path | Upstream | License |
 |---|---|---|---|
 | IFEval scorer | `inference/ifeval_lib/` | [google-research · instruction_following_eval](https://github.com/google-research/google-research/tree/master/instruction_following_eval) | **Apache-2.0** |
+| kev request format (derived) | `inference/decide_request.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
 
-This is the **only** third-party source code redistributed in the repository (see
+These are the **only** third-party source code redistributed in the repository (see
 [`NOTICE`](NOTICE)). Everything else below is installed or fetched separately.
 
 ## 1b. Noncommercial upstream code (fetched via recipe, NOT bundled)
@@ -41,7 +42,8 @@ noncommercial code.
 | HF Transformers | model loading (≥ 4.57) | [huggingface/transformers](https://github.com/huggingface/transformers) | **Apache-2.0** |
 | HF Datasets | eval-data loading | [huggingface/datasets](https://github.com/huggingface/datasets) | **Apache-2.0** |
 | HF Accelerate | training | [huggingface/accelerate](https://github.com/huggingface/accelerate) | **Apache-2.0** |
-| SGLang | diffusion serving backend | [sgl-project/sglang](https://github.com/sgl-project/sglang) | **Apache-2.0** |
+| SGLang | diffusion serving backend; stock ≥ 0.5.22 for the decision server (`inference/serve_decide.py`, no patch) | [sgl-project/sglang](https://github.com/sgl-project/sglang) | **Apache-2.0** |
+| FastAPI / Uvicorn | decision server HTTP layer (optional) | [fastapi/fastapi](https://github.com/fastapi/fastapi), [encode/uvicorn](https://github.com/encode/uvicorn) | **MIT** / **BSD-3-Clause** |
 | vLLM | optional AR serving backend | [vllm-project/vllm](https://github.com/vllm-project/vllm) | **Apache-2.0** |
 
 ## 3. Benchmark harnesses (invoked from `benchmark/`, not bundled)
