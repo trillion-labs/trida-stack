@@ -11,9 +11,12 @@ model-card license.
 | Component | Path | Upstream | License |
 |---|---|---|---|
 | IFEval scorer | `inference/ifeval_lib/` | [google-research · instruction_following_eval](https://github.com/google-research/google-research/tree/master/instruction_following_eval) | **Apache-2.0** |
+| Jev request encoding (vendored, adapted) | `inference/jev.py`, `inference/jev_head.py`, `scripts/export_kev_checkpoint.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
 
-This is the **only** third-party source code redistributed in the repository (see
-[`NOTICE`](NOTICE)). Everything else below is installed or fetched separately.
+These are the only third-party source code redistributed in the repository (see
+[`NOTICE`](NOTICE)); `inference/jev.py` and `inference/jev_head.py` vendor kev's request
+mapping, encoding and pointer head, and `scripts/export_kev_checkpoint.py` writes kev's
+checkpoint format. Everything else below is installed or fetched separately.
 
 ## 1b. Noncommercial upstream code (fetched via recipe, NOT bundled)
 

@@ -116,12 +116,16 @@ and a served model, but there are **CPU-safe** tests you can (and CI does) run w
 no GPU:
 
 ```bash
-pytest -q inference/test_smoke.py \
+pytest -q inference/test_smoke.py inference/test_jev.py \
           inference/vllm/vllm_native_diffusion/test_two_stream_cpu.py
 ```
 
 - `inference/test_smoke.py` — offline wiring checks (mode registry, command
   construction, config keys); stdlib only.
+- `inference/test_jev.py` — the Jev encoder imports without torch, and the pointer
+  head on hand-worked values; needs `torch` (CPU is fine). The token-level check,
+  `inference/test_jev_golden.py`, needs the gated Trida2.1-4B tokenizer in the local
+  cache and is run by hand (see its docstring).
 - `inference/vllm/vllm_native_diffusion/test_two_stream_cpu.py` — pins the
   two-stream GDN snapshot/restore decode algorithm in pure PyTorch on tiny
   tensors; needs `torch` (CPU is fine), no GPU or vLLM.

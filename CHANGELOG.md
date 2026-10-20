@@ -38,6 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `inference/jev.py` — the Jev request encoding a Trida checkpoint's typed-decision
+  head reads (`materialize`, `encode_rows`, including `image_tokens`), and
+  `inference/jev_head.py`, the `PointerHead` that `jev_head.pt` loads into. The
+  encoder is the training stack's, copied unchanged and kept torch-free, so a
+  serving process or demo builds the same rows as the training encoder.
+  `inference/test_jev_golden.py` checks the rows against golden fixtures from the
+  training encoder (provenance in `inference/fixtures/jev_golden/PROVENANCE.md`).
+  Derived from kev (Apache-2.0); attributed in `NOTICE` and `COMPLIANCE.md` §1.
+- `scripts/export_kev_checkpoint.py` — exports a checkpoint to kev's layout. The
+  Trida2.1-4B model card points here for scoring and serving with kev's tools.
 - `metrics/` and `docs/metrics/reviews/` — the response metrics are now collected in
   the repository on a weekly snapshot, with a written review per period recording what
   was measured, what it showed and what was decided. The external series is `no_data`

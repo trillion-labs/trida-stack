@@ -18,6 +18,15 @@ IFEval — Instruction-Following Eval
            the eval_ifeval.py benchmark. See inference/NOTICE for the folder-local
            notice.
 
+Kev — typed-decision (Jev / TypeSafe System One) request encoding
+  Copyright Jared Palmer and the kev contributors.
+  License: Apache License 2.0
+  Source:  https://github.com/jaredpalmer/kev
+  Derived: inference/jev.py vendors kev's request mapping and encoding (kev/api.py,
+           kev/model.py); inference/jev_head.py vendors kev's pointer head
+           (kev/model.py); scripts/export_kev_checkpoint.py writes kev's checkpoint
+           format (kev/checkpoint.py). Modified to fit this stack.
+
 Two-stream Gated-DeltaNet / ShortConv Triton kernels
   From HybridDiffusion (yuchen-zhu-zyc/HybridDiffusion @ 6ca547a), itself a fork of
   SGLang (Apache-2.0).
@@ -31,7 +40,7 @@ Two-stream Gated-DeltaNet / ShortConv Triton kernels
   Note:    inference/sglang/ vendors nothing — it builds the backend from upstream
            via a patch; see inference/sglang/NOTICE for that recipe's terms.
 
-The two components above are the third-party source code redistributed in this
+The components above are the third-party source code redistributed in this
 repository. They do not share a single license: see COMPLIANCE.md section 1.
 
 ================================================================================
