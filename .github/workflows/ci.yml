@@ -48,5 +48,6 @@ jobs:
         run: |
           pytest -q \
             inference/test_smoke.py \
+            inference/test_jev.py \
             inference/vllm/vllm_native_diffusion/test_two_stream_cpu.py \
             tools/test_chat.py
