@@ -3,8 +3,10 @@
 """jev.encode_rows against golden token rows from the training stack's encoder at commit 951c21c
 (fixtures/jev_golden/PROVENANCE.md). Needs transformers 5.x (the tokenizer config at the pinned revision does not load
 under 4.57.6; checked with 5.12.1) and the pinned tokenizer in the local Hugging Face cache. It never downloads (no
-network in tests), so it is not in CI. Fetch the tokenizer once (the repo is gated: accept its terms and log in):
+network in tests), so it is not in CI. The model repo is gated: accept its terms on Hugging Face, log in, and fetch
+the tokenizer at the pinned revision once:
 
+    hf auth login
     hf download trillionlabs/Trida2.1-4B --revision a64a0737a79921991a769a99b06872b883f455d3 --include "tokenizer*"
 
 then run: pytest -q inference/test_jev_golden.py

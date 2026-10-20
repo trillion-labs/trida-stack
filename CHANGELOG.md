@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serving process or demo builds the same rows as the training encoder.
   `inference/test_jev_golden.py` checks the rows against golden fixtures from the
   training encoder (provenance in `inference/fixtures/jev_golden/PROVENANCE.md`).
-  Derived from kev (Apache-2.0).
+  Derived from kev (Apache-2.0); attributed in `NOTICE` and `COMPLIANCE.md` §1.
 - `scripts/export_kev_checkpoint.py` — exports a checkpoint to kev's layout. The
   Trida2.1-4B model card points here for scoring and serving with kev's tools.
 - `metrics/` and `docs/metrics/reviews/` — the response metrics are now collected in
