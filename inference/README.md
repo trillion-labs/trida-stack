@@ -157,6 +157,50 @@ From the *same* requests you get **accuracy**, **tok/s** (aggregate at the clien
 
 Defaults: temp 1.0 / top_p 0.95 / top_k 50, no presence penalty, thinking on, `--max-tokens 8192` — the canonical self-spec setting, identical to the SGLang self-spec config, so a number from `eval.py` means the same thing on either backend. Both backends honor these fields in self-spec (vLLM via its stock rejection sampler, `TRIDA_SS_SAMPLE=0` for exact greedy). `gsm8k`/`mmlu_pro` are self-contained (extraction-based); **ifeval** uses the Google Research IFEval scorer vendored in `ifeval_lib/` (Apache-2.0). `chat.py`/`eval.py` pick the served model id up from `/v1/models`, so they work unchanged against either backend.
 
+## Decisions
+
+`serve_decide.py` serves a **decision checkpoint**: one that carries a pointer head (`jev_head.pt`, see [`MODEL_CONTRACT.md`](MODEL_CONTRACT.md#decision-checkpoints-serve_decidepy)). It answers typed questions about a state with calibrated probabilities. It can also reason first and then decide, and it chats with tool calls. All three run from one in-process engine and one copy of the weights, on **stock SGLang ≥ 0.5.22** with causal decoding. No fork or patch is needed.
+
+```bash
+pip install "sglang>=0.5.22" fastapi uvicorn             # a stock SGLang env, separate from the diffusion backend's
+python serve.py /path/to/decision-checkpoint --mode decide --port 30001
+#   = python serve_decide.py /path/to/decision-checkpoint --port 30001
+#   serve.py runs it under $DECIDE_PYTHON (default: the current python); $TRIDA_DECIDE_MODEL can name the checkpoint
+```
+
+```bash
+curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
+  "request": {
+    "state": {"ticket": "Order #W1 arrived broken. I want my money back.", "order": {"status": "delivered", "total": 42.0}},
+    "questions": {
+      "intent":  {"type": "choice", "instructions": "What does the customer want?",
+                  "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
+      "urgent":  {"type": "noul", "instructions": "Should this jump the queue?"},
+      "anger":   {"type": "score", "instructions": "How upset is the customer?", "criteria": ["calm", "annoyed", "angry"]}}},
+  "reasoning": false}'
+# -> {"answers": {"intent": {"type": "choice", "choice": "refund", "confidence": 0.9794,
+#                             "probabilities": {"refund": 0.9863, "exchange": 0.011, "info": 0.0027}},
+#                 "urgent": {"type": "noul", "noul": 0.9256},
+#                 "anger":  {"type": "score", "score": 1.6872, "legend": ["calm", "annoyed", "angry"], ...}}, ...}
+```
+
+- **Question types:**
+  - `noul`: yes/no; the answer is P(yes).
+  - `choice`: `{key: description}`.
+  - `score`: a list of levels, lowest first; the answer is the expected level.
+- **`"reasoning": true`:** the model first writes its reasoning (returned as `reasoning`), then decides with that reasoning added to the state.
+- **Images:** add an `image` (path, base64 or data URL) to the request.
+- **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
+  - It takes `tools`; tool calls come back as `tool_calls`.
+  - The thinking comes back as `reasoning_content` (streamed as `reasoning_content` deltas before the content).
+  - It honours `max_tokens`, `temperature`, `top_p`, `top_k`, `presence_penalty` and `chat_template_kwargs.enable_thinking`.
+  - Responses carry `usage`, and `finish_reason` is `"length"` when `max_tokens` cut the turn.
+- **`GET /v1/models`:** the served model id, so `chat.py` and `eval.py` work against this server unchanged.
+- **Concurrency:** decisions and chat share the engine and batch together. A decision sent while a long chat is generating returns in tens of milliseconds.
+- **From Python:** `DecideEngine(ckpt).decide(...)` / `.chat(...)` / `.chat_stream(...)`, or the `async` versions (`adecide`, `achat`, ...) on `eng.loop` ([`decide_engine.py`](decide_engine.py)).
+
+How it fits a stock engine: a request row is causal, so an option's hidden state is the last hidden state of the row cut off at that option. Each question with K options therefore becomes K+1 prefix prompts in one batched call with `return_hidden_states="last"`, and SGLang's prefix cache shares the work. The head then runs on those vectors. Checked against a transformers implementation of the same head on 200 held-out decision records, the outputs matched to within 0.1% mean probability difference.
+
 ## Backends
 
 Two ways to run the decode kernels behind `serve.py`'s API — pick one.
@@ -204,6 +248,7 @@ The **vLLM** backend likewise needs one file fetched: `block_causal_readout.py`,
 
 ```bash
 python test_smoke.py           # no GPU: checks command construction + configs
+pytest -q test_decide_cpu.py   # no GPU: decision request encoding, prefix prompts, head, tool-call parsing
 ```
 
 ## Roadmap / contributing

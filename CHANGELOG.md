@@ -38,6 +38,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `inference/serve_decide.py`, `decide_engine.py`, `decide_request.py` — a decision
+  server for checkpoints that carry a pointer head (`jev_head.pt`): typed decisions
+  (`/v1/decide`: yes/no, choice, score, with probabilities), reason-then-decide (the
+  model writes its reasoning, then decides with it in the state) and OpenAI-compatible
+  chat with tool calls, all from one in-process engine and one copy of the weights. It
+  runs on stock SGLang ≥ 0.5.22 (Apache-2.0) with causal decoding; the two-stream
+  decode modes stay with `serve.py`. Each question becomes K+1 prefix prompts whose
+  last hidden states feed the head, so the prefix cache shares the work. The request
+  format follows kev's (Apache-2.0, credited in `NOTICE`). CPU tests in
+  `test_decide_cpu.py`. `serve.py --mode decide` launches it (under `$DECIDE_PYTHON`).
+  Chat streams (server-sent events, reasoning before content), reports `usage` and
+  serves `/v1/models`, so `chat.py` and `eval.py` run against it unchanged. The HTTP
+  server runs on the engine's event loop, so concurrent decisions and chat batch
+  together.
+
 - `metrics/` and `docs/metrics/reviews/` — the response metrics are now collected in
   the repository on a weekly snapshot, with a written review per period recording what
   was measured, what it showed and what was decided. The external series is `no_data`
