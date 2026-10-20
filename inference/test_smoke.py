@@ -56,6 +56,13 @@ def test_reasoning_parser_optional():
     assert "--reasoning-parser" in cmd and "qwen3" in cmd
 
 
+def test_decide_mode_launches_serve_decide():
+    cmd = serve.build_command(Args(mode="decide", model="/ckpt", port=30001))
+    assert cmd[1].endswith("serve_decide.py") and cmd[2] == "/ckpt"
+    assert "sglang.launch_server" not in cmd and "--dllm-algorithm" not in cmd
+    assert "30001" in cmd
+
+
 def test_configs_have_required_keys():
     for y in CONFIGS.glob("*.yaml"):
         text = y.read_text()

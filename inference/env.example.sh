@@ -16,6 +16,10 @@ export TRIDA_MODEL="${TRIDA_MODEL:-trillionlabs/Trida2.0-4B}"
 # (defaults to the current `python` if unset)
 export SGLANG_PYTHON="${SGLANG_PYTHON:-$(command -v python)}"
 
+# serve.py --mode decide (decision checkpoints, serve_decide.py) runs on stock SGLang >= 0.5.22 instead:
+# export DECIDE_PYTHON=/path/to/stock-sglang-venv/bin/python
+# export TRIDA_DECIDE_MODEL=/path/to/decision-checkpoint
+
 # The backend venv's bin must be on PATH — the JIT kernel build needs `ninja`
 # (and other build tools) at server startup.
 export PATH="$(dirname "$SGLANG_PYTHON"):$PATH"

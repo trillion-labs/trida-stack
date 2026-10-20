@@ -162,8 +162,10 @@ Defaults: temp 1.0 / top_p 0.95 / top_k 50, no presence penalty, thinking on, `-
 `serve_decide.py` serves a **decision checkpoint**: one that carries a pointer head (`jev_head.pt`, see [`MODEL_CONTRACT.md`](MODEL_CONTRACT.md#decision-checkpoints-serve_decidepy)). It answers typed questions about a state with calibrated probabilities. It can also reason first and then decide, and it chats with tool calls. All three run from one in-process engine and one copy of the weights, on **stock SGLang ≥ 0.5.22** with causal decoding. No fork or patch is needed.
 
 ```bash
-pip install "sglang>=0.5.22" fastapi uvicorn
-python serve_decide.py /path/to/decision-checkpoint --port 30001
+pip install "sglang>=0.5.22" fastapi uvicorn             # a stock SGLang env, separate from the diffusion backend's
+python serve.py /path/to/decision-checkpoint --mode decide --port 30001
+#   = python serve_decide.py /path/to/decision-checkpoint --port 30001
+#   serve.py runs it under $DECIDE_PYTHON (default: the current python); $TRIDA_DECIDE_MODEL can name the checkpoint
 ```
 
 ```bash
@@ -188,8 +190,14 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
   - `score`: a list of levels, lowest first; the answer is the expected level.
 - **`"reasoning": true`:** the model first writes its reasoning (returned as `reasoning`), then decides with that reasoning added to the state.
 - **Images:** add an `image` (path, base64 or data URL) to the request.
-- **`POST /v1/chat/completions`:** OpenAI-compatible and non-streaming. It takes `tools`, and the thinking comes back as `message.reasoning_content`.
-- **From Python:** `DecideEngine(ckpt).decide(...)` / `.chat(...)` ([`decide_engine.py`](decide_engine.py)).
+- **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
+  - It takes `tools`; tool calls come back as `tool_calls`.
+  - The thinking comes back as `reasoning_content` (streamed as `reasoning_content` deltas before the content).
+  - It honours `max_tokens`, `temperature`, `top_p`, `top_k`, `presence_penalty` and `chat_template_kwargs.enable_thinking`.
+  - Responses carry `usage`, and `finish_reason` is `"length"` when `max_tokens` cut the turn.
+- **`GET /v1/models`:** the served model id, so `chat.py` and `eval.py` work against this server unchanged.
+- **Concurrency:** decisions and chat share the engine and batch together. A decision sent while a long chat is generating returns in tens of milliseconds.
+- **From Python:** `DecideEngine(ckpt).decide(...)` / `.chat(...)` / `.chat_stream(...)`, or the `async` versions (`adecide`, `achat`, ...) on `eng.loop` ([`decide_engine.py`](decide_engine.py)).
 
 How it fits a stock engine: a request row is causal, so an option's hidden state is the last hidden state of the row cut off at that option. Each question with K options therefore becomes K+1 prefix prompts in one batched call with `return_hidden_states="last"`, and SGLang's prefix cache shares the work. The head then runs on those vectors. Checked against a transformers implementation of the same head on 200 held-out decision records, the outputs matched to within 0.1% mean probability difference.
 

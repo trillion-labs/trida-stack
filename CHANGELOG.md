@@ -47,7 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decode modes stay with `serve.py`. Each question becomes K+1 prefix prompts whose
   last hidden states feed the head, so the prefix cache shares the work. The request
   format follows kev's (Apache-2.0, credited in `NOTICE`). CPU tests in
-  `test_decide_cpu.py`.
+  `test_decide_cpu.py`. `serve.py --mode decide` launches it (under `$DECIDE_PYTHON`).
+  Chat streams (server-sent events, reasoning before content), reports `usage` and
+  serves `/v1/models`, so `chat.py` and `eval.py` run against it unchanged. The HTTP
+  server runs on the engine's event loop, so concurrent decisions and chat batch
+  together.
 
 - `metrics/` and `docs/metrics/reviews/` — the response metrics are now collected in
   the repository on a weekly snapshot, with a written review per period recording what

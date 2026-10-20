@@ -9,7 +9,7 @@ import torch
 
 from decide_engine import PointerHead, prefix_prompts, to_answer
 from decide_request import SPECIAL, VISION, RequestError, parse, prompt, with_reasoning
-from serve_decide import split_turn
+from serve_decide import TurnSplitter, split_turn
 
 
 class CharTok:
@@ -108,3 +108,38 @@ def test_split_turn_parses_tool_calls():
     assert reasoning == "look it up" and text == "Checking."
     assert calls[0]["function"]["name"] == "get_order"
     assert calls[0]["function"]["arguments"] == '{"order_id": "#W1", "ids": ["a", "b"]}'
+
+
+def test_split_turn_without_closed_thinking():
+    assert split_turn("still thinking", thinking=True, truncated=True) == ("still thinking", "", [])
+    assert split_turn("The answer is 42.", thinking=True) == ("", "The answer is 42.", [])
+    assert split_turn("plain answer", thinking=False) == ("", "plain answer", [])
+
+
+def _stream(raw, thinking=True, size=1):
+    """Feed a raw turn in `size`-character chunks; -> {field: text}, tool calls."""
+    sp, got = TurnSplitter(thinking), {}
+    for i in range(0, len(raw), size):
+        for f, t in sp.feed(raw[i:i + size]):
+            got[f] = got.get(f, "") + t
+    rest, calls = sp.finish()
+    for f, t in rest:
+        got[f] = got.get(f, "") + t
+    return got, calls
+
+
+@pytest.mark.parametrize("size", [1, 3, 1000])
+def test_turn_splitter_matches_split_turn(size):
+    raw = ("weigh it\n</think>\n\nChecking.\n<tool_call>\n<function=get_order>\n<parameter=order_id>\n#W1\n"
+           "</parameter>\n</function>\n</tool_call>")
+    got, calls = _stream(raw, size=size)
+    reasoning, text, want = split_turn(raw)
+    assert got["reasoning_content"].strip() == reasoning and got["content"].strip() == text
+    assert [c["function"] for c in calls] == [c["function"] for c in want]
+
+
+def test_turn_splitter_plain_and_no_thinking():
+    got, calls = _stream("a < b </thi", size=2)   # a tag prefix that never completes is still text
+    assert got == {"reasoning_content": "a < b </thi"} and not calls
+    got, calls = _stream("391", thinking=False)
+    assert got == {"content": "391"} and not calls
