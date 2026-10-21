@@ -460,7 +460,7 @@ index 311e3e2..e8a5077 100644
  
  
 diff --git a/eval/sglang/srt/dllm/mixin/scheduler.py b/eval/sglang/srt/dllm/mixin/scheduler.py
-index 45ee3d8..b7adcc8 100644
+index 45ee3d8..889b524 100644
 --- a/eval/sglang/srt/dllm/mixin/scheduler.py
 +++ b/eval/sglang/srt/dllm/mixin/scheduler.py
 @@ -401,7 +401,8 @@ class SchedulerDllmMixin:
@@ -473,7 +473,20 @@ index 45ee3d8..b7adcc8 100644
          if adder.can_run_list:
              has_prefill = any(req.is_dllm_prefill() for req in adder.can_run_list)
              has_decode = any(not req.is_dllm_prefill() for req in adder.can_run_list)
-@@ -610,6 +611,10 @@ class SchedulerDllmMixin:
+@@ -600,6 +601,12 @@ class SchedulerDllmMixin:
+         for i, req in enumerate(new_reqs):
+             req.req_pool_idx = req_pool_indices[i]
+             req.init_next_round_input(self.tree_cache)
++            # Lock the matched radix node like PrefillAdder._req_inc_lock_ref does; the
++            # matching dec_lock_ref runs when the request is cached/released, and without
++            # this lock it underflows (AssertionError: dec_lock_ref ... mamba_lock_ref=0).
++            _lock = self.tree_cache.inc_lock_ref(req.last_node)
++            if getattr(_lock, "swa_uuid_for_lock", None) is not None:
++                req.swa_uuid_for_lock = _lock.swa_uuid_for_lock
+             prefix_len = len(req.prefix_indices)
+             origin_remaining = len(req.origin_input_ids) - prefix_len
+             if origin_remaining <= 0:
+@@ -610,6 +617,10 @@ class SchedulerDllmMixin:
              absorbed += 1
  
          if absorbed > 0:
@@ -641,7 +654,7 @@ index ff76fd5..260c233 100644
              full_argmax = self._compute_lm_head_argmax_tiled(
                  hidden_states, lm_head
 diff --git a/eval/sglang/srt/managers/schedule_batch.py b/eval/sglang/srt/managers/schedule_batch.py
-index b7a0cd0..51ce99b 100644
+index b7a0cd0..af25c57 100644
 --- a/eval/sglang/srt/managers/schedule_batch.py
 +++ b/eval/sglang/srt/managers/schedule_batch.py
 @@ -1003,6 +1003,13 @@ class Req(ReqDllmMixin):
@@ -658,6 +671,21 @@ index b7a0cd0..51ce99b 100644
          if self.return_logprob and self.logprob_start_len >= 0:
              max_prefix_len = min(max_prefix_len, self.logprob_start_len)
          max_prefix_len = max(max_prefix_len, 0)
+@@ -2372,6 +2379,14 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
+                     req.extend_input_len = block_size
+                 else:
+                     req.init_next_round_input()
++                    # init_next_round_input -> determine_dllm_phase inspects the block after
++                    # prefix_indices, which for a decoding request is still the end of its prompt;
++                    # that block holds generated tokens (no MASK), so the phase flips to
++                    # STAGING_PREFILL. The next pure-decode step then derives a CAUSAL_PREFILL
++                    # attention mask from that phase: the algorithm emits nothing, skips the KV
++                    # trim, and the GDN prefill path writes MASK/draft tokens into the state.
++                    # A request that is not an inline prefill is decoding — keep it that way.
++                    req.dllm_phase = DllmReqPhase.STAGING_DECODE
+                     req.extend_input_len = min(req.extend_input_len, block_size)
+                     prefix_len = getattr(req, 'kv_committed_len', None) or len(req.prefix_indices)
+                     req.fill_ids = req.fill_ids[:prefix_len + req.extend_input_len]
 diff --git a/eval/sglang/srt/managers/scheduler.py b/eval/sglang/srt/managers/scheduler.py
 index 17750ad..756af77 100644
 --- a/eval/sglang/srt/managers/scheduler.py
