@@ -7,7 +7,12 @@ on:
     branches: [main]
   schedule:
     # Dependencies and upstreams rot even when this repository does not change.
-    - cron: "0 3 * * 1"
+    #
+    # 21:37 UTC Sunday == 06:37 Monday in Asia/Seoul. The odd minute and the
+    # off-peak hour are both deliberate: GitHub queues scheduled runs and drops
+    # them under load, and the top of the hour is the worst moment to ask. On
+    # "0 3" this job started 13-24 minutes late every week.
+    - cron: "37 21 * * 0"
   workflow_dispatch:
 
 concurrency:

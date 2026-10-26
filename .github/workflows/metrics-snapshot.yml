@@ -7,7 +7,11 @@ on:
     # check monthly takes a quarter to show you the collection itself is wrong. Drops to
     # monthly once a 90-day baseline exists. Weekly also stays inside the 14-day window
     # GitHub's traffic API retains.
-    - cron: "20 1 * * 1"
+    #
+    # 22:17 UTC Sunday == 07:17 Monday in Asia/Seoul, and deliberately after the other
+    # three: the snapshot should see that morning's supply-chain and unanswered-item
+    # results, not the previous week's.
+    - cron: "17 22 * * 0"
   workflow_dispatch:
     inputs:
       period:
