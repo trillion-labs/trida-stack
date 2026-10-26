@@ -161,19 +161,21 @@ def main() -> int:
     # that a maintainer opens and merges are not neglected contributions, and counting
     # them produces a 100% no-response rate that means nothing (guideline 4.2, appendix B:
     # split by 신규/기존 기여자). Split the population and report external separately.
-    # First-party is decided per item by GitHub's own author_association, not by
-    # listing collaborators. The collaborator endpoint cannot answer this from a
-    # workflow: GITHUB_TOKEN sees only DIRECT collaborators, so an account whose
-    # access comes through the organisation looks like an outside contributor.
-    # affiliation=all does not help -- the token still cannot see that access.
-    #
-    # That is not theoretical. 2026-W43 collected 7 first-party and 28 external items
-    # from work that was entirely our own, and a reader would have concluded we had 28
-    # outside contributions with a measured response time. We have none.
-    #
-    # author_association is computed server-side on every issue and pull request and is
-    # visible to any token that can read the item at all.
-    FIRST_PARTY = {"OWNER", "MEMBER", "COLLABORATOR"}
+    # First-party is decided from a hand-maintained list, not an API lookup. Both API
+    # routes fail from a workflow because organisation membership here is private:
+    # /collaborators shows GITHUB_TOKEN only DIRECT collaborators, and
+    # author_association reports MEMBER only when the membership is visible. Collected
+    # in Actions, both called 32 of our own items outside contributions -- from a single
+    # account. A reviewer can check eight names; nobody can check a permission-dependent
+    # API answer after the fact.
+    roster = pathlib.Path(__file__).resolve().parent.parent / "docs/metrics/first-party.txt"
+    insiders = {
+        line.strip()
+        for line in roster.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    if not insiders:
+        raise RuntimeError(f"{roster} lists no first-party accounts")
 
     # Every issue/PR ever opened. The repo is young; when it is not, window this.
     items = paginate(f"/repos/{args.repo}/issues", {"state": "all", "filter": "all"})
@@ -187,7 +189,7 @@ def main() -> int:
     per_item = []
     for i in items:
         num, author = i["number"], i.get("user", {}).get("login", "")
-        if i.get("author_association") in FIRST_PARTY:
+        if author in insiders:
             internal_authors.add(author)
             # Measured as its OWN series, never folded into the external one. The external
             # metric answers "what is it like to contribute here"; mixing first-party items
@@ -295,7 +297,7 @@ def main() -> int:
                 note="GitHub's open_issues_count includes PRs (guideline 6.3)"),
         },
         "internal_series": {
-            "scope": "first-party items (repository collaborators)",
+            "scope": "first-party items (docs/metrics/first-party.txt)",
             "why": ("Reported separately, never merged into M-001..M-003. The external "
                     "series is the contributor-experience metric; this one is the "
                     "maintainer-responsiveness metric. Keeping both means a period with no "
@@ -329,11 +331,11 @@ def main() -> int:
             "used for automation would not be caught.",
             "Response means a comment or review by someone other than the author. A fast "
             "formal reply does not imply resolution (guideline appendix B).",
-            "First-party is decided by GitHub's author_association (OWNER, MEMBER or "
-            "COLLABORATOR), so a contributor who later joins the organisation changes "
-            "population between periods.",
-            "Snapshots before 2026-10-26 split the population from the collaborator "
-            "list, which a workflow token cannot read fully, and are not comparable.",
+            "First-party is read from docs/metrics/first-party.txt. Adding someone "
+            "there moves their items between series, so the list is part of the "
+            "measurement and changes to it belong in the period review.",
+            "Snapshots before 2026-10-26 split the population from an API lookup a "
+            "workflow token cannot answer, and are not comparable.",
         ],
         "items": per_item,
     }

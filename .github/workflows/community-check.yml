@@ -39,6 +39,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python tools/check_codeowners.py
 
+      # The roster decides which metrics series an item lands in, and GitHub does not
+      # redirect renamed accounts.
+      - name: First-party roster resolves
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/check_first_party.py
+
       - name: Reporting routes are still stated
         run: |
           set -uo pipefail

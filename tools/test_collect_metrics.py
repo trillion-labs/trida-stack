@@ -138,24 +138,27 @@ def test_internal_series_is_never_a_rate():
 # The split decides which series an item lands in, so a silent change to it
 # invalidates the comparison between periods that Lv3 is asking for.
 
-def test_first_party_comes_from_author_association():
-    """The collaborator endpoint cannot answer this from a workflow.
+def test_first_party_comes_from_the_roster_not_an_api():
+    """Both API routes fail from a workflow because org membership here is private.
 
-    GITHUB_TOKEN sees only DIRECT collaborators, so an account whose access comes
-    through the organisation looks like an outside contributor -- 2026-W43 counted 28
-    of our own pull requests as outside contributions. affiliation=all does not fix
-    it; the token still cannot see that access. author_association is computed
-    server-side on the item itself.
+    /collaborators shows GITHUB_TOKEN only DIRECT collaborators; author_association
+    reports MEMBER only when membership is visible. Collected in Actions, both called
+    32 of our own items outside contributions, from a single account.
     """
     src = (pathlib.Path(__file__).resolve().parent / "collect_metrics.py").read_text()
-    assert '"author_association"' in src
-    assert "/collaborators" not in src
+    # Strip comments: both endpoints are named there, explaining why they are not used.
+    code = "\n".join(l.split("#", 1)[0] for l in src.splitlines())
+    assert "first-party.txt" in code
+    assert "/collaborators" not in code
+    assert "author_association" not in code
 
 
-def test_first_party_set_covers_every_insider_association():
-    src = (pathlib.Path(__file__).resolve().parent / "collect_metrics.py").read_text()
-    for assoc in ("OWNER", "MEMBER", "COLLABORATOR"):
-        assert f'"{assoc}"' in src, assoc
-    # CONTRIBUTOR means "has had a PR merged", which is precisely an outside
-    # contributor; counting it as first-party would empty the external series again.
-    assert '"CONTRIBUTOR"' not in src
+def test_the_roster_is_present_and_parses():
+    roster = pathlib.Path(__file__).resolve().parent.parent / "docs/metrics/first-party.txt"
+    names = [
+        l.strip() for l in roster.read_text().splitlines()
+        if l.strip() and not l.lstrip().startswith("#")
+    ]
+    assert names, "roster is empty"
+    assert all(" " not in n for n in names), "a login cannot contain a space"
+    assert len(names) == len(set(names)), "duplicate login"
