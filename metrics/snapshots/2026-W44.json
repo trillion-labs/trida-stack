@@ -1,0 +1,281 @@
+{
+  "period": "2026-W44",
+  "measured_at": "2026-10-26T08:17:28.354789+00:00",
+  "repository": "trillion-labs/trida-stack",
+  "definitions": "docs/metrics/README.md",
+  "observation_period": true,
+  "observation_note": "Public since 2026-09-28. The guideline puts a new project in a 4-8 week observation period confirming data quality rather than setting targets, and wants a 90-day baseline before targets are committed. No target is in force.",
+  "metrics": {
+    "M-001_first_human_response": {
+      "value": {
+        "median_business_hours": 0.2,
+        "p90_business_hours": 0.31,
+        "n": 2
+      },
+      "status": "partial",
+      "note": "sample of 2; too small for a trend"
+    },
+    "M-002_no_response_rate_pct": {
+      "value": 93.8,
+      "status": "good",
+      "numerator": 30,
+      "denominator": 32
+    },
+    "M-003_sla_attainment_pct": {
+      "value": 100.0,
+      "status": "partial",
+      "numerator": 2,
+      "denominator": 2,
+      "threshold_business_days": 2,
+      "note": "threshold is PROVISIONAL -- observation period, no committed target"
+    },
+    "C-001_interest_signals": {
+      "value": {
+        "stars": 3,
+        "forks": 1,
+        "watchers": 0
+      },
+      "status": "good",
+      "note": "interest signals, NOT evidence of use (guideline 1.3)"
+    },
+    "C-002_open_issues_including_prs": {
+      "value": 8,
+      "status": "good",
+      "note": "GitHub's open_issues_count includes PRs (guideline 6.3)"
+    }
+  },
+  "internal_series": {
+    "scope": "first-party items (repository collaborators)",
+    "why": "Reported separately, never merged into M-001..M-003. The external series is the contributor-experience metric; this one is the maintainer-responsiveness metric. Keeping both means a period with no outside contributors still produces a measured number instead of a row of nulls that cannot be told apart from not measuring at all.",
+    "M-101_first_human_response": {
+      "value": {
+        "median_business_hours": 6.56,
+        "p90_business_hours": 91.19,
+        "max_business_hours": 91.19,
+        "n": 3
+      },
+      "status": "partial",
+      "note": "sample of 3; too small for a trend"
+    },
+    "items": 7,
+    "responded": 3,
+    "closed_without_an_outside_response": 4,
+    "not_a_rate": "Deliberately a count, not a percentage. Most first-party items are a maintainer opening and merging their own work, which never waited for anyone -- expressing that as a no-response RATE produces a large number that reads as neglect and means nothing. M-002 is the rate that carries meaning, over external items."
+  },
+  "population": {
+    "scope": "external contributors only",
+    "external_items": 32,
+    "internal_items_excluded": 7,
+    "responded": 2,
+    "unanswered": 30
+  },
+  "limitations": [
+    "Business hours exclude weekends but NOT public holidays.",
+    "Bots are excluded by account type and a [bot] login suffix; a human account used for automation would not be caught.",
+    "Response means a comment or review by someone other than the author. A fast formal reply does not imply resolution (guideline appendix B).",
+    "Items opened by repository collaborators are excluded as first-party. The split uses the collaborator list (affiliation=all), so a contributor who later gains write access changes population between periods.",
+    "The collaborator list is read with affiliation=all so the split does not depend on which token collected the snapshot. Snapshots taken before 2026-10-26 used the endpoint default and are not comparable."
+  ],
+  "items": [
+    {
+      "number": 46,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 45,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 44,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 42,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 40,
+      "population": "internal",
+      "responded": false
+    },
+    {
+      "number": 39,
+      "population": "internal",
+      "responded": false
+    },
+    {
+      "number": 38,
+      "population": "internal",
+      "responded": false
+    },
+    {
+      "number": 37,
+      "population": "internal",
+      "responded": false
+    },
+    {
+      "number": 36,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 35,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 34,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 33,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 32,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 31,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 30,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 29,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 28,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 27,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 26,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 25,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 24,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 23,
+      "population": "external",
+      "responded": true,
+      "business_hours": 0.09
+    },
+    {
+      "number": 22,
+      "population": "external",
+      "responded": true,
+      "business_hours": 0.31
+    },
+    {
+      "number": 21,
+      "population": "internal",
+      "responded": true,
+      "business_hours": 6.55
+    },
+    {
+      "number": 20,
+      "population": "internal",
+      "responded": true,
+      "business_hours": 6.56
+    },
+    {
+      "number": 19,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 18,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 17,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 16,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 15,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 14,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 13,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 12,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 6,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 5,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 4,
+      "population": "internal",
+      "responded": true,
+      "business_hours": 91.19
+    },
+    {
+      "number": 3,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 2,
+      "population": "external",
+      "responded": false
+    },
+    {
+      "number": 1,
+      "population": "external",
+      "responded": false
+    }
+  ]
+}
