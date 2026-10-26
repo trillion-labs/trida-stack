@@ -132,3 +132,26 @@ def test_internal_series_is_never_a_rate():
     src = (pathlib.Path(__file__).resolve().parent / "collect_metrics.py").read_text()
     assert "closed_without_an_outside_response" in src
     assert "M-102_no_response_rate_pct" not in src
+
+
+# --- population split ---------------------------------------------------------
+# The split decides which series an item lands in, so a silent change to it
+# invalidates the comparison between periods that Lv3 is asking for.
+
+def test_collaborators_are_listed_with_affiliation_all():
+    """The endpoint's default depends on the token, which split W42 from W43.
+
+    A workflow's GITHUB_TOKEN sees only DIRECT collaborators; a user token also sees
+    access granted through the organisation. Unset, the same code called 26 items
+    first-party locally and 7 in Actions, from almost the same set.
+    """
+    src = (pathlib.Path(__file__).resolve().parent / "collect_metrics.py").read_text()
+    assert '"affiliation": "all"' in src
+
+
+def test_an_empty_collaborator_list_is_refused():
+    """Treating everyone as external builds a plausible external series out of
+    first-party work, which is worse than returning no number at all."""
+    src = (pathlib.Path(__file__).resolve().parent / "collect_metrics.py").read_text()
+    assert "insiders = set()" not in src
+    assert "refusing to classify every item" in src
