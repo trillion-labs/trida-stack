@@ -51,6 +51,24 @@ attestation are the ones a reader is trusting most, so every action is pinned to
 40-character commit SHA with the human-readable version in a trailing comment, and
 `tools/check_action_pins.py` fails CI if a tag comes back.
 
+### Updating an action pin
+
+The SHA comes from asking GitHub what the tag pointed at, at that moment:
+
+```bash
+gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq '.object.sha'
+# annotated tag -> one more hop:
+gh api repos/<owner>/<repo>/git/tags/<sha> --jq '.object.sha'
+```
+
+**A pin freezes a point in time; it does not verify it.** If the tag had already been
+moved before the lookup, the pin records the moved commit. So cross-check the SHA
+against the release page for the version in the trailing comment before trusting a new
+pin, and treat the first pin of an action as the moment you decided to trust it.
+
+What the pin does buy is that nothing changes underneath us afterwards, and that any
+later change is a visible diff in a pull request rather than a silent one.
+
 The checksums matter beyond the pin. A pinned commit protects against upstream *moving*;
 recorded hashes additionally detect the history being rewritten under the same ref.
 
