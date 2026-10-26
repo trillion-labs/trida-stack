@@ -162,9 +162,28 @@ def main() -> int:
     # them produces a 100% no-response rate that means nothing (guideline 4.2, appendix B:
     # split by 신규/기존 기여자). Split the population and report external separately.
     try:
-        insiders = {c["login"] for c in paginate(f"/repos/{args.repo}/collaborators")}
-    except urllib.error.HTTPError:
-        insiders = set()  # no permission to list collaborators; treat everyone as external
+        # affiliation=all, explicitly. The default this endpoint applies depends on the
+        # token: a workflow's GITHUB_TOKEN sees only DIRECT collaborators, while a user
+        # token also sees people whose access comes through the organisation. Leaving it
+        # unset made the same code classify the same items differently in CI than
+        # locally -- 2026-W42 (collected locally) called 26 items first-party and 0
+        # external; 2026-W43 (collected in Actions) called 7 first-party and 28 external,
+        # from almost the same set of items. Nobody's access had changed.
+        insiders = {
+            c["login"]
+            for c in paginate(f"/repos/{args.repo}/collaborators", {"affiliation": "all"})
+        }
+        if not insiders:
+            raise RuntimeError(
+                "the collaborator list came back empty; refusing to classify every item "
+                "as an external contribution"
+            )
+    except urllib.error.HTTPError as exc:
+        # Silently treating everyone as external produces a plausible-looking external
+        # series built entirely from first-party work, which is worse than no number.
+        raise RuntimeError(
+            f"cannot list collaborators ({exc}); the population split would be wrong"
+        ) from exc
 
     # Every issue/PR ever opened. The repo is young; when it is not, window this.
     items = paginate(f"/repos/{args.repo}/issues", {"state": "all", "filter": "all"})
@@ -312,8 +331,11 @@ def main() -> int:
             "Response means a comment or review by someone other than the author. A fast "
             "formal reply does not imply resolution (guideline appendix B).",
             "Items opened by repository collaborators are excluded as first-party. The "
-            "split uses the collaborator list, so a contributor who later gains write "
-            "access changes population between periods.",
+            "split uses the collaborator list (affiliation=all), so a contributor who "
+            "later gains write access changes population between periods.",
+            "The collaborator list is read with affiliation=all so the split does not "
+            "depend on which token collected the snapshot. Snapshots taken before "
+            "2026-10-26 used the endpoint default and are not comparable.",
         ],
         "items": per_item,
     }

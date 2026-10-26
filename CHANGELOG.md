@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The metrics population split read the collaborator list without an
+  `affiliation`, and that endpoint's default depends on the token: a workflow's
+  `GITHUB_TOKEN` sees only direct collaborators. The same code therefore
+  classified the same items differently in CI than locally -- 2026-W42 counted 26
+  items first-party and 0 external, 2026-W43 counted 7 and 28, with nobody's
+  access having changed. Now read with `affiliation=all`, and an empty or failed
+  lookup raises instead of quietly calling every item an external contribution.
+
 ### Security
 
 - `filelock` floored at `>=4.2.1` and both lock files moved off 4.1.0. Six
