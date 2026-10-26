@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `filelock` floored at `>=4.2.1` and both lock files moved off 4.1.0. Six
+  advisories, the worst GHSA-v4x8-3wr5-3wq8 (HIGH). It is transitive, so the floor
+  goes in `requirements.txt` as well as the lock: regenerating the lock otherwise
+  drops straight back to a vulnerable resolution.
+
 ### Changed
 
 - The metrics workflow opens a pull request instead of pushing to the default
