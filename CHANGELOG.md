@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   goes in `requirements.txt` as well as the lock: regenerating the lock otherwise
   drops straight back to a vulnerable resolution.
 
+- Every GitHub Action is pinned to a commit SHA instead of a moving tag, and
+  `tools/check_action_pins.py` fails CI if one comes back as a tag. The repository
+  pins third-party kernels to a commit and fails on drift; the workflows that
+  generate the SBOM and sign its attestation were running from tags upstream can
+  move. `ci.yml` also moves from checkout v4 to v6, which the rest already used.
+
 ### Changed
 
 - The metrics workflow opens a pull request instead of pushing to the default

@@ -43,6 +43,14 @@ find out from a bug report. `tools/verify_fetch.sh` runs the recipe weekly again
 upstream: the pin resolves, the subpath exists, the 18 sources match
 `tools/kernel-checksums.txt`, the patch applies, the result parses.
 
+The workflows are a supply chain of their own. A tag like `@v4` is a pointer upstream
+can move, and a compromised account moves it silently -- this is how
+`tj-actions/changed-files` was used to exfiltrate secrets from thousands of
+repositories in March 2025. The actions that generate our SBOM and sign its
+attestation are the ones a reader is trusting most, so every action is pinned to a
+40-character commit SHA with the human-readable version in a trailing comment, and
+`tools/check_action_pins.py` fails CI if a tag comes back.
+
 The checksums matter beyond the pin. A pinned commit protects against upstream *moving*;
 recorded hashes additionally detect the history being rewritten under the same ref.
 
@@ -51,6 +59,7 @@ recorded hashes additionally detect the history being rewritten under the same r
 | check | when | fails on |
 |---|---|---|
 | Pinned-commit drift | PR, push | the recorded pin disagreeing with `fetch_kernels.sh` |
+| Action pins | PR, push | a workflow running a GitHub Action from a tag instead of a commit SHA |
 | Dependency advisories | PR, push, weekly | a finding with no unexpired exception |
 | Fetch recipe | weekly | the recipe or its integrity check failing |
 | Published model card | weekly | HF licence or visibility disagreeing with `COMPLIANCE.md` §4b |
