@@ -161,41 +161,34 @@ def main() -> int:
     # that a maintainer opens and merges are not neglected contributions, and counting
     # them produces a 100% no-response rate that means nothing (guideline 4.2, appendix B:
     # split by 신규/기존 기여자). Split the population and report external separately.
-    try:
-        # affiliation=all, explicitly. The default this endpoint applies depends on the
-        # token: a workflow's GITHUB_TOKEN sees only DIRECT collaborators, while a user
-        # token also sees people whose access comes through the organisation. Leaving it
-        # unset made the same code classify the same items differently in CI than
-        # locally -- 2026-W42 (collected locally) called 26 items first-party and 0
-        # external; 2026-W43 (collected in Actions) called 7 first-party and 28 external,
-        # from almost the same set of items. Nobody's access had changed.
-        insiders = {
-            c["login"]
-            for c in paginate(f"/repos/{args.repo}/collaborators", {"affiliation": "all"})
-        }
-        if not insiders:
-            raise RuntimeError(
-                "the collaborator list came back empty; refusing to classify every item "
-                "as an external contribution"
-            )
-    except urllib.error.HTTPError as exc:
-        # Silently treating everyone as external produces a plausible-looking external
-        # series built entirely from first-party work, which is worse than no number.
-        raise RuntimeError(
-            f"cannot list collaborators ({exc}); the population split would be wrong"
-        ) from exc
+    # First-party is decided per item by GitHub's own author_association, not by
+    # listing collaborators. The collaborator endpoint cannot answer this from a
+    # workflow: GITHUB_TOKEN sees only DIRECT collaborators, so an account whose
+    # access comes through the organisation looks like an outside contributor.
+    # affiliation=all does not help -- the token still cannot see that access.
+    #
+    # That is not theoretical. 2026-W43 collected 7 first-party and 28 external items
+    # from work that was entirely our own, and a reader would have concluded we had 28
+    # outside contributions with a measured response time. We have none.
+    #
+    # author_association is computed server-side on every issue and pull request and is
+    # visible to any token that can read the item at all.
+    FIRST_PARTY = {"OWNER", "MEMBER", "COLLABORATOR"}
 
     # Every issue/PR ever opened. The repo is young; when it is not, window this.
     items = paginate(f"/repos/{args.repo}/issues", {"state": "all", "filter": "all"})
     items = [i for i in items if not is_bot(i.get("user"))]
 
+    external_authors: set[str] = set()
+    internal_authors: set[str] = set()
     waits, unanswered, within_sla, measured = [], 0, 0, 0
     internal_total = 0
     internal_waits, internal_unanswered = [], 0
     per_item = []
     for i in items:
         num, author = i["number"], i.get("user", {}).get("login", "")
-        if author in insiders:
+        if i.get("author_association") in FIRST_PARTY:
+            internal_authors.add(author)
             # Measured as its OWN series, never folded into the external one. The external
             # metric answers "what is it like to contribute here"; mixing first-party items
             # into it produces a 100% no-response rate that means nothing (4.2). But
@@ -213,6 +206,7 @@ def main() -> int:
                 per_item.append({"number": num, "population": "internal",
                                  "responded": True, "business_hours": round(bh_i, 2)})
             continue
+        external_authors.add(author)
         created = parse(i.get("created_at"))
         resp = first_human_response(args.repo, num, author, "pull_request" in i)
         if resp is None:
@@ -309,6 +303,7 @@ def main() -> int:
                     "row of nulls that cannot be told apart from not measuring at all."),
             **internal_block,
             "items": internal_total,
+            "authors": len(internal_authors),
             "responded": len(internal_waits),
             "closed_without_an_outside_response": internal_unanswered,
             "not_a_rate": ("Deliberately a count, not a percentage. Most first-party items "
@@ -320,6 +315,10 @@ def main() -> int:
         "population": {
             "scope": "external contributors only",
             "external_items": total,
+            # Items alone hid a classification bug: 2026-W43 reported 28 external
+            # items that came from a single account of our own. A distinct-author
+            # count makes that visible at a glance.
+            "external_authors": len(external_authors),
             "internal_items_excluded": internal_total,
             "responded": measured,
             "unanswered": unanswered,
@@ -330,12 +329,11 @@ def main() -> int:
             "used for automation would not be caught.",
             "Response means a comment or review by someone other than the author. A fast "
             "formal reply does not imply resolution (guideline appendix B).",
-            "Items opened by repository collaborators are excluded as first-party. The "
-            "split uses the collaborator list (affiliation=all), so a contributor who "
-            "later gains write access changes population between periods.",
-            "The collaborator list is read with affiliation=all so the split does not "
-            "depend on which token collected the snapshot. Snapshots taken before "
-            "2026-10-26 used the endpoint default and are not comparable.",
+            "First-party is decided by GitHub's author_association (OWNER, MEMBER or "
+            "COLLABORATOR), so a contributor who later joins the organisation changes "
+            "population between periods.",
+            "Snapshots before 2026-10-26 split the population from the collaborator "
+            "list, which a workflow token cannot read fully, and are not comparable.",
         ],
         "items": per_item,
     }

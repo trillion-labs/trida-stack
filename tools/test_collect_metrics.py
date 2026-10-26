@@ -138,20 +138,24 @@ def test_internal_series_is_never_a_rate():
 # The split decides which series an item lands in, so a silent change to it
 # invalidates the comparison between periods that Lv3 is asking for.
 
-def test_collaborators_are_listed_with_affiliation_all():
-    """The endpoint's default depends on the token, which split W42 from W43.
+def test_first_party_comes_from_author_association():
+    """The collaborator endpoint cannot answer this from a workflow.
 
-    A workflow's GITHUB_TOKEN sees only DIRECT collaborators; a user token also sees
-    access granted through the organisation. Unset, the same code called 26 items
-    first-party locally and 7 in Actions, from almost the same set.
+    GITHUB_TOKEN sees only DIRECT collaborators, so an account whose access comes
+    through the organisation looks like an outside contributor -- 2026-W43 counted 28
+    of our own pull requests as outside contributions. affiliation=all does not fix
+    it; the token still cannot see that access. author_association is computed
+    server-side on the item itself.
     """
     src = (pathlib.Path(__file__).resolve().parent / "collect_metrics.py").read_text()
-    assert '"affiliation": "all"' in src
+    assert '"author_association"' in src
+    assert "/collaborators" not in src
 
 
-def test_an_empty_collaborator_list_is_refused():
-    """Treating everyone as external builds a plausible external series out of
-    first-party work, which is worse than returning no number at all."""
+def test_first_party_set_covers_every_insider_association():
     src = (pathlib.Path(__file__).resolve().parent / "collect_metrics.py").read_text()
-    assert "insiders = set()" not in src
-    assert "refusing to classify every item" in src
+    for assoc in ("OWNER", "MEMBER", "COLLABORATOR"):
+        assert f'"{assoc}"' in src, assoc
+    # CONTRIBUTOR means "has had a PR merged", which is precisely an outside
+    # contributor; counting it as first-party would empty the external series again.
+    assert '"CONTRIBUTOR"' not in src
