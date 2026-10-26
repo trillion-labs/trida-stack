@@ -9,13 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The metrics population split read the collaborator list without an
-  `affiliation`, and that endpoint's default depends on the token: a workflow's
-  `GITHUB_TOKEN` sees only direct collaborators. The same code therefore
-  classified the same items differently in CI than locally -- 2026-W42 counted 26
-  items first-party and 0 external, 2026-W43 counted 7 and 28, with nobody's
-  access having changed. Now read with `affiliation=all`, and an empty or failed
-  lookup raises instead of quietly calling every item an external contribution.
+- The metrics population split is read from `docs/metrics/first-party.txt` instead
+  of an API lookup. Organisation membership here is private, so neither
+  `/collaborators` nor `author_association` can answer it from a workflow: both
+  classified 32 of our own items as outside contributions when collected in Actions,
+  while passing locally against a user token. Snapshots also record distinct author
+  counts, which is what made the bug legible -- 32 external items from 1 author.
+  `tools/check_first_party.py` fails CI when a listed login stops resolving.
 
 ### Security
 
