@@ -2,8 +2,13 @@ name: Unanswered questions
 
 on:
   schedule:
-    # Weekday mornings, Asia/Seoul (00:00 UTC == 09:00 KST), matching stated hours.
-    - cron: "0 0 * * 1-5"
+    # Weekday mornings, Asia/Seoul: 21:53 UTC Sun-Thu == 06:53 Mon-Fri KST. The day
+    # field is 0-4, not 1-5 -- 21:00 UTC is already the next day in Seoul, so keeping
+    # 1-5 would run this Tuesday through Saturday.
+    #
+    # It was "0 0" and started 38-40 minutes late every weekday: the top of the hour
+    # is when the scheduler is most congested.
+    - cron: "53 21 * * 0-4"
   workflow_dispatch:
 
 permissions:

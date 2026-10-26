@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- All four scheduled workflows moved off the hour and into the UTC evening, and
+  their weekday fields shifted a day to compensate: 21:00 UTC is already the next
+  day in Seoul, so `* * 1-5` would have run Tuesday through Saturday. Measured
+  lateness was 38-40 minutes every weekday on `0 0` and 13-24 on `0 3`. The
+  snapshot now runs last, so it sees that morning's results rather than last
+  week's.
+
 ### Fixed
 
 - The metrics population split is read from `docs/metrics/first-party.txt` instead
