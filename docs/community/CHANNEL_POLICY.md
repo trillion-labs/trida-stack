@@ -52,28 +52,47 @@ PRIVATE
 
 ## 역할과 최소 권한
 
-| 역할 | 책임 | 필요한 권한 |
-|---|---|---|
-| 커뮤니티 리드 | 목표, 당번, 월간 리뷰, 대외 공지 | 설정 변경 승인 |
-| 메인테이너 | 기술 답변, 작업 승인, 릴리스 연결 | GitHub write/maintain |
-| 트리아저 | 질문 분류, 중복 연결, 라벨 | GitHub triage |
-| 모더레이터 | 규칙 안내, 신고 접수, 긴급 제한 | 메시지 관리·제한 |
-| 보안 담당 | 취약점 비공개 접수와 대응 | 보안함 최소 접근 |
+| 역할 | 담당 | 백업 | 책임 | 필요한 권한 |
+|---|---|---|---|---|
+| 커뮤니티 리드 | [@usik-luke-trl](https://github.com/usik-luke-trl) | [@guks-trl](https://github.com/guks-trl) | 목표, 당번, 월간 리뷰, 대외 공지 | 설정 변경 승인 |
+| 기술 당번 | [@hongjoonahn-trl](https://github.com/hongjoonahn-trl) | [@guks-trl](https://github.com/guks-trl) | 기술 답변, 질문 분류, 작업 승인, 릴리스 연결 | GitHub write/maintain |
+| 모더레이터 | [@guks-trl](https://github.com/guks-trl) | [@usik-luke-trl](https://github.com/usik-luke-trl) | 규칙 안내, 신고 접수, 긴급 제한 | 메시지 관리·제한 |
+| 보안 담당 | [@usik-luke-trl](https://github.com/usik-luke-trl) | [@hongjoonahn-trl](https://github.com/hongjoonahn-trl) | 취약점 비공개 접수와 대응 | 보안함 최소 접근 |
+
+**모더레이터와 보안 담당을 같은 사람에게 두지 않았습니다.** 네 역할 중 이 둘이 겹칠 때
+이해충돌이 가장 큽니다 — 보안 담당자에 관한 신고를 그 사람이 접수하게 되기 때문입니다.
+담당은 각자의 작업 영역을 따라갑니다([`GOVERNANCE.md`](../../GOVERNANCE.md)의 메인테이너
+표): 서빙·평가를 보는 사람이 기술 질문을, 릴리스·공급망을 보는 사람이 취약점을 받습니다.
 
 **모더레이터에게 서버 소유자나 모든 GitHub 관리 권한을 주지 않습니다.** 봇도 읽기·쓰기
 범위를 최소화하고, 토큰을 저장소에 커밋하지 않습니다. 소유권은 개인 계정 하나에
 의존하지 않고 승계 절차와 비상 연락망을 둡니다. 관리자와 운영자는 다중요소 인증을
 사용합니다.
 
-> **담당자 미지정.** 가이드는 커뮤니티 리드·기술 당번·모더레이터·보안 담당을 실명으로
-> 지정하도록 요구합니다. 아직 배정되지 않았습니다 — 채널 개설 전에 채웁니다.
+### 세 사람이 네 역할을 나눠 맡습니다
+
+**모든 역할에 담당과 백업이 다른 사람으로 있습니다.** 담당이 자리를 비워도 그 역할이
+비지 않고, 한 사람이 빠져도 네 역할 중 둘 이상이 동시에 멈추지 않습니다. 공개 초대를
+열기 전 조건(H3)이 요구하는 것이 이것입니다.
+
+**신고 회피가 실제로 작동합니다.** 모더레이터와 보안 담당이 다른 사람이고, 각 역할의
+백업도 담당과 다른 사람입니다. 그래서 세 사람 중 누구에 관한 신고든 **처리할 사람이
+남습니다.**
+
+> 메인테이너 본인에 관한 행동강령 신고도
+> [`admin@trillionlabs.co`](mailto:admin@trillionlabs.co)로 보내 주세요. 해당자는
+> 처리에서 **빠지고**, 나머지가 다룹니다. 회피는 선의가 아니라
+> [`GOVERNANCE.md`](../../GOVERNANCE.md)에 적힌 규칙입니다.
+
+**담당자는 바뀔 수 있고, 바뀌면 이 표를 고칩니다.** 표가 현실과 어긋난 채로 공개돼 있는
+것이 비어 있는 것보다 나쁩니다 — 신고자는 표를 보고 보낼지 말지 정합니다.
 
 ## 집행과 신고
 
 운영자는 사안과 반복성에 따라 **안내 → 경고 → 콘텐츠 제한 → 일시 제한 → 영구 차단**을
 적용합니다. 등급별 기준은 [MODERATOR_RUNBOOK.md](MODERATOR_RUNBOOK.md)에 있습니다.
 
-- 행동강령 신고: [`conduct@trillionlabs.co`](mailto:conduct@trillionlabs.co)
+- 행동강령 신고: [`admin@trillionlabs.co`](mailto:admin@trillionlabs.co)
 - 보안 취약점: [`security@trillionlabs.co`](mailto:security@trillionlabs.co)
 - 이의제기: 조치 통지로부터 14일 이내, 같은 주소로
 

@@ -7,19 +7,19 @@
 # Note: these lines only take effect once the branch ruleset sets
 # require_code_owner_review. See docs/supply-chain/README.md.
 
-/LICENSE                         @guks-trl @hongjoonahn-tri @usik-luke-trl
-/NOTICE                          @guks-trl @hongjoonahn-tri @usik-luke-trl
-/COMPLIANCE.md                   @guks-trl @hongjoonahn-tri @usik-luke-trl
-/SECURITY.md                     @guks-trl @hongjoonahn-tri @usik-luke-trl
-/GOVERNANCE.md                   @guks-trl @hongjoonahn-tri @usik-luke-trl
-/CITATION.cff                    @guks-trl @hongjoonahn-tri @usik-luke-trl
-/docs/oss/                        @guks-trl @hongjoonahn-tri @usik-luke-trl
-/docs/supply-chain/              @guks-trl @hongjoonahn-tri @usik-luke-trl
-/.github/workflows/              @guks-trl @hongjoonahn-tri @usik-luke-trl
-/.github/dependabot.yml          @guks-trl @hongjoonahn-tri @usik-luke-trl
-/.github/CODEOWNERS              @guks-trl @hongjoonahn-tri @usik-luke-trl
-/tools/                          @guks-trl @hongjoonahn-tri @usik-luke-trl
+/LICENSE                         @guks-trl @hongjoonahn-trl @usik-luke-trl
+/NOTICE                          @guks-trl @hongjoonahn-trl @usik-luke-trl
+/COMPLIANCE.md                   @guks-trl @hongjoonahn-trl @usik-luke-trl
+/SECURITY.md                     @guks-trl @hongjoonahn-trl @usik-luke-trl
+/GOVERNANCE.md                   @guks-trl @hongjoonahn-trl @usik-luke-trl
+/CITATION.cff                    @guks-trl @hongjoonahn-trl @usik-luke-trl
+/docs/oss/                       @guks-trl @hongjoonahn-trl @usik-luke-trl
+/docs/supply-chain/              @guks-trl @hongjoonahn-trl @usik-luke-trl
+/.github/workflows/              @guks-trl @hongjoonahn-trl @usik-luke-trl
+/.github/dependabot.yml          @guks-trl @hongjoonahn-trl @usik-luke-trl
+/.github/CODEOWNERS              @guks-trl @hongjoonahn-trl @usik-luke-trl
+/tools/                          @guks-trl @hongjoonahn-trl @usik-luke-trl
 
 # The fetch recipes are the install path for both two-stream code paths.
-/train/block_gated_delta_rule/   @guks-trl @hongjoonahn-tri @usik-luke-trl
-/inference/sglang/               @guks-trl @hongjoonahn-tri @usik-luke-trl
+/train/block_gated_delta_rule/   @guks-trl @hongjoonahn-trl @usik-luke-trl
+/inference/sglang/               @guks-trl @hongjoonahn-trl @usik-luke-trl
