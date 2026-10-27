@@ -11,6 +11,7 @@ Generation itself is done by our OpenAI-compatible server (`serve_trida_openai.p
 Symlinked into the BFCL package as `bfcl_eval/model_handler/local_inference/trida.py` by
 `register_bfcl.sh`, and registered in `model_config.py`.
 """
+import ast
 import json
 import os
 import re
@@ -19,8 +20,9 @@ import sys
 from bfcl_eval.model_handler.local_inference.qwen_fc import QwenFCHandler
 from overrides import override
 
-# make inference.bd_generate importable from the BFCL venv (for load_tokenizer_compat)
-_REPO = "$SCRATCH/trida-stack"
+# make the repo importable from the BFCL venv (for an optional inference.bd_generate). realpath resolves
+# the symlink register_bfcl.sh puts into the BFCL package back to benchmark/bfcl_v4/ in this repo.
+_REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
@@ -30,11 +32,18 @@ class TridaFCHandler(QwenFCHandler):
 
     def _trida_tokenizer(self):
         if TridaFCHandler._trida_tok is None:
-            from inference.bd_generate import load_tokenizer_compat
             ckpt = os.environ.get("TRIDA_CKPT") or os.environ.get("CKPT")
             if not ckpt:
                 raise RuntimeError("TRIDA_CKPT/CKPT env not set; needed to load the served model's template")
-            TridaFCHandler._trida_tok = load_tokenizer_compat(ckpt)
+            try:
+                from inference.bd_generate import load_tokenizer_compat
+                TridaFCHandler._trida_tok = load_tokenizer_compat(ckpt)
+            except ImportError:
+                # inference.bd_generate is not part of this repo. Without this fallback every prompt
+                # silently fell back to the QwenFC JSON format, which is off-distribution for Qwen3.5
+                # (its template emits XML <function=...> tool calls).
+                from transformers import AutoTokenizer
+                TridaFCHandler._trida_tok = AutoTokenizer.from_pretrained(ckpt)
         return TridaFCHandler._trida_tok
 
     def __init__(
@@ -62,7 +71,9 @@ class TridaFCHandler(QwenFCHandler):
             tools = [{"type": "function", "function": f} for f in function] if function else None
             prompt = tok.apply_chat_template(
                 messages, tools=tools, add_generation_prompt=True, tokenize=False)
-            return prompt + "<think>\n"
+            # the Qwen3.5 template already opens the reasoning block; don't add a second one
+            head = prompt.rstrip()
+            return head + "\n" if head.endswith("<think>") else prompt + "<think>\n"
         except Exception as e:
             print(f"[trida_handler] apply_chat_template failed ({e}); falling back to QwenFC format", flush=True)
             return super()._format_prompt(messages, function)
@@ -107,9 +118,31 @@ class TridaFCHandler(QwenFCHandler):
                             return None
         return None
 
+    # XML <parameter> values are plain text, so their type has to be recovered from the test's
+    # language: BFCL's Java/JavaScript checkers expect every value as a string, while Python expects
+    # real literals (True, 5, [1, 2]).
+    @staticmethod
+    def _xml_value(v, language="python"):
+        if language != "python":
+            return v
+        try:
+            return json.loads(v)
+        except Exception:
+            pass
+        try:
+            return ast.literal_eval(v)
+        except Exception:
+            return v
+
+    @override
+    def decode_ast(self, result, language, has_tool_call_tag):
+        # QwenFCHandler.decode_ast, with the test language passed down to the parser.
+        lang = getattr(language, "value", str(language)).lower()
+        return [{c["name"]: dict(c["arguments"])} for c in self._extract_tool_calls(result, lang)]
+
     @staticmethod
     @override
-    def _extract_tool_calls(input_string):
+    def _extract_tool_calls(input_string, language="python"):
         """Robust superset of Qwen's `<tool_call>` parser. Beyond the inherited normalization
         (missing ``arguments`` / ``arguments`` as a JSON string), this re-parses each
         ``<tool_call>`` block with a brace-balancing loader so the model's frequent extra-trailing-
@@ -124,10 +157,7 @@ class TridaFCHandler(QwenFCHandler):
             for fm in re.finditer(r"<function=([^>\s]+)\s*>(.*?)</function>", block, re.DOTALL):
                 a = {}
                 for k, v in re.findall(r"<parameter=([^>]+?)\s*>\s*(.*?)\s*</parameter>", fm.group(2), re.DOTALL):
-                    v = v.strip()
-                    try: v = json.loads(v)
-                    except Exception: pass
-                    a[k.strip()] = v
+                    a[k.strip()] = TridaFCHandler._xml_value(v.strip(), language)
                 raw.append({"name": fm.group(1).strip(), "arguments": a})
         if not raw:  # no tag-wrapped calls parsed -> defer to the inherited extractor
             raw = QwenFCHandler._extract_tool_calls(input_string)

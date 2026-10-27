@@ -161,15 +161,28 @@ def main() -> int:
     # that a maintainer opens and merges are not neglected contributions, and counting
     # them produces a 100% no-response rate that means nothing (guideline 4.2, appendix B:
     # split by 신규/기존 기여자). Split the population and report external separately.
-    try:
-        insiders = {c["login"] for c in paginate(f"/repos/{args.repo}/collaborators")}
-    except urllib.error.HTTPError:
-        insiders = set()  # no permission to list collaborators; treat everyone as external
+    # First-party is decided from a hand-maintained list, not an API lookup. Both API
+    # routes fail from a workflow because organisation membership here is private:
+    # /collaborators shows GITHUB_TOKEN only DIRECT collaborators, and
+    # author_association reports MEMBER only when the membership is visible. Collected
+    # in Actions, both called 32 of our own items outside contributions -- from a single
+    # account. A reviewer can check eight names; nobody can check a permission-dependent
+    # API answer after the fact.
+    roster = pathlib.Path(__file__).resolve().parent.parent / "docs/metrics/first-party.txt"
+    insiders = {
+        line.strip()
+        for line in roster.read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    if not insiders:
+        raise RuntimeError(f"{roster} lists no first-party accounts")
 
     # Every issue/PR ever opened. The repo is young; when it is not, window this.
     items = paginate(f"/repos/{args.repo}/issues", {"state": "all", "filter": "all"})
     items = [i for i in items if not is_bot(i.get("user"))]
 
+    external_authors: set[str] = set()
+    internal_authors: set[str] = set()
     waits, unanswered, within_sla, measured = [], 0, 0, 0
     internal_total = 0
     internal_waits, internal_unanswered = [], 0
@@ -177,6 +190,7 @@ def main() -> int:
     for i in items:
         num, author = i["number"], i.get("user", {}).get("login", "")
         if author in insiders:
+            internal_authors.add(author)
             # Measured as its OWN series, never folded into the external one. The external
             # metric answers "what is it like to contribute here"; mixing first-party items
             # into it produces a 100% no-response rate that means nothing (4.2). But
@@ -194,6 +208,7 @@ def main() -> int:
                 per_item.append({"number": num, "population": "internal",
                                  "responded": True, "business_hours": round(bh_i, 2)})
             continue
+        external_authors.add(author)
         created = parse(i.get("created_at"))
         resp = first_human_response(args.repo, num, author, "pull_request" in i)
         if resp is None:
@@ -282,7 +297,7 @@ def main() -> int:
                 note="GitHub's open_issues_count includes PRs (guideline 6.3)"),
         },
         "internal_series": {
-            "scope": "first-party items (repository collaborators)",
+            "scope": "first-party items (docs/metrics/first-party.txt)",
             "why": ("Reported separately, never merged into M-001..M-003. The external "
                     "series is the contributor-experience metric; this one is the "
                     "maintainer-responsiveness metric. Keeping both means a period with no "
@@ -290,6 +305,7 @@ def main() -> int:
                     "row of nulls that cannot be told apart from not measuring at all."),
             **internal_block,
             "items": internal_total,
+            "authors": len(internal_authors),
             "responded": len(internal_waits),
             "closed_without_an_outside_response": internal_unanswered,
             "not_a_rate": ("Deliberately a count, not a percentage. Most first-party items "
@@ -301,6 +317,10 @@ def main() -> int:
         "population": {
             "scope": "external contributors only",
             "external_items": total,
+            # Items alone hid a classification bug: 2026-W43 reported 28 external
+            # items that came from a single account of our own. A distinct-author
+            # count makes that visible at a glance.
+            "external_authors": len(external_authors),
             "internal_items_excluded": internal_total,
             "responded": measured,
             "unanswered": unanswered,
@@ -311,9 +331,11 @@ def main() -> int:
             "used for automation would not be caught.",
             "Response means a comment or review by someone other than the author. A fast "
             "formal reply does not imply resolution (guideline appendix B).",
-            "Items opened by repository collaborators are excluded as first-party. The "
-            "split uses the collaborator list, so a contributor who later gains write "
-            "access changes population between periods.",
+            "First-party is read from docs/metrics/first-party.txt. Adding someone "
+            "there moves their items between series, so the list is part of the "
+            "measurement and changes to it belong in the period review.",
+            "Snapshots before 2026-10-26 split the population from an API lookup a "
+            "workflow token cannot answer, and are not comparable.",
         ],
         "items": per_item,
     }
