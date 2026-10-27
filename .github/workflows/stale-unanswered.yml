@@ -2,8 +2,13 @@ name: Unanswered questions
 
 on:
   schedule:
-    # Weekday mornings, Asia/Seoul (00:00 UTC == 09:00 KST), matching stated hours.
-    - cron: "0 0 * * 1-5"
+    # Weekday mornings, Asia/Seoul: 21:53 UTC Sun-Thu == 06:53 Mon-Fri KST. The day
+    # field is 0-4, not 1-5 -- 21:00 UTC is already the next day in Seoul, so keeping
+    # 1-5 would run this Tuesday through Saturday.
+    #
+    # It was "0 0" and started 38-40 minutes late every weekday: the top of the hour
+    # is when the scheduler is most congested.
+    - cron: "53 21 * * 0-4"
   workflow_dispatch:
 
 permissions:
@@ -16,8 +21,8 @@ jobs:
     name: Report items with no human response
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.10"
       # Of everything the guideline says is worth sending to chat, this is the one that
