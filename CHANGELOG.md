@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- All four scheduled workflows moved off the hour and into the UTC evening, and
+  their weekday fields shifted a day to compensate: 21:00 UTC is already the next
+  day in Seoul, so `* * 1-5` would have run Tuesday through Saturday. Measured
+  lateness was 38-40 minutes every weekday on `0 0` and 13-24 on `0 3`. The
+  snapshot now runs last, so it sees that morning's results rather than last
+  week's.
+
+### Fixed
+
+- The metrics population split is read from `docs/metrics/first-party.txt` instead
+  of an API lookup. Organisation membership here is private, so neither
+  `/collaborators` nor `author_association` can answer it from a workflow: both
+  classified 32 of our own items as outside contributions when collected in Actions,
+  while passing locally against a user token. Snapshots also record distinct author
+  counts, which is what made the bug legible -- 32 external items from 1 author.
+  `tools/check_first_party.py` fails CI when a listed login stops resolving.
+
+### Security
+
+- `filelock` floored at `>=4.2.1` and both lock files moved off 4.1.0. Six
+  advisories, the worst GHSA-v4x8-3wr5-3wq8 (HIGH). It is transitive, so the floor
+  goes in `requirements.txt` as well as the lock: regenerating the lock otherwise
+  drops straight back to a vulnerable resolution.
+
+- Every GitHub Action is pinned to a commit SHA instead of a moving tag, and
+  `tools/check_action_pins.py` fails CI if one comes back as a tag. The repository
+  pins third-party kernels to a commit and fails on drift; the workflows that
+  generate the SBOM and sign its attestation were running from tags upstream can
+  move. `ci.yml` also moves from checkout v4 to v6, which the rest already used.
+
+### Changed
+
 - The metrics workflow opens a pull request instead of pushing to the default
   branch. Two reasons, and the second one is that the old version could not have
   worked: the ruleset on main requires a pull request and only an organization
@@ -37,6 +69,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   written into `GOVERNANCE.md`.
 
 ### Added
+
+- `inference/jev.py` — the Jev request encoding a Trida checkpoint's typed-decision
+  head reads (`materialize`, `encode_rows`, including `image_tokens`), and
+  `inference/jev_head.py`, the `PointerHead` that `jev_head.pt` loads into. The
+  encoder is the training stack's, copied unchanged and kept torch-free, so a
+  serving process or demo builds the same rows as the training encoder.
+  `inference/test_jev_golden.py` checks the rows against golden fixtures from the
+  training encoder (provenance in `inference/fixtures/jev_golden/PROVENANCE.md`).
+  Derived from kev (Apache-2.0); attributed in `NOTICE` and `COMPLIANCE.md` §1.
+- `scripts/export_kev_checkpoint.py` — exports a checkpoint to kev's layout. The
+  Trida2.1-4B model card points here for scoring and serving with kev's tools.
 
 - `inference/mlx/`: on-device (Apple Silicon, MLX) serving of Trida2.0-4B with lossless
   self-speculative decoding (`bd_bidir_shift` b7/g4 semantics), an OpenAI-compatible server with

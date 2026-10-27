@@ -43,6 +43,32 @@ find out from a bug report. `tools/verify_fetch.sh` runs the recipe weekly again
 upstream: the pin resolves, the subpath exists, the 18 sources match
 `tools/kernel-checksums.txt`, the patch applies, the result parses.
 
+The workflows are a supply chain of their own. A tag like `@v4` is a pointer upstream
+can move, and a compromised account moves it silently -- this is how
+`tj-actions/changed-files` was used to exfiltrate secrets from thousands of
+repositories in March 2025. The actions that generate our SBOM and sign its
+attestation are the ones a reader is trusting most, so every action is pinned to a
+40-character commit SHA with the human-readable version in a trailing comment, and
+`tools/check_action_pins.py` fails CI if a tag comes back.
+
+### Updating an action pin
+
+The SHA comes from asking GitHub what the tag pointed at, at that moment:
+
+```bash
+gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq '.object.sha'
+# annotated tag -> one more hop:
+gh api repos/<owner>/<repo>/git/tags/<sha> --jq '.object.sha'
+```
+
+**A pin freezes a point in time; it does not verify it.** If the tag had already been
+moved before the lookup, the pin records the moved commit. So cross-check the SHA
+against the release page for the version in the trailing comment before trusting a new
+pin, and treat the first pin of an action as the moment you decided to trust it.
+
+What the pin does buy is that nothing changes underneath us afterwards, and that any
+later change is a visible diff in a pull request rather than a silent one.
+
 The checksums matter beyond the pin. A pinned commit protects against upstream *moving*;
 recorded hashes additionally detect the history being rewritten under the same ref.
 
@@ -51,8 +77,10 @@ recorded hashes additionally detect the history being rewritten under the same r
 | check | when | fails on |
 |---|---|---|
 | Pinned-commit drift | PR, push | the recorded pin disagreeing with `fetch_kernels.sh` |
+| Action pins | PR, push | a workflow running a GitHub Action from a tag instead of a commit SHA |
 | Dependency advisories | PR, push, weekly | a finding with no unexpired exception |
 | Fetch recipe | weekly | the recipe or its integrity check failing |
+| Published model card | weekly | HF licence or visibility disagreeing with `COMPLIANCE.md` §4b |
 | Release SBOM | on release | invalid SBOM, or a finding with no exception |
 
 ## Licence policy for new dependencies
@@ -115,14 +143,19 @@ our "not affected, here is why" analysis instead of re-deriving it.
 The tarball contains no PolyForm-NC source, because none is committed. The SBOM is
 therefore accurate about what we distribute, and the register covers what gets fetched.
 
+## The model is not in this repository
+
+`COMPLIANCE.md` §4b records the weights' licence and the base model's, and
+`tools/check_model_card.py` checks weekly that those claims still match what Hugging Face
+publishes. The repository cannot fix a wrong model card — it can refuse to go on
+describing it incorrectly.
+
+Apache-2.0 on the weights does not make the serving stack permissive: the diffusion and
+self-speculative decode paths run §1b kernels that are PolyForm Noncommercial, and that
+restriction attaches to whoever runs them. The AR path has no such dependency.
+
 ## Known gaps
 
-- **The published model has no stated licence.** `trillionlabs/Trida2.0-4B` declares
-  `license: other` with no name, link or LICENSE file, so a downloader has no terms.
-  The base models are clean (Qwen3/Qwen3.5 are Apache-2.0, verified 2026-10-01), so
-  nothing restrictive propagates — the gap is our own publication. See
-  [`../../COMPLIANCE.md`](../../COMPLIANCE.md) §4b. This is a decision to publish on the
-  model repository, not something this repository can fix.
 - **No AI-BOM.** Training configuration and evaluation results are not tracked as
   supply-chain artifacts. Training data provenance is deliberately out of scope —
   it is internal and proprietary, as recorded in `data/DATA_CATALOG.md`.
