@@ -656,7 +656,12 @@ def _stream_first_fit(docs, max_length, buffer_size=32, max_segments=0):
     ``<= max_length``. Nothing is dropped: a doc that doesn't fit the current row waits in the buffer
     for a later row. Every row starts with the OLDEST buffered doc, so a long doc can't starve, and
     the buffer never holds more than ``buffer_size`` docs because docs are pulled only to refill it.
-    Each doc must already fit alone (``len(doc["input_ids"]) <= max_length``)."""
+    Each doc must already fit alone (``len(doc["input_ids"]) <= max_length``); both preconditions
+    are enforced, because violating either one fails silently otherwise -- an oversized doc becomes
+    a row head unconditionally and yields a row over ``max_length``, and ``buffer_size < 1`` leaves
+    the buffer permanently empty, so the generator returns at once and the whole stream is lost."""
+    if buffer_size < 1:
+        raise ValueError(f"buffer_size must be >= 1, got {buffer_size}")
     it = iter(docs)
     buf, exhausted = [], False
 
@@ -674,6 +679,11 @@ def _stream_first_fit(docs, max_length, buffer_size=32, max_segments=0):
             return
         row = [buf.pop(0)]
         used = row[0]["input_ids"].shape[0]
+        if used > max_length:
+            raise ValueError(
+                f"doc of {used} tokens does not fit alone in max_length={max_length}; "
+                "callers must drop it before packing (see PackedMultiTurnRowDataset._docs)"
+            )
         i = 0
         while True:
             while i < len(buf) and not (max_segments and len(row) >= max_segments):

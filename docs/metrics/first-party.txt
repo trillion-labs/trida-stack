@@ -1,0 +1,27 @@
+# First-party authors: Trillion Labs people and automation.
+#
+# Items opened by these accounts go in the internal series (M-101); everything else
+# is an outside contribution and lands in M-001..M-003.
+#
+# This is a hand-maintained list, not an API lookup, and that is deliberate. Both API
+# routes fail from a workflow because organisation membership here is private:
+#
+#   /collaborators        GITHUB_TOKEN sees only DIRECT collaborators
+#   author_association    reports MEMBER only when membership is visible
+#
+# Collected in Actions, both returned 32 outside contributions from one account of
+# our own. A list of eight names is something a reviewer can check at a glance; a
+# permission-dependent API answer is not.
+#
+# Adding someone: add the login, and the next snapshot moves their items to the
+# internal series. tools/check_first_party.py fails CI if a login here does not
+# resolve on GitHub.
+
+guks-trl
+hongjoonahn-trl
+usik-luke-trl
+Jason-trillion
+jay-trl
+hoon-trl
+hyunwookim-trl
+bot-trl

@@ -128,6 +128,7 @@ inference/               nano-inference serving stack (thin, nanoGPT-style)
   vllm/                      second backend: out-of-tree vLLM plugin (block-diffusion + self-spec/AR-Trust)
     vllm_native_diffusion/     the plugin package (VLLM_PLUGINS=trida_diffusion)
     tools/, docs/              Slurm eval jobs, worklog + design notes
+  mlx/                       on-device backend (Apple Silicon): MLX self-spec decoder, OpenAI server, agent
 benchmark/               heavier agentic eval harnesses (bfcl_v4, tau2, functionchat, ko_agentbench,
                          swe_bench, terminal_bench) + serving/
 data/                    dataset download scripts + catalog
