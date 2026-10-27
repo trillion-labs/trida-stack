@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `--pack --multiturn` now packs conversations with buffered first-fit
+  (`PackedMultiTurnRowDataset`). A conversation that doesn't fit the current row
+  waits for a later one instead of being dropped; only conversations longer than
+  `--max_length` are skipped. `--micro_batch_size` is again the number of rows per
+  forward. **Removed:** `--pack_examples` and `--max_packed_rows`. The packer also
+  enforces its two preconditions instead of failing silently: a conversation that does
+  not fit a row alone, and a `buffer_size` below one, each raise instead of yielding an
+  oversized row or dropping the whole stream.
+
 - All four scheduled workflows moved off the hour and into the UTC evening, and
   their weekday fields shifted a day to compensate: 21:00 UTC is already the next
   day in Seoul, so `* * 1-5` would have run Tuesday through Saturday. Measured

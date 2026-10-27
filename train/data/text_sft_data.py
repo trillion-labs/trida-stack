@@ -463,44 +463,122 @@ def pack_rows_multiturn(rows, pad_id, bd_size, length_buckets, max_length):
             "turn_id": torch.stack([o[4] for o in out])}
 
 
-class PackedMultiTurnCollator:
-    """Pack multiple WHOLE multi-turn conversations per row for the FLARE two-stream forward: every
-    assistant turn supervised (``build_sample_multiturn``, interleaved reasoning), each conversation
-    block-aligned + doc-isolated (``seg_id`` -> per-doc ``cu_seqlens`` in the recurrence/conv/mask).
-    Mirrors ``PackedTextSftCollator`` but multi-turn + block-aligned. Forward cost is the doc length
-    (the [x0;xt] forward is 2*L, budgeted by capping the row to ``max_length``)."""
+def _stream_first_fit(docs, max_length, buffer_size=32, max_segments=0):
+    """Buffered first-fit packing over a doc stream; yields rows (lists of docs) of total length
+    ``<= max_length``. Nothing is dropped: a doc that doesn't fit the current row waits in the buffer
+    for a later row. Every row starts with the OLDEST buffered doc, so a long doc can't starve, and
+    the buffer never holds more than ``buffer_size`` docs because docs are pulled only to refill it.
+    Each doc must already fit alone (``len(doc["input_ids"]) <= max_length``); both preconditions
+    are enforced, because violating either one fails silently otherwise -- an oversized doc becomes
+    a row head unconditionally and yields a row over ``max_length``, and ``buffer_size < 1`` leaves
+    the buffer permanently empty, so the generator returns at once and the whole stream is lost."""
+    if buffer_size < 1:
+        raise ValueError(f"buffer_size must be >= 1, got {buffer_size}")
+    it = iter(docs)
+    buf, exhausted = [], False
 
-    def __init__(self, tokenizer, bd_size=4, max_length=32768, max_response_length=32768,
-                 length_buckets=(2048, 4096, 8192, 16384, 32768), max_segments=0, max_packed_rows=0,
-                 keep_all_reasoning=True):
+    def refill():
+        nonlocal exhausted
+        while not exhausted and len(buf) < buffer_size:
+            try:
+                buf.append(next(it))
+            except StopIteration:
+                exhausted = True
+
+    while True:
+        refill()
+        if not buf:
+            return
+        row = [buf.pop(0)]
+        used = row[0]["input_ids"].shape[0]
+        if used > max_length:
+            raise ValueError(
+                f"doc of {used} tokens does not fit alone in max_length={max_length}; "
+                "callers must drop it before packing (see PackedMultiTurnRowDataset._docs)"
+            )
+        i = 0
+        while True:
+            while i < len(buf) and not (max_segments and len(row) >= max_segments):
+                n = buf[i]["input_ids"].shape[0]
+                if used + n <= max_length:
+                    row.append(buf.pop(i))
+                    used += n
+                else:
+                    i += 1
+            before = len(buf)
+            refill()  # docs popped into this row freed buffer slots; scan the newcomers too
+            if len(buf) == before or (max_segments and len(row) >= max_segments):
+                break
+        yield row
+
+
+class PackedMultiTurnRowDataset(IterableDataset):
+    """Packed multi-turn rows for the FLARE two-stream forward (``--pack --multiturn``): builds whole
+    conversations (every assistant turn supervised via ``build_sample_multiturn``), block-aligns each
+    so packed doc starts land on block boundaries (doc-isolated via ``seg_id``), and yields ONE row at
+    a time via buffered first-fit (``_stream_first_fit``). A conversation that doesn't fit the
+    current row waits for a later one, so the only docs skipped are those that can't fit alone
+    (``> max_length`` tokens, or ``> max_response_length`` supervised). DataLoader ``batch_size`` =
+    rows per forward (``--micro_batch_size``). Packing runs per DataLoader worker over its sharded
+    stream."""
+
+    def __init__(self, base, tokenizer, bd_size, max_length=32768, max_response_length=32768,
+                 keep_all_reasoning=True, max_segments=0, buffer_size=32):
+        self.base = base
         self.tokenizer = tokenizer
         self.pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
         self.bd_size = bd_size
         self.max_length = max_length
         self.max_response_length = max_response_length
-        self.length_buckets = tuple(length_buckets) if length_buckets else None
-        self.max_segments = max_segments
-        self.max_packed_rows = max_packed_rows
         self.keep_all_reasoning = keep_all_reasoning
+        self.max_segments = max_segments
+        self.buffer_size = buffer_size
 
-    def __call__(self, examples):
-        kept = []
-        for ex in examples:
+    def _docs(self, counts):
+        for ex in self.base:
             s = build_sample_multiturn(self.tokenizer, ex, self.bd_size,
                                        keep_all_reasoning=self.keep_all_reasoning)
             if s is None:
+                counts["unusable"] += 1
                 continue
             s = _block_align_doc(s, self.bd_size, self.pad_id)
             if s["input_ids"].shape[0] > self.max_length:
+                counts["too_long"] += 1
                 continue
             if int((s["labels"] != -100).sum()) > self.max_response_length:
+                counts["response_too_long"] += 1
                 continue
-            kept.append(s)
-        if not kept:
+            counts["packed"] += 1
+            yield s
+
+    def __iter__(self):
+        counts = {"packed": 0, "too_long": 0, "response_too_long": 0, "unusable": 0}
+        rows = 0
+        for row in _stream_first_fit(self._docs(counts), self.max_length, self.buffer_size,
+                                     self.max_segments):
+            rows += 1
+            yield row
+        info = get_worker_info()
+        print(f"[pack] worker {info.id if info else 0}: {rows} rows from {counts['packed']} docs; "
+              f"skipped too_long={counts['too_long']} response_too_long={counts['response_too_long']} "
+              f"unusable={counts['unusable']}", flush=True)
+
+
+class StreamPackedMultiTurnCollator:
+    """Tensorize rows from ``PackedMultiTurnRowDataset`` via ``pack_rows_multiturn`` (no packing or
+    dropping here)."""
+
+    def __init__(self, tokenizer, bd_size, max_length=32768,
+                 length_buckets=(2048, 4096, 8192, 16384, 32768)):
+        self.pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
+        self.bd_size = bd_size
+        self.max_length = max_length
+        self.length_buckets = tuple(length_buckets) if length_buckets else None
+
+    def __call__(self, rows):
+        rows = [r for r in rows if r]
+        if not rows:
             return None
-        rows = greedy_pack(kept, self.max_length, self.max_segments, ar_only=True)  # cost = doc length
-        if self.max_packed_rows and len(rows) > self.max_packed_rows:
-            rows = rows[: self.max_packed_rows]
         return pack_rows_multiturn(rows, self.pad_id, self.bd_size, self.length_buckets, self.max_length)
 
 

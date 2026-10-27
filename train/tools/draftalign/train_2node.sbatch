@@ -34,7 +34,7 @@ export COMPILE_FLAG=$([ "${COMPILE_MLP:-1}" = 1 ] && echo --compile_mlp || true)
 # OFFLOAD=1 adds --activation_offload; hyungguk's final v6-2n runs ("nooff", 30 s/step, 64-68 GB) ran WITHOUT it —
 # with it, job 3719 did <5 steps in 25 min (CPU offload of 32k activations per layer).
 export OFFLOAD_FLAG=$([ "${OFFLOAD:-0}" = 1 ] && echo --activation_offload || true)   # exported: expanded inside the srun bash -c
-MICRO=${MICRO:-1}; ACCUM=${ACCUM:-2}; PACK_EXAMPLES=${PACK_EXAMPLES:-20}; MAX_PACKED_ROWS=${MAX_PACKED_ROWS:-1}
+MICRO=${MICRO:-1}; ACCUM=${ACCUM:-2}
 mkdir -p $SAVE_DIR $L/models/scratch/slurm
 [ -e $SAVE_DIR/RUN.json ] && { echo "refusing: $SAVE_DIR already has a run (RUN.json). Pick a new SAVE_NAME."; exit 2; }
 cat > $SAVE_DIR/RUN.json <<J
@@ -62,7 +62,6 @@ srun --ntasks-per-node=1 --export=ALL bash -c '
       --bd_size '"$BD"' --ar_loss_weight '"$AR_W"' --mask_pattern '"$MASK_PATTERN"' --fused_ce ${OFFLOAD_FLAG} ${COMPILE_FLAG} \
       --max_length '"$MAX_LEN"' --max_response_length '"$MAX_LEN"' \
       --length_buckets '"$BUCKETS"' --response_buckets '"$BUCKETS"' \
-      --pack_examples '"$PACK_EXAMPLES"' --max_packed_rows '"$MAX_PACKED_ROWS"' \
       --micro_batch_size '"$MICRO"' --grad_accum '"$ACCUM"' \
       --max_steps '"$MAX_STEPS"' --warmup '"$WARMUP"' --lr '"$LR"' --lr_min_ratio '"$LR_MIN_RATIO"' \
       --acc_metric_n '"$ACC_METRIC_N"' --auf_floor '"$AUF_FLOOR"' \

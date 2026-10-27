@@ -64,12 +64,15 @@ Collators, selected by flags:
 | *(none)* | `TextSftCollator` | single-turn, one convo/row |
 | `--multiturn` | `MultiTurnTextSftCollator` | every assistant turn supervised |
 | `--pack` | `PackedRowDataset` + `StreamPackedCollator` | packed single-turn |
-| `--pack --multiturn` | `PackedMultiTurnCollator` | **packed whole conversations** (hybrid/bidirectional only) |
+| `--pack --multiturn` | `PackedMultiTurnRowDataset` + `StreamPackedMultiTurnCollator` | **packed whole conversations** (hybrid/bidirectional only) |
 
 Packing is **document-isolated** three ways, all keyed off `seg_id`: the gated-delta recurrence +
 short-conv reset at every `cu_seqlens` boundary, the flex mask confines attention per document, and
 RoPE positions restart per document. Docs are padded to `bd_size` multiples so packed doc starts
-land on block boundaries (kernel requirement). Verified: perturbing one packed document changes the
+land on block boundaries (kernel requirement).
+Both packed paths stream rows with carry-over: a conversation that doesn't fit the current row waits
+for a later one (buffered first-fit for `--pack --multiturn`), so only conversations longer than
+`--max_length` are skipped; `--micro_batch_size` is the number of rows per forward. Verified: perturbing one packed document changes the
 other's logits by exactly 0.
 
 ## Flags that matter
