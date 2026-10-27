@@ -12,6 +12,7 @@ whose tokenizer ships a chat template (Qwen3, Tri-7B/Llama, …).
 
 import json
 import multiprocessing as mp
+import os
 import random
 
 import torch
@@ -65,7 +66,124 @@ def _to_ids(enc):
     return list(enc)
 
 
-def _apply_template(tokenizer, messages, tools, add_generation_prompt, keep_all_reasoning=False):
+# ---- images (Qwen3.5 VL) --------------------------------------------------------------------
+IMAGE_PAD = "<|image_pad|>"
+SPATIAL_MERGE = 2  # Qwen3.5 vision merger: 2x2 patches -> one LLM token
+
+
+def image_pad_id(tokenizer):
+    """``<|image_pad|>`` id, or None for tokenizers without it (cached: get_vocab() is costly)."""
+    pid = getattr(tokenizer, "_trida_image_pad_id", -1)
+    if pid == -1:
+        pid = tokenizer.convert_tokens_to_ids(IMAGE_PAD) if IMAGE_PAD in tokenizer.get_vocab() else None
+        tokenizer._trida_image_pad_id = pid
+    return pid
+
+
+def _is_image_part(part):
+    # Mirrors the chat template's test, so refs come out in the order it emits <|image_pad|>.
+    return isinstance(part, dict) and ("image" in part or "image_url" in part or part.get("type") == "image")
+
+
+def _image_refs(messages):
+    """Image references in render order. Raises on video parts (images only for now)."""
+    refs = []
+    for m in messages:
+        content = m.get("content")
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if _is_image_part(part):
+                ref = part.get("image") or part.get("image_url")
+                refs.append(ref.get("url") if isinstance(ref, dict) else ref)
+            elif isinstance(part, dict) and ("video" in part or part.get("type") == "video"):
+                raise ValueError("video content is not supported")
+    return refs
+
+
+def _load_image(ref, image_root=None):
+    import base64
+    import io
+
+    from PIL import Image
+    if ref.startswith("data:"):
+        img = Image.open(io.BytesIO(base64.b64decode(ref.split(",", 1)[1])))
+    else:
+        path = ref[len("file://"):] if ref.startswith("file://") else ref
+        if image_root and not os.path.isabs(path):
+            path = os.path.join(image_root, path)
+        img = Image.open(path)
+    return img.convert("RGB")
+
+
+def load_image_processor(path):
+    """The checkpoint's image processor on the PIL backend (no torchvision needed)."""
+    try:
+        from transformers import AutoImageProcessor
+        return AutoImageProcessor.from_pretrained(path, backend="pil")
+    except ImportError:  # transformers gates AutoImageProcessor itself on torchvision
+        from transformers.models.qwen2_vl.image_processing_pil_qwen2_vl import Qwen2VLImageProcessorPil
+        return Qwen2VLImageProcessorPil.from_pretrained(path)
+
+
+def process_images(image_processor, refs, image_root=None, max_image_pixels=1024 * 1024):
+    """Load + preprocess one conversation's images. Returns (pixel_values [P, C*T*p*p],
+    image_grid_thw [N, 3], tokens per image)."""
+    images = [_load_image(r, image_root) for r in refs]
+    size = dict(image_processor.size)
+    size["longest_edge"] = min(size.get("longest_edge") or max_image_pixels, max_image_pixels)
+    out = image_processor(images=images, return_tensors="pt", size=size)
+    grid = out["image_grid_thw"].long()
+    counts = (grid.prod(-1) // SPATIAL_MERGE**2).tolist()
+    return out["pixel_values"], grid, counts
+
+
+def _expand_image_pads(ids, pad_id, counts):
+    """The template emits ONE <|image_pad|> per image; the model needs one per merged patch. Images
+    appear in the same order in every (prefix) render, so expanding with the same ``counts`` keeps
+    prefix renders token-stable."""
+    out, k = [], 0
+    for t in ids:
+        if t == pad_id:
+            out.extend([pad_id] * counts[k])
+            k += 1
+        else:
+            out.append(t)
+    return out
+
+
+def mrope_position_ids(input_ids, image_grid_thw, image_token_id, spatial_merge=SPATIAL_MERGE):
+    """3-D (t, h, w) RoPE positions for ONE document, ``[3, T]`` — the single-sequence form of
+    ``Qwen3_5Model.get_rope_index``: text runs advance all three axes together; an image's tokens
+    take (start, start + row, start + col) over its merged grid, then the position advances by
+    ``max(h, w) // spatial_merge``. A text-only doc gives arange on every axis (= 1-D RoPE)."""
+    ids = torch.as_tensor(input_ids)
+    is_img = ids == image_token_id
+    pos = torch.empty(3, ids.shape[0], dtype=torch.long)
+    grids = iter(image_grid_thw.tolist() if image_grid_thw is not None else [])
+    cur, i, T = 0, 0, ids.shape[0]
+    while i < T:
+        j = i
+        while j < T and bool(is_img[j]) == bool(is_img[i]):
+            j += 1
+        if not is_img[i]:
+            pos[:, i:j] = torch.arange(cur, cur + (j - i))
+            cur += j - i
+        else:
+            _, gh, gw = next(grids)
+            h, w = gh // spatial_merge, gw // spatial_merge
+            if j - i != h * w:
+                raise ValueError(f"image span of {j - i} tokens does not match grid {h}x{w}")
+            pos[0, i:j] = cur
+            pos[1, i:j] = cur + torch.arange(h).repeat_interleave(w)
+            pos[2, i:j] = cur + torch.arange(w).repeat(h)
+            cur += max(gh, gw) // spatial_merge
+        i = j
+    return pos
+
+
+def _apply_template(tokenizer, messages, tools, add_generation_prompt, keep_all_reasoning=False,
+                    image_counts=None):
     """Render + tokenize one message list. No per-call tools fallback: the tools-vs-no-tools mode
     is chosen ONCE per example in ``build_sample`` so ``full`` and ``prompt`` always render in the
     same mode (otherwise they can diverge and break the prefix/label boundary).
@@ -73,12 +191,21 @@ def _apply_template(tokenizer, messages, tools, add_generation_prompt, keep_all_
     ``keep_all_reasoning`` is forwarded to the chat template (a no-op on stock templates; on the
     patched Qwen3 template it keeps ``<think>`` for non-last assistant turns that carry
     ``reasoning_content``). It must be identical across the ``full`` / ``prompt`` renders of one
-    sample, else the rendered reasoning diverges and the prefix/label boundary breaks."""
+    sample, else the rendered reasoning diverges and the prefix/label boundary breaks.
+
+    ``image_counts`` (tokens per image, in render order) expands each ``<|image_pad|>``; a render that
+    contains image pads without counts raises (only the packed multi-turn path handles images)."""
     enc = tokenizer.apply_chat_template(
         messages, tools=tools, tokenize=True, add_generation_prompt=add_generation_prompt,
         keep_all_reasoning=keep_all_reasoning,
     )
-    return _to_ids(enc)
+    ids = _to_ids(enc)
+    pad_id = image_pad_id(tokenizer)
+    if pad_id is not None and pad_id in ids:
+        if image_counts is None:
+            raise ValueError("conversation has images; only --pack --multiturn supports them")
+        ids = _expand_image_pads(ids, pad_id, image_counts)
+    return ids
 
 
 def build_sample(tokenizer, example, keep_all_reasoning=False):
@@ -136,20 +263,29 @@ def build_sample(tokenizer, example, keep_all_reasoning=False):
     return {"input_ids": ids, "labels": labels}
 
 
-def build_sample_multiturn(tokenizer, example, bd_size, keep_all_reasoning=False):
+def build_sample_multiturn(tokenizer, example, bd_size, keep_all_reasoning=False,
+                           image_processor=None, max_image_pixels=1024 * 1024):
     """Supervise EVERY assistant turn of a conversation in ONE sequence (for the causally-ordered
     multi-turn block-diffusion forward), instead of only the last turn.
 
     Returns ``None`` if unusable, else a dict of LongTensor[T]:
         input_ids, labels (all assistant turns supervised; else -100),
         resp_block (GLOBAL, conversation-ordered block id, unique per (turn, bd-block); -1 off-resp),
-        turn_id   (assistant-turn ordinal 0,1,...; -1 off-resp).
+        turn_id   (assistant-turn ordinal 0,1,...; -1 off-resp),
+    plus, when the conversation has images: ``pixel_values`` [P, C*T*p*p], ``image_grid_thw`` [N, 3]
+    and ``mrope_pos`` [3, T] (3-D RoPE positions). Images are image parts in message ``content``
+    (``{"type": "image", "image": <path | data: URI>}``; relative paths resolve against
+    ``example["image_root"]``) and need ``image_processor``. ``example["max_image_pixels"]``, if set,
+    overrides ``max_image_pixels`` for that conversation's images.
 
     Each assistant turn's content span is located by incremental prefix renders (the standard
     multi-turn label-masking trick): ``prompt_j = template(messages[:i_j], add_generation_prompt)``
-    marks the turn's content start, ``upto_j = template(messages[:i_j+1])`` its end. Turns whose
-    incremental render is not an exact token prefix of the full render are skipped (become clean
-    conditioning) rather than mis-supervised.
+    marks the turn's content start, ``upto_j = template(messages[:i_j+1])`` its end. A turn without
+    reasoning renders ``<think>\\n\\n</think>``, whose ``\\n\\n`` token never matches the generation
+    prompt's ``<think>\\n``; such turns are located by the turn header instead
+    (``template(messages[:i_j]) + "<|im_start|>assistant\\n"``) and train with the empty think block.
+    Turns that still don't render as exact token prefixes of the full render are skipped (become
+    clean conditioning) rather than mis-supervised.
     """
     messages = example.get("messages") or example.get("conversations")
     if not messages:
@@ -160,23 +296,38 @@ def build_sample_multiturn(tokenizer, example, bd_size, keep_all_reasoning=False
     if not asst_idxs:
         return None
 
+    try:
+        refs = _image_refs(messages)
+    except ValueError:
+        return None
+    counts = None
+    if refs:
+        if image_processor is None:
+            return None
+        # a record may raise (or lower) the cap for its own images, e.g. dense diagrams
+        cap = example.get("max_image_pixels") or max_image_pixels
+        try:
+            pixel_values, grid, counts = process_images(image_processor, refs, example.get("image_root"), cap)
+        except Exception:
+            return None
+
     tools = example.get("tools")
 
+    def render(msgs, tools_arg, gen):
+        return _apply_template(tokenizer, msgs, tools_arg, gen, keep_all_reasoning=keep_all_reasoning,
+                               image_counts=counts)
+
     def render_all(tools_arg):
-        full = _apply_template(tokenizer, messages, tools_arg, False,
-                               keep_all_reasoning=keep_all_reasoning)
-        spans = []
-        for i in asst_idxs:
-            prefix = _apply_template(tokenizer, messages[:i], tools_arg, True,
-                                     keep_all_reasoning=keep_all_reasoning)
-            upto = _apply_template(tokenizer, messages[: i + 1], tools_arg, False,
-                                   keep_all_reasoning=keep_all_reasoning)
-            spans.append((prefix, upto))
+        full = render(messages, tools_arg, False)
+        spans = [(render(messages[:i], tools_arg, True), render(messages[: i + 1], tools_arg, False))
+                 for i in asst_idxs]
         return full, spans
 
+    tools_arg = tools
     try:
         full, spans = render_all(tools)
     except Exception:
+        tools_arg = None
         try:
             full, spans = render_all(None)
         except Exception:
@@ -189,14 +340,25 @@ def build_sample_multiturn(tokenizer, example, bd_size, keep_all_reasoning=False
     labels = torch.full((T,), -100, dtype=torch.long)
     resp_block = torch.full((T,), -1, dtype=torch.long)
     turn_id = torch.full((T,), -1, dtype=torch.long)
+    header = None
 
     gblk = 0
     n_turns = 0
     for j, (prefix, upto) in enumerate(spans):
         lp, lu = len(prefix), len(upto)
         # prefix stability: both incremental renders must be exact token prefixes of `full`
-        if lu > T or lp >= lu or full[:lp] != prefix or full[:lu] != upto:
+        if lu > T or full[:lu] != upto:
             continue
+        if lp >= lu or full[:lp] != prefix:
+            if header is None:
+                header = tokenizer.encode("<|im_start|>assistant\n", add_special_tokens=False)
+            try:
+                base = render(messages[: asst_idxs[j]], tools_arg, False)
+            except Exception:
+                continue
+            lp = len(base) + len(header)
+            if lp >= lu or full[: len(base)] != base or full[len(base):lp] != header:
+                continue
         pos = torch.arange(lp, lu)
         labels[pos] = ids[pos]
         turn_id[pos] = j
@@ -205,9 +367,15 @@ def build_sample_multiturn(tokenizer, example, bd_size, keep_all_reasoning=False
         gblk += int(within.max().item()) + 1
         n_turns += 1
 
+    if counts:
+        labels[ids == image_pad_id(tokenizer)] = -100  # image tokens are never prediction targets
     if n_turns == 0 or int((labels != -100).sum()) == 0:
         return None
-    return {"input_ids": ids, "labels": labels, "resp_block": resp_block, "turn_id": turn_id}
+    out = {"input_ids": ids, "labels": labels, "resp_block": resp_block, "turn_id": turn_id}
+    if counts:
+        out.update(pixel_values=pixel_values, image_grid_thw=grid,
+                   mrope_pos=mrope_position_ids(ids, grid, image_pad_id(tokenizer)))
+    return out
 
 
 class TextSftCollator:
@@ -426,8 +594,12 @@ def _block_align_doc(s, bd_size, pad_id):
         return s
     def cat(x, v):
         return torch.cat([x, torch.full((padlen,), v, dtype=x.dtype)])
-    return {"input_ids": cat(s["input_ids"], pad_id), "labels": cat(s["labels"], -100),
-            "resp_block": cat(s["resp_block"], -1), "turn_id": cat(s["turn_id"], -1)}
+    out = dict(s, input_ids=cat(s["input_ids"], pad_id), labels=cat(s["labels"], -100),
+               resp_block=cat(s["resp_block"], -1), turn_id=cat(s["turn_id"], -1))
+    if "mrope_pos" in s:  # the pad continues the doc's positions, as the 1-D path does
+        nxt = int(s["mrope_pos"].max()) + 1
+        out["mrope_pos"] = torch.cat([s["mrope_pos"], torch.arange(nxt, nxt + padlen).expand(3, -1)], dim=1)
+    return out
 
 
 def pack_rows_multiturn(rows, pad_id, bd_size, length_buckets, max_length):
@@ -456,11 +628,27 @@ def pack_rows_multiturn(rows, pad_id, bd_size, length_buckets, max_length):
         return ids, lab, am, seg, tid
 
     out = [row_tensors(r) for r in rows]
-    return {"input_ids": torch.stack([o[0] for o in out]),
-            "labels": torch.stack([o[1] for o in out]),
-            "attention_mask": torch.stack([o[2] for o in out]),
-            "seg_id": torch.stack([o[3] for o in out]),
-            "turn_id": torch.stack([o[4] for o in out])}
+    batch = {"input_ids": torch.stack([o[0] for o in out]),
+             "labels": torch.stack([o[1] for o in out]),
+             "attention_mask": torch.stack([o[2] for o in out]),
+             "seg_id": torch.stack([o[3] for o in out]),
+             "turn_id": torch.stack([o[4] for o in out])}
+    docs = [s for row in rows for s in row]
+    if any("mrope_pos" in s for s in docs):
+        # 3-D RoPE positions [B, 3, L]: each doc starts at 0 (per-doc reset), text-only docs are
+        # arange on all three axes; row-end pad is 0 (masked out). Image tensors are concatenated
+        # in row-then-doc order, which is the order their <|image_pad|> runs appear in input_ids.
+        mrope = torch.zeros(len(rows), 3, L, dtype=torch.long)
+        for b, row in enumerate(rows):
+            off = 0
+            for s in row:
+                n = s["input_ids"].shape[0]
+                mrope[b, :, off:off + n] = s["mrope_pos"] if "mrope_pos" in s else torch.arange(n).expand(3, -1)
+                off += n
+        batch["mrope_pos"] = mrope
+        batch["pixel_values"] = torch.cat([s["pixel_values"] for s in docs if "pixel_values" in s])
+        batch["image_grid_thw"] = torch.cat([s["image_grid_thw"] for s in docs if "image_grid_thw" in s])
+    return batch
 
 
 def _stream_first_fit(docs, max_length, buffer_size=32, max_segments=0):
@@ -520,10 +708,12 @@ class PackedMultiTurnRowDataset(IterableDataset):
     current row waits for a later one, so the only docs skipped are those that can't fit alone
     (``> max_length`` tokens, or ``> max_response_length`` supervised). DataLoader ``batch_size`` =
     rows per forward (``--micro_batch_size``). Packing runs per DataLoader worker over its sharded
-    stream."""
+    stream. With ``image_processor`` set, conversations may carry images (see
+    ``build_sample_multiturn``); their tokens count toward ``max_length``."""
 
     def __init__(self, base, tokenizer, bd_size, max_length=32768, max_response_length=32768,
-                 keep_all_reasoning=True, max_segments=0, buffer_size=32):
+                 keep_all_reasoning=True, max_segments=0, buffer_size=32, image_processor=None,
+                 max_image_pixels=1024 * 1024):
         self.base = base
         self.tokenizer = tokenizer
         self.pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
@@ -533,11 +723,15 @@ class PackedMultiTurnRowDataset(IterableDataset):
         self.keep_all_reasoning = keep_all_reasoning
         self.max_segments = max_segments
         self.buffer_size = buffer_size
+        self.image_processor = image_processor
+        self.max_image_pixels = max_image_pixels
 
     def _docs(self, counts):
         for ex in self.base:
             s = build_sample_multiturn(self.tokenizer, ex, self.bd_size,
-                                       keep_all_reasoning=self.keep_all_reasoning)
+                                       keep_all_reasoning=self.keep_all_reasoning,
+                                       image_processor=self.image_processor,
+                                       max_image_pixels=self.max_image_pixels)
             if s is None:
                 counts["unusable"] += 1
                 continue
@@ -692,7 +886,7 @@ class JsonlAgenticDataset(IterableDataset):
             with open(path) as f:
                 for line in f:
                     if idx % nshard == shard:
-                        yield line
+                        yield path, line
                     idx += 1
 
     def __iter__(self):
@@ -707,12 +901,14 @@ class JsonlAgenticDataset(IterableDataset):
         rng = random.Random(self.seed + 1000 * nonce + shard)
 
         buf = []
-        for line in self._lines(shard, nshard):
+        for path, line in self._lines(shard, nshard):
             try:
                 ex = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            item = {"messages": ex.get("messages") or ex.get("conversations"), "tools": ex.get("tools")}
+            item = {"messages": ex.get("messages") or ex.get("conversations"), "tools": ex.get("tools"),
+                    "image_root": os.path.dirname(os.path.abspath(path)),  # relative image paths
+                    "max_image_pixels": ex.get("max_image_pixels")}        # per-record image cap
             if not item["messages"]:
                 continue
             if self.shuffle_buffer <= 1:

@@ -9,7 +9,7 @@ import argparse
 def build_parser():
     """Torch-free CLI definition, so `train.py --help` works before torch/FSDP are installed."""
     p = argparse.ArgumentParser()
-    p.add_argument("--model_id", default="Qwen/Qwen3-4B")
+    p.add_argument("--model_id", default="Qwen/Qwen3.5-4B")
     p.add_argument("--resume", default=None,
                    help="checkpoint dir to resume from (loads HF weights from it; also loads "
                         "optimizer state + global_step if train_state/ is present, else warm restart)")
@@ -91,6 +91,12 @@ def build_parser():
                         "with x0-causal (ar_loss_weight>0) + linear_block_mode=causal the model is "
                         "globally causal (vLLM-servable). Default off = original BD behavior.")
     p.add_argument("--max_segments", type=int, default=0, help="max segments per packed row (0=unlimited)")
+    p.add_argument("--projector_lr_scale", type=float, default=0.1,
+                   help="VL checkpoints: the vision projector's LR as a multiple of --lr (the vision "
+                        "encoder is frozen)")
+    p.add_argument("--max_image_pixels", type=int, default=1024 * 1024,
+                   help="VL checkpoints: downscale images above this many pixels (1024x1024 ~= 1k "
+                        "tokens per image; tokens = pixels / 32^2)")
     p.add_argument("--max_steps", type=int, default=2000)
     p.add_argument("--start_step", type=int, default=0,
                    help="initial global_step (warm-start continuation): continues the cosine LR "
