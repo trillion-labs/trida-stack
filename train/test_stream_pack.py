@@ -1,4 +1,8 @@
-"""CPU tests for packed multi-turn rows (buffered first-fit, --pack --multiturn). No GPU, no network."""
+"""CPU tests for packed multi-turn rows (buffered first-fit, --pack --multiturn).
+
+No GPU and no network, but not stdlib-only: importing train.data.text_sft_data reaches
+`transformers` through train.hf_block_diffusion, so CI installs it (see ci.yml).
+"""
 import random
 from types import SimpleNamespace
 

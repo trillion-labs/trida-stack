@@ -116,9 +116,12 @@ and a served model, but there are **CPU-safe** tests you can (and CI does) run w
 no GPU:
 
 ```bash
-pytest -q inference/test_smoke.py inference/test_jev.py \
-          inference/vllm/vllm_native_diffusion/test_two_stream_cpu.py
+pytest -q          # no paths: reads `testpaths` from pyproject.toml, same as CI
 ```
+
+Pass no paths. pytest ignores `testpaths` whenever paths are given on the command
+line, so a test listed in `pyproject.toml` but missing from your command (or from
+CI's) is registered and never run.
 
 - `inference/test_smoke.py` — offline wiring checks (mode registry, command
   construction, config keys); stdlib only.
@@ -129,9 +132,15 @@ pytest -q inference/test_smoke.py inference/test_jev.py \
 - `inference/vllm/vllm_native_diffusion/test_two_stream_cpu.py` — pins the
   two-stream GDN snapshot/restore decode algorithm in pure PyTorch on tiny
   tensors; needs `torch` (CPU is fine), no GPU or vLLM.
+- `tools/test_chat.py` — the chat CLI's offline paths.
+- `train/test_stream_pack.py` — buffered first-fit packing for `--pack --multiturn`,
+  on synthetic docs; needs `torch` and `transformers` (its import chain reaches
+  `train.hf_block_diffusion`), but downloads no model.
 
-If you add tests, keep the CPU-safe ones runnable without a GPU or network so they
-stay in CI.
+If you add tests, keep the CPU-safe ones runnable without a GPU or network, add them
+to `testpaths` in `pyproject.toml`, and check that whatever they import at module
+level is installed by the `Install CPU deps` step in `.github/workflows/ci.yml` —
+`pip install -e . --no-deps` skips `requirements.txt`, which targets a GPU cluster.
 
 ---
 

@@ -43,6 +43,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install pytest
+          # train/test_stream_pack.py reaches train.data.text_sft_data, whose module-level
+          # import chain ends at `transformers` (via train.hf_block_diffusion). It is CPU-only
+          # and pulls no model, but it is not in the default install because requirements.txt
+          # targets a GPU cluster and is skipped by --no-deps below.
+          pip install transformers
           pip install -e . --no-deps
       - name: Run CPU-safe tests
         # No paths here on purpose: pytest ignores `testpaths` whenever paths are passed on
