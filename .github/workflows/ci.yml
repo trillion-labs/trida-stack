@@ -45,9 +45,7 @@ jobs:
           pip install pytest
           pip install -e . --no-deps
       - name: Run CPU-safe tests
-        run: |
-          pytest -q \
-            inference/test_smoke.py \
-            inference/test_jev.py \
-            inference/vllm/vllm_native_diffusion/test_two_stream_cpu.py \
-            tools/test_chat.py
+        # No paths here on purpose: pytest ignores `testpaths` whenever paths are passed on
+        # the command line, so a test added to pyproject.toml but not to this list would be
+        # registered and never run. `pyproject.toml` is the single list.
+        run: pytest -q

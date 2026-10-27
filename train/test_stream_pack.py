@@ -2,6 +2,7 @@
 import random
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from train.data.text_sft_data import (
@@ -94,3 +95,50 @@ def test_collator_rows_are_block_aligned_and_doc_isolated():
     for k, d in enumerate(rows[0]):
         assert torch.equal(batch["input_ids"][0][seg == k], d["input_ids"])
     assert (batch["labels"][0][batch["attention_mask"][0] == 0] == -100).all()
+
+
+# --- preconditions and edge cases -------------------------------------------------
+# The six tests above all run the packer on well-formed, mixed-size streams. These pin
+# what happens when an input violates the docstring's contract, or sits on a boundary.
+
+def test_doc_that_does_not_fit_alone_is_rejected():
+    # A row head is taken unconditionally, so without the guard a 4000-token doc would be
+    # yielded as a 4000-token row under max_length=1024 and OOM a step mid-training.
+    docs = [make_doc(4000, 1), make_doc(100, 2)]
+    with pytest.raises(ValueError, match="does not fit alone"):
+        list(_stream_first_fit(iter(docs), 1024, buffer_size=4))
+
+
+def test_buffer_size_below_one_is_rejected():
+    # `while len(buf) < 0` never fires, so refill() is a no-op: the generator used to return
+    # immediately and drop the entire stream without raising or logging.
+    docs = [make_doc(100, t) for t in range(1, 6)]
+    with pytest.raises(ValueError, match="buffer_size must be >= 1"):
+        list(_stream_first_fit(iter(docs), 32768, buffer_size=0))
+
+
+def test_buffer_size_one_still_fills_rows():
+    # buffer_size=1 is legal: docs popped into the row free the slot, and refill() inside the
+    # scan loop pulls the next one, so a row keeps growing past the buffer bound.
+    docs = [make_doc(100, t) for t in range(1, 6)]
+    rows = list(_stream_first_fit(iter(docs), 32768, buffer_size=1))
+    assert [len(r) for r in rows] == [5]
+
+
+def test_empty_stream_yields_no_rows():
+    assert list(_stream_first_fit(iter([]), 32768, buffer_size=4)) == []
+
+
+def test_max_segments_one_gives_single_doc_rows():
+    # The test above covers max_segments=5; 1 is where an off-by-one in the `>=` would show.
+    docs = [make_doc(100, t) for t in range(1, 11)]
+    rows = list(_stream_first_fit(iter(docs), 32768, buffer_size=8, max_segments=1))
+    assert [len(r) for r in rows] == [1] * 10
+
+
+def test_row_filled_exactly_to_max_length():
+    # The fit test is `used + n <= max_length`; a row landing exactly on the bound must be
+    # accepted, not rolled over into the next row.
+    docs = [make_doc(512, 1), make_doc(512, 2), make_doc(8, 3)]
+    rows = list(_stream_first_fit(iter(docs), 1024, buffer_size=4))
+    assert [sum(d["input_ids"].shape[0] for d in r) for r in rows] == [1024, 8]
