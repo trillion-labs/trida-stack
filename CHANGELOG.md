@@ -114,6 +114,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the release procedure, and how maintainers join or step down. States plainly that
   `require_code_owner_review` is not yet enabled, so CODEOWNERS is advisory today.
 
+### Fixed
+
+- SGLang backend patch: self-speculative decoding corrupted requests when a new
+  request was prefilled inside a running decode batch. Their outputs drifted below
+  AR quality under concurrent load. The patch also stops a radix-cache lock
+  underflow (`mamba_lock_ref=0`) on the same path. `inference/sglang/README.md`
+  documents the remaining memory spike when a long prompt joins a sampling batch,
+  sized per prompt token.
+
 ## [0.1.2] — 2026-10-13
 
 A security dependency bump, and the supply-chain plumbing that v0.1.1 was cut thirty
