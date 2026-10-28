@@ -51,6 +51,10 @@ jobs:
           set -uo pipefail
           failed=0
           grep -q "security@trillionlabs.co" SECURITY.md || { echo "SECURITY.md: no reporting address"; failed=1; }
+          # The repository has GitHub private vulnerability reporting enabled, so the Security tab
+          # shows a "Report a vulnerability" button. SECURITY.md has to name that route too, or a
+          # reporter who uses it has no stated expectations and we have two channels, one documented.
+          grep -q "security/advisories" SECURITY.md || { echo "SECURITY.md: no GitHub advisory route"; failed=1; }
           grep -q "admin@trillionlabs.co" CODE_OF_CONDUCT.md || { echo "CODE_OF_CONDUCT.md: no reporting address"; failed=1; }
           grep -q "SECURITY.md" README.md || { echo "README.md: no path to SECURITY.md"; failed=1; }
           grep -q "CONTRIBUTING.md" README.md || { echo "README.md: no path to CONTRIBUTING.md"; failed=1; }

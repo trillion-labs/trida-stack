@@ -27,8 +27,16 @@ and the un-described older tags are out of scope by policy rather than by omissi
 **Please do not report security vulnerabilities through public GitHub issues,
 pull requests, or discussions.**
 
-Instead, report them privately by email to
-**[security@trillionlabs.co](mailto:security@trillionlabs.co)**.
+Instead, use either private channel:
+
+- **GitHub private vulnerability reporting** — the **Report a vulnerability**
+  button under the repository's [Security tab](https://github.com/trillion-labs/trida-stack/security/advisories).
+  The report, and the whole thread, stay private until an advisory is published.
+- **Email** — **[security@trillionlabs.co](mailto:security@trillionlabs.co)**,
+  a role alias rather than one person's inbox.
+
+Either reaches the maintainers; the GitHub route keeps the report attached to the
+repository and lets us credit you on the advisory.
 
 Please include as much of the following as you can:
 

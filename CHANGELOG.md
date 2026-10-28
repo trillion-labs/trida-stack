@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Vulnerability reports have a second private channel: GitHub private vulnerability
+  reporting is enabled, so the Security tab's **Report a vulnerability** button now
+  works, and `SECURITY.md` names it beside the role-alias email. `community-check`
+  fails if that route disappears from the document, which is what kept the address
+  check honest.
+
 - `--model_id` now defaults to `Qwen/Qwen3.5-4B` (was `Qwen/Qwen3-4B`).
 - Assistant turns without reasoning now train with their empty
   `<think>\n\n</think>` block. They were previously left unsupervised.
