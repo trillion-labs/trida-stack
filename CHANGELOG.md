@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Vulnerability reports have a second private channel: GitHub private vulnerability
+  reporting is enabled, so the Security tab's **Report a vulnerability** button now
+  works, and `SECURITY.md` names it beside the role-alias email. `community-check`
+  fails if that route disappears from the document, which is what kept the address
+  check honest.
+
 - The handle checker reads every file that names people, not only `CODEOWNERS`.
   `hongjoonahn-tri` was fixed in `CODEOWNERS` two weeks ago and survived in
   `GOVERNANCE.md` -- the document that says who is responsible -- as a link that 404s,
