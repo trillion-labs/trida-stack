@@ -28,7 +28,7 @@ several.
 | GitHub | Area |
 |---|---|
 | [@guks-trl](https://github.com/guks-trl) | training, two-stream kernels, model contract |
-| [@hongjoonahn-tri](https://github.com/hongjoonahn-tri) | serving backends, evaluation |
+| [@hongjoonahn-trl](https://github.com/hongjoonahn-trl) | serving backends, evaluation |
 | [@usik-luke-trl](https://github.com/usik-luke-trl) | release, supply chain, repository policy |
 
 These three are also the code owners for every protected path in

@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The handle checker reads every file that names people, not only `CODEOWNERS`.
+  `hongjoonahn-tri` was fixed in `CODEOWNERS` two weeks ago and survived in
+  `GOVERNANCE.md` -- the document that says who is responsible -- as a link that 404s,
+  because the check added at the time read one file. It now covers `GOVERNANCE.md` and
+  `docs/community/README.md`, and a failure names which file to edit.
+
 - `--model_id` now defaults to `Qwen/Qwen3.5-4B` (was `Qwen/Qwen3-4B`).
 - Assistant turns without reasoning now train with their empty
   `<think>\n\n</think>` block. They were previously left unsupervised.
