@@ -46,7 +46,7 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=8192)
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--top-p", type=float, default=0.95)
-    ap.add_argument("--top-k", type=int, default=50)
+    ap.add_argument("--top-k", type=int, default=20)
     ap.add_argument("--presence-penalty", type=float, default=0.0)
     ap.add_argument("--no-think", dest="think", action="store_false",
                     help="disable enable_thinking")
