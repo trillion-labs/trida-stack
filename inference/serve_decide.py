@@ -78,46 +78,72 @@ def split_turn(raw, thinking=True, truncated=False, tools=None):
 
 class TurnSplitter:
     """Streams a raw turn as (field, text) deltas: "reasoning_content" until </think>, then "content" until a
-    <tool_call> starts (tool calls are parsed from the whole turn at the end). Holds back a tail that could be the
-    start of a tag, so a tag split across chunks is never emitted as text."""
+    <tool_call> starts. Holds back a tail that could be the start of a tag, so a tag split across chunks is never
+    emitted as text. finish() settles the end the way split_turn reads the whole turn: the same tool calls, the text
+    of a malformed <tool_call> kept as content, and a turn that never closed its thinking (and was not cut off) also
+    sent as content, since split_turn reads that turn as the answer."""
 
     def __init__(self, thinking=True, tools=None):
+        self.thinking, self.tools = thinking, tools
         self.field = "reasoning_content" if thinking else "content"
-        self.tools = tools
-        self.buf, self.raw, self.in_calls = "", "", False
+        self.buf, self.raw, self.calls_text, self.in_calls, self.lead = "", "", "", False, True
+
+    def _emit(self, out, text):
+        text = text.replace("<think>", "")
+        if self.lead:                    # like split_turn's strip(): no whitespace at the start of a field
+            text = text.lstrip()
+            self.lead = not text
+        if text:
+            out.append((self.field, text))
 
     def feed(self, piece):
         self.raw += piece
+        if self.in_calls:
+            self.calls_text += piece
+            return []
         self.buf += piece
         out = []
         while True:
             tag = END_THINK if self.field == "reasoning_content" else CALL_OPEN
-            if self.in_calls:
-                self.buf = ""
-                return out
             i = self.buf.find(tag)
             if i < 0:
                 keep = max((k for k in range(1, len(tag)) if self.buf.endswith(tag[:k])), default=0)
                 text, self.buf = self.buf[:len(self.buf) - keep], self.buf[len(self.buf) - keep:]
-                text = text.replace("<think>", "")
-                if text:
-                    out.append((self.field, text))
+                self._emit(out, text)
                 return out
-            text = self.buf[:i].replace("<think>", "")
-            if text:
-                out.append((self.field, text))
+            self._emit(out, self.buf[:i])
             self.buf = self.buf[i + len(tag):]
             if self.field == "reasoning_content":
-                self.field = "content"
-                self.buf = self.buf.lstrip("\n")
+                self.field, self.lead = "content", True
             else:
-                self.in_calls = True
+                self.in_calls, self.calls_text, self.buf = True, CALL_OPEN + self.buf, ""
+                return out
 
-    def finish(self):
-        """-> (remaining deltas, tool calls)."""
-        out = [] if self.in_calls or not self.buf else [(self.field, self.buf)]
-        rest = self.raw.rpartition(END_THINK)[2] if END_THINK in self.raw else self.raw
-        return out, _tool_calls(rest, self.tools)
+    def finish(self, truncated=False):
+        """-> (remaining deltas, tool calls). `truncated`: max_tokens cut the turn."""
+        reasoning, text, calls = split_turn(self.raw, self.thinking, truncated, self.tools)
+        out = []
+        if self.in_calls:                # what is left of the <tool_call> text once the parsed calls are removed
+            rest = _CALL.sub("", self.calls_text).rstrip()
+            if rest.strip():
+                out.append(("content", rest))
+        elif self.buf:
+            self._emit(out, self.buf.rstrip() if self.field == "content" else self.buf)
+        if self.field == "reasoning_content" and text:   # thinking never closed: split_turn reads it as the answer
+            out.append(("content", text))
+        return out, calls
+
+
+def _num(body, key, default, cast):
+    """An optional numeric field: missing or null -> default (OpenAI clients send null for unset), else cast; a value
+    that is not a number is the caller's error (400), not the server's."""
+    v = body.get(key)
+    if v is None:
+        return default
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or (cast is int and v != int(v)):
+        from fastapi import HTTPException
+        raise HTTPException(400, f"{key} must be {'an integer' if cast is int else 'a number'}, got {v!r}")
+    return cast(v)
 
 
 def create_app(engine):
@@ -154,9 +180,9 @@ def create_app(engine):
         if not isinstance(messages, list) or not messages:
             raise HTTPException(400, "messages must be a non-empty list")
         thinking = (body.get("chat_template_kwargs") or {}).get("enable_thinking")
-        kw = dict(tools=body.get("tools"), max_new_tokens=int(body.get("max_tokens") or 2048),
-                  temperature=float(body.get("temperature", 0.6)), top_p=float(body.get("top_p", 0.95)),
-                  top_k=int(body.get("top_k", 20)), presence_penalty=float(body.get("presence_penalty", 0.0)),
+        kw = dict(tools=body.get("tools"), max_new_tokens=_num(body, "max_tokens", 2048, int),
+                  temperature=_num(body, "temperature", 0.6, float), top_p=_num(body, "top_p", 0.95, float),
+                  top_k=_num(body, "top_k", 20, int), presence_penalty=_num(body, "presence_penalty", 0.0, float),
                   enable_thinking=thinking)
         cid, created = f"chatcmpl-{uuid.uuid4().hex[:24]}", int(time.time())
         thinks = thinking is not False
@@ -177,7 +203,7 @@ def create_app(engine):
                         continue
                     for field, text in split.feed(piece):
                         yield chunk({field: text})
-                rest, calls = split.finish()
+                rest, calls = split.finish(stats.get("finish_reason") == "length")
                 for field, text in rest:
                     yield chunk({field: text})
                 if calls:

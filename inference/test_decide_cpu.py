@@ -116,13 +116,13 @@ def test_split_turn_without_closed_thinking():
     assert split_turn("plain answer", thinking=False) == ("", "plain answer", [])
 
 
-def _stream(raw, thinking=True, size=1):
+def _stream(raw, thinking=True, size=1, truncated=False, tools=None):
     """Feed a raw turn in `size`-character chunks; -> {field: text}, tool calls."""
-    sp, got = TurnSplitter(thinking), {}
+    sp, got = TurnSplitter(thinking, tools), {}
     for i in range(0, len(raw), size):
         for f, t in sp.feed(raw[i:i + size]):
             got[f] = got.get(f, "") + t
-    rest, calls = sp.finish()
+    rest, calls = sp.finish(truncated)
     for f, t in rest:
         got[f] = got.get(f, "") + t
     return got, calls
@@ -140,6 +140,9 @@ def test_turn_splitter_matches_split_turn(size):
 
 def test_turn_splitter_plain_and_no_thinking():
     got, calls = _stream("a < b </thi", size=2)   # a tag prefix that never completes is still text
+    # thinking never closed and not cut off: streamed live as reasoning, then sent as the answer (as split_turn reads it)
+    assert got == {"reasoning_content": "a < b </thi", "content": "a < b </thi"} and not calls
+    got, calls = _stream("a < b </thi", size=2, truncated=True)
     assert got == {"reasoning_content": "a < b </thi"} and not calls
     got, calls = _stream("391", thinking=False)
     assert got == {"content": "391"} and not calls
@@ -208,3 +211,108 @@ def test_decide_rows_match_the_jev_encoder():
         want = jev.encode_rows(CharTok(), jev.materialize(labelled), **jev.training_context(MAX_STATE))
         got = parse(req).encode(CharTok()).rows
         assert got == [{k: r[k] for k in ("ids", "decide", "opts")} for r in want]
+
+
+TURNS = [
+    ("weigh it\n</think>\n\nChecking.\n<tool_call>\n<function=f>\n<parameter=n>\n3\n</parameter>\n</function>\n"
+     "</tool_call>", True, False),
+    ("The answer is 42.", True, False),                                    # thinking never closed
+    ("still thinking", True, True),                                        # ... because max_tokens cut it
+    ("ok\n</think>\n\nText <tool_call>\n<function=f>\nbroken", True, False),   # malformed tool call
+    ("A <tool_call>\n<function=f>\n</function>\n</tool_call> B", False, False),  # text after a call
+    ("r</think>\n\nhi", True, False),
+    ("\n\n391", False, False),
+]
+
+
+@pytest.mark.parametrize("raw, thinking, truncated", TURNS)
+@pytest.mark.parametrize("size", [1, 2, 3, 1000])
+def test_stream_matches_split_turn(raw, thinking, truncated, size):
+    """Streamed and non-streamed chat return the same turn. Only trailing whitespace may differ: a stream cannot know
+    the text before a tag or the end was the last of its field."""
+    reasoning, text, calls = split_turn(raw, thinking, truncated, TOOLS)
+    got, got_calls = _stream(raw, thinking, size, truncated, TOOLS)
+    assert got.get("content", "").rstrip() == text
+    if reasoning:
+        assert got["reasoning_content"].rstrip() == reasoning
+    assert [c["function"] for c in got_calls] == [c["function"] for c in calls]
+
+
+class ChatEngine:
+    """Stands in for DecideEngine's chat: replays one raw turn, and records the sampling arguments it was given."""
+    ckpt = "/ckpt/trida-decide"
+
+    def __init__(self, raw, finish="stop"):
+        self.raw, self.finish, self.kw = raw, finish, None
+
+    async def achat(self, messages, **kw):
+        self.kw = kw
+        return {"text": self.raw, "prompt_tokens": 7, "completion_tokens": 5, "finish_reason": self.finish}
+
+    async def achat_stream(self, messages, **kw):
+        self.kw = kw
+        for i in range(0, len(self.raw), 3):
+            yield self.raw[i:i + 3]
+        yield {"prompt_tokens": 7, "completion_tokens": 5, "finish_reason": self.finish}
+
+
+def _client(engine):
+    pytest.importorskip("httpx")
+    testclient = pytest.importorskip("fastapi.testclient")
+    from serve_decide import create_app
+    return testclient.TestClient(create_app(engine))
+
+
+MSG = {"messages": [{"role": "user", "content": "hi"}]}
+
+
+def _events(r):
+    import json
+    lines = [x[len("data: "):] for x in r.text.split("\n") if x.startswith("data: ")]
+    assert lines[-1] == "[DONE]"
+    return [json.loads(x) for x in lines[:-1]]
+
+
+def test_chat_response_shape_and_usage():
+    raw = "look\n</think>\n\n<tool_call>\n<function=f>\n<parameter=n>\n3\n</parameter>\n</function>\n</tool_call>"
+    r = _client(ChatEngine(raw)).post("/v1/chat/completions", json={**MSG, "tools": TOOLS})
+    assert r.status_code == 200
+    choice = r.json()["choices"][0]
+    assert choice["finish_reason"] == "tool_calls"
+    assert choice["message"]["content"] is None and choice["message"]["reasoning_content"] == "look"
+    assert choice["message"]["tool_calls"][0]["function"] == {"name": "f", "arguments": '{"n": 3}'}
+    assert r.json()["usage"] == {"prompt_tokens": 7, "completion_tokens": 5, "total_tokens": 12}
+    r = _client(ChatEngine("cut off", "length")).post("/v1/chat/completions", json=MSG)
+    assert r.json()["choices"][0]["finish_reason"] == "length"
+
+
+@pytest.mark.parametrize("raw, finish", [("look\n</think>\n\nIt is 3.", "stop"), ("The answer is 42.", "stop"),
+                                         ("still thinking", "length"), (TURNS[0][0], "stop"), (TURNS[3][0], "stop")])
+def test_chat_stream_matches_non_stream(raw, finish):
+    client = _client(ChatEngine(raw, finish))
+    whole = client.post("/v1/chat/completions", json={**MSG, "tools": TOOLS}).json()["choices"][0]
+    events = _events(client.post("/v1/chat/completions", json={**MSG, "tools": TOOLS, "stream": True}))
+    deltas = [e["choices"][0]["delta"] for e in events]
+    assert deltas[0] == {"role": "assistant"}
+    last = events[-1]
+    assert last["choices"][0]["finish_reason"] == whole["finish_reason"] and last["usage"]["total_tokens"] == 12
+    order = [k for d in deltas[1:-1] for k in d]                 # reasoning, then content, then tool calls
+    assert order == sorted(order, key=["reasoning_content", "content", "tool_calls"].index)
+    text = "".join(d.get("content", "") for d in deltas).rstrip()
+    assert text == (whole["message"]["content"] or "")
+    calls = [c["function"] for d in deltas for c in d.get("tool_calls", [])]
+    assert calls == [c["function"] for c in whole["message"].get("tool_calls", [])]
+
+
+def test_chat_sampling_values():
+    engine = ChatEngine("x")
+    client = _client(engine)
+    body = {**MSG, "temperature": None, "top_p": None, "max_tokens": None, "top_k": None, "presence_penalty": None}
+    assert client.post("/v1/chat/completions", json=body).status_code == 200      # null means "use the default"
+    assert engine.kw["temperature"] == 0.6 and engine.kw["max_new_tokens"] == 2048 and engine.kw["top_k"] == 20
+    assert client.post("/v1/chat/completions", json={**MSG, "temperature": 0, "top_k": 5}).status_code == 200
+    assert engine.kw["temperature"] == 0.0 and engine.kw["top_k"] == 5            # 0 is greedy, not "unset"
+    for bad in ({"temperature": "hot"}, {"top_k": 2.5}, {"max_tokens": True}):
+        r = client.post("/v1/chat/completions", json={**MSG, **bad})
+        assert r.status_code == 400 and next(iter(bad)) in r.text
+    assert client.post("/v1/chat/completions", json={"messages": []}).status_code == 400
