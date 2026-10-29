@@ -5,7 +5,7 @@
 | 구분 | 외부유입 |
 | 라이선스 | Apache-2.0 |
 | 획득 경로 | https://github.com/sgl-project/sglang |
-| 사용 위치 | `inference/sglang/` |
+| 사용 위치 | `inference/zoro-1/sglang/` |
 | 평가 기록일 | 2026-10-13 |
 | 결정 시점 | adopted as the first diffusion serving backend, ahead of the vLLM plugin |
 | 결정 | **채택** |

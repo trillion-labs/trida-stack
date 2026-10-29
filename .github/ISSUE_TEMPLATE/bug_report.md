@@ -17,7 +17,7 @@ A clear and concise description of what the bug is.
 Steps or a minimal command to reproduce:
 
 ```bash
-# e.g. python inference/serve.py <model> --mode diffusion ...
+# e.g. python inference/zoro-1/serve.py <model> --mode diffusion ...
 ```
 
 ## Expected behavior

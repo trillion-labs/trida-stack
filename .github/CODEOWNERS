@@ -22,4 +22,4 @@
 
 # The fetch recipes are the install path for both two-stream code paths.
 /train/block_gated_delta_rule/   @guks-trl @hongjoonahn-trl @usik-luke-trl
-/inference/sglang/               @guks-trl @hongjoonahn-trl @usik-luke-trl
+/inference/zoro-1/sglang/        @guks-trl @hongjoonahn-trl @usik-luke-trl

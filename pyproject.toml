@@ -33,23 +33,21 @@ Issues = "https://github.com/trillion-labs/trida-stack/issues"
 [tool.setuptools]
 # First-party packages only. The PolyForm-NC two-stream kernels are NOT bundled (fetched by
 # train/block_gated_delta_rule/fetch_kernels.sh); vLLM / SGLang backends are installed separately.
-packages = ["train", "train.data", "inference", "inference.ifeval_lib"]
-
-[tool.setuptools.package-data]
-inference = ["configs/*.yaml"]
+packages = ["train", "train.data"]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
 
 [tool.pytest.ini_options]
-# inference/ is a package, but its CLIs/tests use sibling imports (e.g. `import serve`).
-pythonpath = ["inference", "."]
+# Each model's nano-inference (inference/<model>/) is scripts with sibling imports (e.g. `import serve`).
+pythonpath = ["inference/zoro-1", "."]
 # CPU-only tests (no GPU, no network). The vLLM test additionally needs torch.
 testpaths = [
-  "inference/test_smoke.py",
-  "inference/test_jev.py",
-  "inference/test_decide_cpu.py",
-  "inference/vllm/vllm_native_diffusion/test_two_stream_cpu.py",
+  "inference/zoro-1/test_smoke.py",
+  "inference/zoro-1/test_jev.py",
+  "inference/zoro-1/test_decide_cpu.py",
+  "inference/zoro-1/speedrun/test_speedrun.py",
+  "inference/zoro-1/vllm/vllm_native_diffusion/test_two_stream_cpu.py",
   "tools/test_chat.py",
   "train/test_stream_pack.py",
   "train/test_vlm.py",
@@ -71,4 +69,4 @@ select = ["E9", "F63", "F7", "F82"]
 # to library standards.
 [tool.ruff.lint.per-file-ignores]
 "train/tools/**" = ["F821"]
-"inference/vllm/tools/**" = ["F821"]
+"inference/zoro-1/vllm/tools/**" = ["F821"]

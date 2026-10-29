@@ -1,0 +1,12 @@
+# Zoro-1 self-speculative decoding, as on the model card: generation block 8 (block_diffusion.json bd=8),
+# bd_bidir_shift, 15 positions per forward pass; temperature 1.0 / top-k 20 / top-p 0.95.
+variant: bd_bidir_shift
+block_size: 15
+gen_block_size: 8
+mask_id: 248077   # mask token id of the served checkpoint (model-specific)
+causal_prefill: true
+temperature: 1.0
+top_k: 20
+top_p: 0.95
+use_spec_verify: true
+draft_mode: strict_truncated

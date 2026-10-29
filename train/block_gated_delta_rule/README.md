@@ -4,7 +4,7 @@ The two-stream Gated-DeltaNet + ShortConv Triton kernels used by
 `train/hf_block_diffusion_hybrid.py` (`forward_flare`) are **not vendored in this
 repo**. They are PolyForm-Noncommercial 1.0.0 (upstream) — see
 `LICENSE.HybridDiffusion` — so this Apache-2.0 repo ships a *recipe* to assemble
-them from their public upstream, exactly like `inference/sglang/`.
+them from their public upstream, exactly like `inference/zoro-1/sglang/`.
 
 ## What you get
 

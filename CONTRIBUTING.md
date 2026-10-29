@@ -18,8 +18,8 @@ this repository**. They are **PolyForm Noncommercial 1.0.0** upstream code that 
 [`COMPLIANCE.md`](COMPLIANCE.md) §1b and [`NOTICE`](NOTICE)):
 
 - `train/block_gated_delta_rule/fetch_kernels.sh` + `trillion_mods.patch`
-- `inference/sglang/two_stream_diffusion.patch`
-- `inference/vllm/vllm_native_diffusion/KERNELS.md`
+- `inference/zoro-1/sglang/two_stream_diffusion.patch`
+- `inference/zoro-1/vllm/vllm_native_diffusion/KERNELS.md`
 
 **The two-stream training and diffusion-serving paths are noncommercial-only.**
 Please do not paste, vendor, or otherwise redistribute those kernels (or Trillion's
@@ -61,7 +61,7 @@ source .venv/bin/activate
 pip install -e ".[dev]"    # dev extra = pytest, ruff, pre-commit
 
 # 4. (optional) inference/eval client deps
-pip install -r inference/requirements.txt
+pip install -r inference/zoro-1/requirements.txt
 ```
 
 > **Note on `torch`:** `requirements.txt` pins the CUDA build to match the
@@ -123,13 +123,13 @@ Pass no paths. pytest ignores `testpaths` whenever paths are given on the comman
 line, so a test listed in `pyproject.toml` but missing from your command (or from
 CI's) is registered and never run.
 
-- `inference/test_smoke.py` — offline wiring checks (mode registry, command
+- `inference/zoro-1/test_smoke.py` — offline wiring checks (mode registry, command
   construction, config keys); stdlib only.
-- `inference/test_jev.py` — the Jev encoder imports without torch, and the pointer
+- `inference/zoro-1/test_jev.py` — the Jev encoder imports without torch, and the pointer
   head on hand-worked values; needs `torch` (CPU is fine). The token-level check,
-  `inference/test_jev_golden.py`, needs the gated Trida2.1-4B tokenizer in the local
+  `inference/zoro-1/test_jev_golden.py`, needs the gated Trida2.1-4B tokenizer in the local
   cache and is run by hand (see its docstring).
-- `inference/vllm/vllm_native_diffusion/test_two_stream_cpu.py` — pins the
+- `inference/zoro-1/vllm/vllm_native_diffusion/test_two_stream_cpu.py` — pins the
   two-stream GDN snapshot/restore decode algorithm in pure PyTorch on tiny
   tensors; needs `torch` (CPU is fine), no GPU or vLLM.
 - `tools/test_chat.py` — the chat CLI's offline paths.
@@ -150,7 +150,7 @@ level is installed by the `Install CPU deps` step in `.github/workflows/ci.yml` 
 2. Make focused commits; keep unrelated changes out of the PR.
 3. Run `ruff check .`, `pre-commit run` (on your staged files), and the CPU-safe
    tests locally.
-4. Update docs (`README.md`, `inference/README.md`, `train/README.md`) when you
+4. Update docs (`README.md`, `inference/zoro-1/README.md`, `train/README.md`) when you
    change behavior, flags, or the model contract.
 5. If you touch dependencies or third-party code, update
    [`COMPLIANCE.md`](COMPLIANCE.md) and [`NOTICE`](NOTICE) accordingly — and never
