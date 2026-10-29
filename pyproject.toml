@@ -52,6 +52,7 @@ testpaths = [
   "tools/test_chat.py",
   "train/test_stream_pack.py",
   "train/test_vlm.py",
+  "train/test_jev.py",
 ]
 
 [tool.ruff]

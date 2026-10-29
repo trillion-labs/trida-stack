@@ -120,6 +120,7 @@ class HFBlockDiffusion(nn.Module):
         self.is_vl = getattr(config, "vision_config", None) is not None
         auto_cls = AutoModelForImageTextToText if self.is_vl else AutoModelForCausalLM
         self.model = auto_cls.from_pretrained(model_id, dtype=dtype, trust_remote_code=trust_remote_code)
+        self.compute_dtype = dtype   # activations/masks; the stored params may be fp32 masters (train.py --fp32_master)
         self.image_token_id = getattr(config, "image_token_id", None) if self.is_vl else None
         if self.is_vl:
             # Frozen vision encoder: only the projector (merger) trains with the language model.
@@ -171,21 +172,27 @@ class HFBlockDiffusion(nn.Module):
     def visual(self):  # the vision tower (encoder blocks + merger) of a VL checkpoint, else None
         return self.model.model.visual if self.is_vl else None
 
-    def param_groups(self, projector_lr_scale=1.0):
+    def param_groups(self, projector_lr_scale=1.0, jev_head_lr_scale=1.0):
         """Trainable parameters as optimizer groups, each tagged with an ``lr_scale`` relative to the
         base LR (the trainer applies ``schedule * lr_scale`` every step): the vision projector
-        (``visual.merger``) at ``projector_lr_scale``, the language model at 1. The vision encoder is
+        (``visual.merger``) at ``projector_lr_scale``, the Jev pointer head at ``jev_head_lr_scale``, the
+        language model at 1. The vision encoder is
         frozen, so it appears in neither group."""
-        backbone, projector = [], []
+        backbone, projector, jev_head = [], [], []
         for name, p in self.named_parameters():
             if not p.requires_grad:
                 continue
             if ".visual." in name and ".visual.merger." not in name:
                 raise RuntimeError(f"vision encoder parameter {name} is trainable; expected it frozen")
-            (projector if ".visual.merger." in name else backbone).append(p)
+            if name.startswith("jev_head."):
+                jev_head.append(p)
+            else:
+                (projector if ".visual.merger." in name else backbone).append(p)
         groups = [{"params": backbone, "lr_scale": 1.0}]
         if projector:
             groups.append({"params": projector, "lr_scale": projector_lr_scale})
+        if jev_head:
+            groups.append({"params": jev_head, "lr_scale": jev_head_lr_scale})
         return groups
 
     def _set_text_attn_impl(self, impl):
@@ -872,7 +879,7 @@ class HFBlockDiffusion(nn.Module):
         argument the dense packed diffusion path (``forward_packed``) relies on. HF's native
         gradient checkpointing (enabled in ``__init__``) still applies, since the whole stack runs
         through ``self.tm``."""
-        dtype = self.tm.embed_tokens.weight.dtype
+        dtype = self.compute_dtype
         mask, impl = self._ar_doc_mask(self.ar_segid(attention_mask, seg_id), dtype=dtype)
         self._set_attn_impl(impl)
         out = self.tm(input_ids=input_ids, attention_mask=mask, use_cache=False)

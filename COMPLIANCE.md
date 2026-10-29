@@ -12,6 +12,7 @@ model-card license.
 |---|---|---|---|
 | IFEval scorer | `inference/ifeval_lib/` | [google-research · instruction_following_eval](https://github.com/google-research/google-research/tree/master/instruction_following_eval) | **Apache-2.0** |
 | Jev request encoding (vendored, adapted) | `inference/jev.py`, `inference/jev_head.py`, `scripts/export_kev_checkpoint.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
+| Typed-decision training, kev scheme (vendored, adapted) | `train/jev.py`, `train/tools/export_kev_checkpoint.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
 | mlx-vlm Qwen3-VL vision encoder (adapted) | `inference/mlx/trida_mlx/vision.py` | [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) `mlx_vlm/models/qwen3_vl/vision.py` | **MIT** |
 | MLX gated-delta Metal kernel (adapted) | `inference/mlx/trida_mlx/kernels.py` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) `mlx_lm/models/gated_delta.py` | **MIT** |
 | Qwen3.5 / Trida chat template (test fixture) | `inference/mlx/tests/fixtures/trida_chat_template.jinja` | shipped with `trillionlabs/Trida2.0-4B` (from Qwen3.5) | **Apache-2.0** |
@@ -19,7 +20,10 @@ model-card license.
 These are the only third-party source code redistributed in the repository (see
 [`NOTICE`](NOTICE)); `inference/jev.py` and `inference/jev_head.py` vendor kev's request
 mapping, encoding and pointer head, and `scripts/export_kev_checkpoint.py` writes kev's
-checkpoint format. Everything else below is installed or fetched separately.
+checkpoint format. On the training side `train/jev.py` vendors the same mapping and
+encoding plus kev's augmentation, pointer head and loss, adapted to this trainer's packed
+rows, and `train/tools/export_kev_checkpoint.py` writes the same format. Everything else
+below is installed or fetched separately.
 
 ## 1b. Noncommercial upstream code (fetched via recipe, NOT bundled)
 

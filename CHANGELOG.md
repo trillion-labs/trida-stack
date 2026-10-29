@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   positions. `train/tools/compose_vl_checkpoint.py` attaches the base vision tower
   to a text-only checkpoint. `shape_for_sglang.py` passes VL checkpoints through.
   The FSDP ranks stay in lockstep when a batch has no images.
+- Typed-decision training in [kev](https://github.com/jaredpalmer/kev)'s scheme
+  (`train/jev.py`, `--jev_data` / `--jev_only`). A pointer head on the clean causal
+  stream answers typed questions (yes/no, pick one, score) over a state. kev's
+  encoding, augmentation and loss are ported. It runs alone or interleaved with SFT,
+  with `--jev_head_lr_scale`, `--jev_loss_weight` and `--jev_micro_per_step`.
+  `train/tools/export_kev_checkpoint.py` exports a checkpoint to kev's layout for
+  `kev.benchmark` / `kev.serve`.
+- `--fp32_master` (fp32 weights and AdamW state over bf16 compute; needed at small
+  LRs) and `--adam_beta2`.
 
 ### Changed
 
@@ -75,6 +84,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   move. `ci.yml` also moves from checkout v4 to v6, which the rest already used.
 
 ### Changed
+
+- `--model_id` now defaults to `Qwen/Qwen3.5-4B` (was `Qwen/Qwen3-4B`).
+- Assistant turns without reasoning now train with their empty
+  `<think>\n\n</think>` block. They were previously left unsupervised.
+- `--pack --multiturn` now packs conversations with buffered first-fit
+  (`PackedMultiTurnRowDataset`). A conversation that doesn't fit the current row
+  waits for a later one instead of being dropped; only conversations longer than
+  `--max_length` are skipped. `--micro_batch_size` is again the number of rows per
+  forward. **Removed:** `--pack_examples` and `--max_packed_rows`.
 
 - The metrics workflow opens a pull request instead of pushing to the default
   branch. Two reasons, and the second one is that the old version could not have
