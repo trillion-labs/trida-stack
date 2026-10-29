@@ -10,6 +10,10 @@ numpy
 # >=5.0.1: GHSA-379c-qx7v-6h59 path traversal in folder-based builders.
 # Unpinned, this resolved to 2.14.4.
 datasets>=5.0.1
+# Transitive (via huggingface_hub / torch), pinned here so regenerating the lock
+# keeps the floor. >=4.2.1: six advisories against 4.1.0, the worst of them
+# GHSA-v4x8-3wr5-3wq8 (HIGH).
+filelock>=4.2.1
 huggingface_hub
 python-dotenv
 wandb
@@ -17,6 +21,8 @@ wandb
 transformers>=4.57,<5
 accelerate
 sentencepiece
+# image loading for vision-language training (the PIL image-processor backend; no torchvision)
+pillow
 tiktoken
 fsspec
 # vLLM / SGLang serving backends are optional and installed separately (see inference/).

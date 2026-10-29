@@ -19,6 +19,41 @@ Qwen3.5 two-stream checkpoint — i.e. the `LowConfidenceShiftHybridDiffusion` a
 registration, the dllm decode algorithms + scheduler mixin, the GDN attention
 backend, the Qwen3.5 model/logits path, and the CUDA-graph / KV-cache plumbing).
 
+It also fixes two bugs in the upstream fast decode loop. That loop lets a new
+request prefill inside a batch that is already decoding (inline absorb):
+
+- **Corrupted requests.** Re-initialising the batch flipped requests that were
+  already decoding back to the prefill phase. On the next step self-spec emitted
+  nothing for them, skipped their KV trim, and wrote the MASK/draft block into
+  their KV cache and GDN state. Their outputs drifted and dropped spans whenever
+  requests arrived while others were decoding, i.e. under any concurrent load.
+  With the fix, self-spec matches AR again. On a 4B checkpoint, BFCL in
+  self-spec went from 66.1 to 80.5, against 81.0 for AR at the same sampling
+  settings.
+- **Crash.** The absorbed request's radix-cache node was never locked, so
+  releasing it underflowed the lock count
+  (`AssertionError: dec_lock_ref ... mamba_lock_ref=0`).
+
+Rebuild the backend from the current patch if you built it before this fix.
+
+Known limitation: when self-spec samples (temperature > 0), a prompt that joins a
+running batch gets full-vocabulary logits computed for every prompt token, although
+only the last one is used. The spike is predictable from prompt length: about
+1.5 MB per prompt token for the Qwen3.5 vocabulary (248k entries as bf16, then as
+fp32), summed over every prompt absorbed in the same step.
+
+| prompt tokens absorbed in one step | logits spike |
+|---|---|
+| 4k | ~6 GB |
+| 8k | ~12 GB |
+| 16k | ~24 GB |
+
+The spike has to fit outside the static pool. `serve.py --mem-fraction` (default 0.8)
+leaves about 16 GB of an 80 GB GPU outside it, enough for roughly 8k absorbed prompt
+tokens after CUDA-graph and activation overhead. `--mem-fraction 0.7` leaves about
+24 GB, enough for roughly 12–16k. Greedy self-spec (temperature 0) takes a tiled
+argmax path and is not affected.
+
 ## Recipe
 
 ### 1. Clone the pinned upstream

@@ -1,0 +1,4 @@
+# local benchmark / profiling outputs and request logs
+bench*.json
+reqlog/
+*.egg-info/

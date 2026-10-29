@@ -11,10 +11,16 @@ model-card license.
 | Component | Path | Upstream | License |
 |---|---|---|---|
 | IFEval scorer | `inference/ifeval_lib/` | [google-research · instruction_following_eval](https://github.com/google-research/google-research/tree/master/instruction_following_eval) | **Apache-2.0** |
-| kev request format (derived) | `inference/decide_request.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
+| Jev request encoding (vendored, adapted) | `inference/jev.py`, `inference/jev_head.py`, `scripts/export_kev_checkpoint.py`, `inference/decide_request.py`, `inference/decide_engine.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
+| mlx-vlm Qwen3-VL vision encoder (adapted) | `inference/mlx/trida_mlx/vision.py` | [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) `mlx_vlm/models/qwen3_vl/vision.py` | **MIT** |
+| MLX gated-delta Metal kernel (adapted) | `inference/mlx/trida_mlx/kernels.py` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) `mlx_lm/models/gated_delta.py` | **MIT** |
+| Qwen3.5 / Trida chat template (test fixture) | `inference/mlx/tests/fixtures/trida_chat_template.jinja` | shipped with `trillionlabs/Trida2.0-4B` (from Qwen3.5) | **Apache-2.0** |
 
-These are the **only** third-party source code redistributed in the repository (see
-[`NOTICE`](NOTICE)). Everything else below is installed or fetched separately.
+These are the only third-party source code redistributed in the repository (see
+[`NOTICE`](NOTICE)); `inference/jev.py` and `inference/jev_head.py` vendor kev's request
+mapping, encoding and pointer head, and `scripts/export_kev_checkpoint.py` writes kev's
+checkpoint format; `inference/decide_request.py` and `inference/decide_engine.py` (the decision
+server) follow the same encoding and pointer head. Everything else below is installed or fetched separately.
 
 ## 1b. Noncommercial upstream code (fetched via recipe, NOT bundled)
 
@@ -42,9 +48,12 @@ noncommercial code.
 | HF Transformers | model loading (≥ 4.57) | [huggingface/transformers](https://github.com/huggingface/transformers) | **Apache-2.0** |
 | HF Datasets | eval-data loading | [huggingface/datasets](https://github.com/huggingface/datasets) | **Apache-2.0** |
 | HF Accelerate | training | [huggingface/accelerate](https://github.com/huggingface/accelerate) | **Apache-2.0** |
+| Pillow | image loading for image+text training | [python-pillow/Pillow](https://github.com/python-pillow/Pillow) | **MIT-CMU (HPND)** |
 | SGLang | diffusion serving backend; stock ≥ 0.5.22 for the decision server (`inference/serve_decide.py`, no patch) | [sgl-project/sglang](https://github.com/sgl-project/sglang) | **Apache-2.0** |
 | FastAPI / Uvicorn | decision server HTTP layer (optional) | [fastapi/fastapi](https://github.com/fastapi/fastapi), [encode/uvicorn](https://github.com/encode/uvicorn) | **MIT** / **BSD-3-Clause** |
 | vLLM | optional AR serving backend | [vllm-project/vllm](https://github.com/vllm-project/vllm) | **Apache-2.0** |
+| MLX | on-device backend (`inference/mlx/`) | [ml-explore/mlx](https://github.com/ml-explore/mlx) | **MIT** |
+| mlx-lm | Qwen3.5 model + kernels for `inference/mlx/` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) | **MIT** |
 
 ## 3. Benchmark harnesses (invoked from `benchmark/`, not bundled)
 

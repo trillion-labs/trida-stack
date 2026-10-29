@@ -44,7 +44,7 @@ Freeze the 4B, train a small (4-6 layer) block-diffusion drafter on its greedy o
 Prerequisite work: drafter architecture choice (reuse DFlash's), data is the same self-distilled corpus.
 
 ## Regardless of branch — do these first (cheap, they de-risk everything after)
-- **Fix `max_packed_rows=1`**: the collator drops every conversation that does not fit row 1. With
+- **Fix `max_packed_rows=1`** *(done: `--pack --multiturn` now streams rows with carry-over; the flag is gone)*: the collator drops every conversation that does not fit row 1. With
   `PACK_EXAMPLES=20` that is most of the pull, i.e. we are training on a biased subsample (short convs).
   Carry leftovers to the next step. This alone may explain part of the plateau.
 - **Add the acceptance metric to the training loop** (slot-1..k argmax agreement with the clean head, from

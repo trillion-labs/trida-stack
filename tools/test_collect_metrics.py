@@ -132,3 +132,33 @@ def test_internal_series_is_never_a_rate():
     src = (pathlib.Path(__file__).resolve().parent / "collect_metrics.py").read_text()
     assert "closed_without_an_outside_response" in src
     assert "M-102_no_response_rate_pct" not in src
+
+
+# --- population split ---------------------------------------------------------
+# The split decides which series an item lands in, so a silent change to it
+# invalidates the comparison between periods that Lv3 is asking for.
+
+def test_first_party_comes_from_the_roster_not_an_api():
+    """Both API routes fail from a workflow because org membership here is private.
+
+    /collaborators shows GITHUB_TOKEN only DIRECT collaborators; author_association
+    reports MEMBER only when membership is visible. Collected in Actions, both called
+    32 of our own items outside contributions, from a single account.
+    """
+    src = (pathlib.Path(__file__).resolve().parent / "collect_metrics.py").read_text()
+    # Strip comments: both endpoints are named there, explaining why they are not used.
+    code = "\n".join(l.split("#", 1)[0] for l in src.splitlines())
+    assert "first-party.txt" in code
+    assert "/collaborators" not in code
+    assert "author_association" not in code
+
+
+def test_the_roster_is_present_and_parses():
+    roster = pathlib.Path(__file__).resolve().parent.parent / "docs/metrics/first-party.txt"
+    names = [
+        l.strip() for l in roster.read_text().splitlines()
+        if l.strip() and not l.lstrip().startswith("#")
+    ]
+    assert names, "roster is empty"
+    assert all(" " not in n for n in names), "a login cannot contain a space"
+    assert len(names) == len(set(names)), "duplicate login"

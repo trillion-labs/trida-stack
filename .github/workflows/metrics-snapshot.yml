@@ -7,7 +7,11 @@ on:
     # check monthly takes a quarter to show you the collection itself is wrong. Drops to
     # monthly once a 90-day baseline exists. Weekly also stays inside the 14-day window
     # GitHub's traffic API retains.
-    - cron: "20 1 * * 1"
+    #
+    # 22:17 UTC Sunday == 07:17 Monday in Asia/Seoul, and deliberately after the other
+    # three: the snapshot should see that morning's supply-chain and unanswered-item
+    # results, not the previous week's.
+    - cron: "17 22 * * 0"
   workflow_dispatch:
     inputs:
       period:
@@ -32,8 +36,8 @@ jobs:
     name: Collect and open a PR
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.10"
 

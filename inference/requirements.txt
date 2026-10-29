@@ -4,6 +4,7 @@
 # serve.py / chat.py / eval.py (gsm8k, mmlu_pro)
 requests
 datasets>=5.0.1   # GHSA-379c-qx7v-6h59
+filelock>=4.2.1   # GHSA-v4x8-3wr5-3wq8 (+5)
 
 # eval_ifeval.py only — Google Research IFEval scorer (vendored in ifeval_lib/, Apache-2.0)
 absl-py

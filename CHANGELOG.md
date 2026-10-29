@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Image+text training for Qwen3.5 vision-language checkpoints. Conversations under
+  `--pack --multiturn` may carry image parts. The vision encoder is frozen and the
+  projector trains at `--projector_lr_scale` × `--lr`. Images above
+  `--max_image_pixels` are downscaled, and image tokens get Qwen's 3-D RoPE
+  positions. `train/tools/compose_vl_checkpoint.py` attaches the base vision tower
+  to a text-only checkpoint. `shape_for_sglang.py` passes VL checkpoints through.
+  The FSDP ranks stay in lockstep when a batch has no images.
+
+### Changed
+
+- Vulnerability reports have a second private channel: GitHub private vulnerability
+  reporting is enabled, so the Security tab's **Report a vulnerability** button now
+  works, and `SECURITY.md` names it beside the role-alias email. `community-check`
+  fails if that route disappears from the document, which is what kept the address
+  check honest.
+
+- The handle checker reads every file that names people, not only `CODEOWNERS`.
+  `hongjoonahn-tri` was fixed in `CODEOWNERS` two weeks ago and survived in
+  `GOVERNANCE.md` -- the document that says who is responsible -- as a link that 404s,
+  because the check added at the time read one file. It now covers `GOVERNANCE.md` and
+  `docs/community/README.md`, and a failure names which file to edit.
+
+- `--model_id` now defaults to `Qwen/Qwen3.5-4B` (was `Qwen/Qwen3-4B`).
+- Assistant turns without reasoning now train with their empty
+  `<think>\n\n</think>` block. They were previously left unsupervised.
+
+- `--pack --multiturn` now packs conversations with buffered first-fit
+  (`PackedMultiTurnRowDataset`). A conversation that doesn't fit the current row
+  waits for a later one instead of being dropped; only conversations longer than
+  `--max_length` are skipped. `--micro_batch_size` is again the number of rows per
+  forward. **Removed:** `--pack_examples` and `--max_packed_rows`. The packer also
+  enforces its two preconditions instead of failing silently: a conversation that does
+  not fit a row alone, and a `buffer_size` below one, each raise instead of yielding an
+  oversized row or dropping the whole stream.
+
+- All four scheduled workflows moved off the hour and into the UTC evening, and
+  their weekday fields shifted a day to compensate: 21:00 UTC is already the next
+  day in Seoul, so `* * 1-5` would have run Tuesday through Saturday. Measured
+  lateness was 38-40 minutes every weekday on `0 0` and 13-24 on `0 3`. The
+  snapshot now runs last, so it sees that morning's results rather than last
+  week's.
+
+### Fixed
+
+- The metrics population split is read from `docs/metrics/first-party.txt` instead
+  of an API lookup. Organisation membership here is private, so neither
+  `/collaborators` nor `author_association` can answer it from a workflow: both
+  classified 32 of our own items as outside contributions when collected in Actions,
+  while passing locally against a user token. Snapshots also record distinct author
+  counts, which is what made the bug legible -- 32 external items from 1 author.
+  `tools/check_first_party.py` fails CI when a listed login stops resolving.
+
+### Security
+
+- `filelock` floored at `>=4.2.1` and both lock files moved off 4.1.0. Six
+  advisories, the worst GHSA-v4x8-3wr5-3wq8 (HIGH). It is transitive, so the floor
+  goes in `requirements.txt` as well as the lock: regenerating the lock otherwise
+  drops straight back to a vulnerable resolution.
+
+- Every GitHub Action is pinned to a commit SHA instead of a moving tag, and
+  `tools/check_action_pins.py` fails CI if one comes back as a tag. The repository
+  pins third-party kernels to a commit and fails on drift; the workflows that
+  generate the SBOM and sign its attestation were running from tags upstream can
+  move. `ci.yml` also moves from checkout v4 to v6, which the rest already used.
+
 ### Changed
 
 - The metrics workflow opens a pull request instead of pushing to the default
@@ -53,6 +120,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server runs on the engine's event loop, so concurrent decisions and chat batch
   together.
 
+- `inference/jev.py` — the Jev request encoding a Trida checkpoint's typed-decision
+  head reads (`materialize`, `encode_rows`, including `image_tokens`), and
+  `inference/jev_head.py`, the `PointerHead` that `jev_head.pt` loads into. The
+  encoder is the training stack's, copied unchanged and kept torch-free, so a
+  serving process or demo builds the same rows as the training encoder.
+  `inference/test_jev_golden.py` checks the rows against golden fixtures from the
+  training encoder (provenance in `inference/fixtures/jev_golden/PROVENANCE.md`).
+  Derived from kev (Apache-2.0); attributed in `NOTICE` and `COMPLIANCE.md` §1.
+- `scripts/export_kev_checkpoint.py` — exports a checkpoint to kev's layout. The
+  Trida2.1-4B model card points here for scoring and serving with kev's tools.
+
+- `inference/mlx/`: on-device (Apple Silicon, MLX) serving of Trida2.0-4B with lossless
+  self-speculative decoding (`bd_bidir_shift` b7/g4 semantics), an OpenAI-compatible server with
+  tool calls and a prompt cache, a minimal agent loop, MLX quantization, and offline tests.
+- `inference/mlx/`: image input for vision-language checkpoints (Trida-2.0-4B-1006): Qwen3.5 vision
+  encoder + projector, HF-identical preprocessing, multimodal RoPE, image-aware prompt cache,
+  OpenAI `image_url` parts in the server.
 - `metrics/` and `docs/metrics/reviews/` — the response metrics are now collected in
   the repository on a weekly snapshot, with a written review per period recording what
   was measured, what it showed and what was decided. The external series is `no_data`
@@ -79,6 +163,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GOVERNANCE.md` — roles, how a decision is made, where decisions are recorded,
   the release procedure, and how maintainers join or step down. States plainly that
   `require_code_owner_review` is not yet enabled, so CODEOWNERS is advisory today.
+
+### Fixed
+
+- SGLang backend patch: self-speculative decoding corrupted requests when a new
+  request was prefilled inside a running decode batch. Their outputs drifted below
+  AR quality under concurrent load. The patch also stops a radix-cache lock
+  underflow (`mamba_lock_ref=0`) on the same path. `inference/sglang/README.md`
+  documents the remaining memory spike when a long prompt joins a sampling batch,
+  sized per prompt token.
+
+- BFCL handler (`benchmark/bfcl_v4/trida_handler.py`): every prompt silently fell
+  back to the QwenFC JSON format. The handler imported `inference.bd_generate`, which
+  is not in this repo, from a placeholder path. It now loads the served checkpoint's
+  own chat template. It also stops adding a second `<think>` prefill and types XML
+  tool-call values per test language (Python literals for Python; strings for
+  Java/JavaScript, which BFCL checks as strings).
+- FunctionChat runner: it resumed from a per-model-name response and grade cache, so
+  new checkpoints were partly graded with earlier models' results. Each run now starts
+  clean.
 
 ## [0.1.2] — 2026-10-13
 

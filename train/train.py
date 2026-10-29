@@ -39,12 +39,14 @@ from torch.utils.data import DataLoader
 from train.data.text_sft_data import (
     JsonlAgenticDataset,
     MultiTurnTextSftCollator,
-    PackedMultiTurnCollator,
+    PackedMultiTurnRowDataset,
     PackedRowDataset,
     PackedTextSftCollator,
     StreamPackedCollator,
+    StreamPackedMultiTurnCollator,
     TextSftCollator,
     download_jsonl_paths,
+    load_image_processor,
 )
 from train.hf_block_diffusion import HFBlockDiffusion
 from train.hf_block_diffusion_hybrid import HFBlockDiffusionHybrid, is_hybrid_model_id
@@ -85,6 +87,8 @@ def save_hf(model, args, tag):
         hf_sd = {k[len("model."):]: v for k, v in sd.items() if k.startswith("model.")}
         model.model.save_pretrained(out, state_dict=hf_sd)
         model.tokenizer.save_pretrained(out)
+        if getattr(model, "image_processor", None) is not None:
+            model.image_processor.save_pretrained(out)  # preprocessor_config.json for VL checkpoints
         with open(os.path.join(out, "block_diffusion.json"), "w") as f:
             json.dump({"bd_size": model.bd_size, "mask_id": model.mask_id,
                        "ar_loss_weight": model.ar_loss_weight}, f, indent=2)
@@ -175,14 +179,27 @@ def main():
     else:
         model = HFBlockDiffusion(**common)
     tokenizer = model.tokenizer
+    image_processor = None
+    if model.is_vl:
+        image_processor = load_image_processor(model_source)
+        model.image_processor = image_processor
+        log(f"[model] vision-language checkpoint: frozen vision encoder, trainable projector | "
+            f"images capped at {args.max_image_pixels} px")
 
-    # ---- FSDP2: shard each decoder layer + the root; bf16 params, fp32 grad reduce ----
+    # ---- FSDP2: shard each decoder layer (+ vision block) + the root; bf16 params, fp32 reduce ----
     mp = MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
     for layer in model.tm.layers:
         fully_shard(layer, mp_policy=mp, reshard_after_forward=not args.fsdp_keep_params)
+    if model.is_vl:
+        for block in model.visual.blocks:
+            fully_shard(block, mp_policy=mp, reshard_after_forward=not args.fsdp_keep_params)
+        fully_shard(model.visual.merger, mp_policy=mp)
     fully_shard(model, mp_policy=mp)
     model.train()
-    log(f"[model] {args.model_id} sharded across {world_size()} ranks | bf16 weights")
+    n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_all = sum(p.numel() for p in model.parameters())
+    log(f"[model] {args.model_id} sharded across {world_size()} ranks | bf16 weights | "
+        f"trainable {n_train / 1e9:.2f}B of {n_all / 1e9:.2f}B params")
 
     # ---- data (streaming JSONL; sharded per rank x worker, no Arrow) ----
     # Every rank resolves its OWN local paths (don't broadcast rank-0's paths — on a multi-node run
@@ -195,22 +212,26 @@ def main():
         paths = download_jsonl_paths(repo_id=args.dataset)
     dataset = JsonlAgenticDataset(paths, rank=rank(), world=world_size(), seed=args.seed)
     if args.pack and args.multiturn:
-        # Packed MULTI-TURN (FLARE two-stream): bin-pack whole conversations (every assistant turn
-        # supervised), each block-aligned + doc-isolated via seg_id. Map-style: pull pack_examples
-        # raw convos per step, pack into <=max_length rows. Requires linear_block_mode=bidirectional.
+        # Packed MULTI-TURN (FLARE two-stream): the dataset bin-packs whole conversations (every
+        # assistant turn supervised), each block-aligned + doc-isolated via seg_id, and yields one
+        # <=max_length row at a time via buffered first-fit — a conversation that doesn't fit waits
+        # for the next row instead of being dropped. Each micro-batch is `micro_batch_size` rows.
+        # Requires linear_block_mode=bidirectional.
         assert args.linear_block_mode == "bidirectional", \
             "--pack --multiturn is the FLARE two-stream path; needs --linear_block_mode bidirectional"
-        collate = PackedMultiTurnCollator(
-            tokenizer, bd_size=args.bd_size, max_length=args.max_length,
+        dataset = PackedMultiTurnRowDataset(
+            dataset, tokenizer, bd_size=args.bd_size, max_length=args.max_length,
             max_response_length=args.max_response_length,
-            length_buckets=parse_int_list(args.length_buckets),
-            max_segments=args.max_segments, max_packed_rows=args.max_packed_rows,
-            keep_all_reasoning=args.keep_all_reasoning)
-        batch_size = args.pack_examples
+            keep_all_reasoning=args.keep_all_reasoning, max_segments=args.max_segments,
+            image_processor=image_processor, max_image_pixels=args.max_image_pixels)
+        collate = StreamPackedMultiTurnCollator(
+            tokenizer, bd_size=args.bd_size, max_length=args.max_length,
+            length_buckets=parse_int_list(args.length_buckets))
+        batch_size = args.micro_batch_size
     elif args.pack:
         # Streaming first-fit packer with carry-over: the dataset yields one <=max_length row at a
         # time (overflow sample starts the next row; nothing dropped), so each micro-batch is exactly
-        # `micro_batch_size` packed rows. No pack_examples / max_packed_rows.
+        # `micro_batch_size` packed rows.
         dataset = PackedRowDataset(
             dataset, tokenizer, max_length=args.max_length,
             max_response_length=args.max_response_length,
@@ -240,8 +261,13 @@ def main():
     log(f"[data] packing={'on' if args.pack else 'off'} multiturn={'on' if args.multiturn else 'off'} "
         f"collator={type(collate).__name__} batch_size={batch_size}")
 
-    optim = torch.optim.AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.95),
-                              weight_decay=args.weight_decay)
+    # Discriminative LR: the vision projector trains at --projector_lr_scale x the language-model
+    # LR (the vision encoder is frozen and not optimized). Text-only models get one group.
+    groups = model.param_groups(projector_lr_scale=args.projector_lr_scale)
+    optim = torch.optim.AdamW(groups, lr=args.lr, betas=(0.9, 0.95), weight_decay=args.weight_decay)
+    if len(groups) > 1:
+        log(f"[optim] language model lr {args.lr:g} | projector lr {args.lr * args.projector_lr_scale:g} "
+            f"(x{args.projector_lr_scale:g})")
 
     run = None
     if args.wandb and is_master():
@@ -262,9 +288,11 @@ def main():
             batch = {k: v.to(dev, non_blocking=True) for k, v in batch.items()}
             is_boundary = (micro + 1) % args.grad_accum == 0
             model.set_requires_gradient_sync(is_boundary)
+            images = {k: batch[k] for k in ("pixel_values", "image_grid_thw", "mrope_pos") if k in batch}
             loss, logs = model(batch["input_ids"], batch["labels"], batch["attention_mask"],
                                seg_id=batch.get("seg_id"), resp_pos=batch.get("resp_pos"),
-                               resp_block=batch.get("resp_block"), turn_id=batch.get("turn_id"))
+                               resp_block=batch.get("resp_block"), turn_id=batch.get("turn_id"),
+                               **images)
             (loss / args.grad_accum).backward()
             running["loss"] += loss.item()
             running["diff"] += logs["diff_loss"].item()
@@ -278,7 +306,7 @@ def main():
 
             lr = get_lr(global_step, args.lr, args.warmup, args.max_steps, args.lr_min_ratio)
             for g in optim.param_groups:
-                g["lr"] = lr
+                g["lr"] = lr * g.get("lr_scale", 1.0)
             gnorm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             optim.step()
             optim.zero_grad(set_to_none=True)
