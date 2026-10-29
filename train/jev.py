@@ -281,24 +281,34 @@ class JevRowDataset(IterableDataset):
         info = get_worker_info()
         wid, nw = (info.id, info.num_workers) if info else (0, 1)
         shard, nshard = self.rank * nw + wid, self.world * nw
+        n = len(self.records)
+        if n == 0:
+            raise ValueError("JevRowDataset has no records")
         epoch = 0
         while True:
-            order = list(range(len(self.records)))
+            order = list(range(n))
             random.Random(_seed(self.seed, "order", epoch)).shuffle(order)
-            batch, used = [], 0
-            for idx in order[shard::nshard]:
+            batch, used, emitted = [], 0, False
+            # fewer records than shards: wrap around so every shard still gets one (an empty shard never yields)
+            for idx in (order[i % n] for i in range(shard, max(n, nshard), nshard)):
                 for rows in self._variants(epoch, idx):
-                    n = sum(len(r["ids"]) for r in rows)
-                    if n > self.max_tokens:                      # oversize: its own micro-batch
+                    t = sum(len(r["ids"]) for r in rows)
+                    if t > self.max_tokens:                      # oversize: its own micro-batch
+                        emitted = True
                         yield pack_jev([rows], self.tok)
                         continue
-                    if batch and used + n > self.max_tokens:
+                    if batch and used + t > self.max_tokens:
+                        emitted = True
                         yield pack_jev(batch, self.tok)
                         batch, used = [], 0
                     batch.append(rows)
-                    used += n
+                    used += t
             if batch:
+                emitted = True
                 yield pack_jev(batch, self.tok)
+            if not emitted:
+                raise RuntimeError(f"Jev shard {shard}/{nshard} produced no micro-batch in epoch {epoch}: every variant "
+                                   f"was skipped (over --jev_max_variant_tokens or the context limit)")
             epoch += 1
 
 

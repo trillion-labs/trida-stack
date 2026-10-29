@@ -1,7 +1,12 @@
 """CPU tests for Jev decision training data (train/jev.py). No GPU, no network. Parity with kev itself (encoding and
 forward, on real kev data and a tiny model) is checked by train/tools/jev_parity_{kev,trida}.py."""
+import importlib.util
 import math
 import random
+import threading
+from pathlib import Path
+
+import pytest
 
 import torch
 import torch.nn.functional as F
@@ -15,6 +20,7 @@ from train.jev import (
     encode_rows,
     jev_loss,
     materialize,
+    none_pair,
     pack_jev,
     training_context,
 )
@@ -115,3 +121,60 @@ def test_short_pack_is_padded_with_a_dummy_row():
     n = len(rows[0]["ids"])
     assert n < MIN_PACK and b["input_ids"].shape[1] == MIN_PACK
     assert b["seg_id"][0, n:].unique().tolist() == [1] and len(b["questions"]) == 1
+
+
+def _first_batch(ds, timeout=10):
+    """next(iter(ds)) on a thread, so a dataset that never yields fails the test instead of hanging it."""
+    out = []
+
+    def run():
+        try:
+            out.append(next(iter(ds)))
+        except Exception as e:
+            out.append(e)
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(timeout)
+    assert out, "JevRowDataset yielded nothing"
+    if isinstance(out[0], Exception):
+        raise out[0]
+    return out[0]
+
+
+def test_more_shards_than_records_still_yields():
+    # 2 ranks x 2 workers is 4 shards; with 1 record the old modulo sharding left 3 of them looping forever
+    tok = CharTok()
+    for rank in range(2):
+        b = _first_batch(JevRowDataset([REQ], tok, rank=rank, world=2, max_tokens=400, p_none_pair=0.0))
+        assert len(b["questions"]) == 3
+
+
+def test_shard_with_every_variant_skipped_raises():
+    tok = CharTok()
+    ds = JevRowDataset([dict(REQ, state="x" * 600)], tok, max_tokens=400, max_variant_tokens=400, p_none_pair=0.0)
+    with pytest.raises(RuntimeError, match="no micro-batch"):
+        _first_batch(ds)
+
+
+def test_none_pair_present_and_absent():
+    for seed in range(20):
+        present, absent = (v["questions"]["team"] for v in none_pair(REQ, random.Random(seed)))
+        (nk,) = set(present["criteria"]) - set(REQ["questions"]["team"]["criteria"])
+        assert present["label"] == "billing" and "billing" in present["criteria"]    # true option listed: none is wrong
+        assert absent["label"] == nk and "billing" not in absent["criteria"]          # true option removed: none is right
+        assert set(absent["criteria"]) == set(present["criteria"]) - {"billing"}
+    assert none_pair({"state": "s", "questions": {"q": dict(REQ["questions"]["urgent"])}}, random.Random(0)) == []
+
+
+def test_train_encoder_matches_inference_encoder():
+    # inference/jev.py says it is this encoder unchanged; train rows must stay identical to what serving scores
+    spec = importlib.util.spec_from_file_location("inference_jev", Path(__file__).parents[1] / "inference" / "jev.py")
+    inf = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inf)
+    tok = CharTok()
+    for req in (REQ, dict(REQ, state={"customer": "refund please", "items": ["laptop", 2]}), dict(REQ, state="x" * 500)):
+        for max_state in (384, 7552):
+            want = inf.encode_rows(tok, inf.materialize(req), **inf.training_context(max_state))
+            got = encode_rows(tok, materialize(req), **training_context(max_state))
+            assert got == [{k: v for k, v in r.items() if k != "qtype"} for r in want]

@@ -279,6 +279,8 @@ def main():
         raise ValueError("--jev_only needs --jev_data")
     if not args.jev_only and not args.dataset:
         raise ValueError("--dataset is required (unless --jev_only)")
+    if args.jev_data and args.jev_micro_per_step < 1:
+        raise ValueError("--jev_micro_per_step must be >= 1 with --jev_data (its last micro-batch syncs gradients)")
     if not args.jev_only:
         if is_master():
             paths = download_jsonl_paths(repo_id=args.dataset)
