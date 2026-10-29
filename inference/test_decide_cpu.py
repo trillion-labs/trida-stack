@@ -193,3 +193,18 @@ def test_decide_endpoint_parses_without_paths():
     client = testclient.TestClient(create_app(Engine()))
     r = client.post("/v1/decide", json={"request": {**REQ, "image": "/etc/hosts"}})
     assert r.status_code == 400 and "/etc" not in r.text
+
+
+def test_decide_rows_match_the_jev_encoder():
+    # the server must score the rows decision checkpoints were trained on; inference/jev.py is pinned to the training
+    # encoder by golden fixtures, so this ties decide_request's own encoder to it
+    import jev
+    from decide_request import MAX_STATE
+    for req in (REQ, {**REQ, "state": "x" * 9000},
+                {"state": ["a", {"b": 2}], "questions": {"m": {"type": "score", "instructions": "how much?",
+                                                             "criteria": ["low", "mid", "high"]}}}):
+        first = {"choice": lambda q: next(iter(q["criteria"])), "noul": lambda q: True, "score": lambda q: 0}
+        labelled = {**req, "questions": {k: {**q, "label": first[q["type"]](q)} for k, q in req["questions"].items()}}
+        want = jev.encode_rows(CharTok(), jev.materialize(labelled), **jev.training_context(MAX_STATE))
+        got = parse(req).encode(CharTok()).rows
+        assert got == [{k: r[k] for k in ("ids", "decide", "opts")} for r in want]
