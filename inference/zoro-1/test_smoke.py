@@ -76,8 +76,45 @@ def test_configs_have_required_keys():
         assert "block_size:" in text, f"{y.name} missing block_size"
 
 
+def _raw_ckpt(root):
+    import json
+    raw = root / "zoro-1"
+    raw.mkdir()
+    cfg = {"architectures": ["Qwen3_5ForConditionalGeneration"], "model_type": "qwen3_5", "vision_config": {}}
+    (raw / "config.json").write_text(json.dumps(cfg))
+    (raw / "model-00001-of-00002.safetensors").write_bytes(b"w")
+    (raw / "tokenizer.json").write_text("{}")
+    return raw
+
+
+def test_for_sglang_shapes_once_and_reuses(tmp_path):
+    import json
+    raw = _raw_ckpt(tmp_path)
+    cache = tmp_path / "cache"
+    out = Path(serve.for_sglang(str(raw), cache))
+    cfg = json.loads((out / "config.json").read_text())
+    assert cfg["architectures"] == ["Qwen3_5DLLMForConditionalGeneration"] and "vision_config" in cfg
+    assert (out / "model-00001-of-00002.safetensors").is_symlink() and (out / "tokenizer.json").exists()
+    assert serve.for_sglang(str(raw), cache) == str(out)          # same dir next time, no re-shape
+    assert serve.for_sglang(str(out), cache) == str(out)          # an already-shaped dir is served as is
+
+
+def test_dry_run_and_no_shape_leave_the_model_alone(monkeypatch):
+    called = []
+    monkeypatch.setattr(serve, "for_sglang", lambda m, cache=None: called.append(m) or m)
+    for extra in (["--dry-run"], ["--no-shape", "--dry-run"]):
+        monkeypatch.setattr(sys, "argv", ["serve.py", "trillionlabs/Zoro-1", *extra])
+        serve.main()
+    monkeypatch.setattr(sys, "argv", ["serve.py", "trillionlabs/Zoro-1", "--mode", "decide", "--dry-run"])
+    serve.main()
+    assert called == []
+
+
 def main():
+    import inspect
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    fixtured = [t for t in tests if inspect.signature(t).parameters]   # need pytest fixtures: run under pytest
+    tests = [t for t in tests if t not in fixtured]
     failed = 0
     for t in tests:
         try:
@@ -86,7 +123,7 @@ def main():
         except Exception as e:
             failed += 1
             print(f"  FAIL {t.__name__}: {e}")
-    print(f"\n{len(tests) - failed}/{len(tests)} passed")
+    print(f"\n{len(tests) - failed}/{len(tests)} passed ({len(fixtured)} more under `pytest test_smoke.py`)")
     sys.exit(1 if failed else 0)
 
 

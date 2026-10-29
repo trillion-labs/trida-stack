@@ -24,7 +24,10 @@ Usage
 
 ``out_dir`` defaults to ``<raw_ckpt_dir>_sglang``. Serve the result:
 
-    python inference/zoro-1/serve.py <out_dir> --mode diffusion --port 30000
+    python inference/zoro-1/serve.py <out_dir> --port 30000
+
+``serve.py`` runs this automatically for ``causal`` / ``self-spec`` (``shape()`` below), so running it by
+hand is only needed for a custom output location or ``--copy``.
 """
 import argparse
 import json
@@ -98,6 +101,34 @@ def shape_config(raw: dict) -> dict:
     }
 
 
+def is_shaped(cfg: dict) -> bool:
+    return "Qwen3_5DLLMForConditionalGeneration" in cfg.get("architectures", [])
+
+
+def shape(raw_dir: Path, out_dir: Path, copy: bool = False) -> list:
+    """Write the shim: a rewritten config.json plus the weights and tokenizer files, symlinked (or copied)
+    from ``raw_dir``. ``out_dir`` must not exist. -> the carried file names."""
+    raw_cfg = json.loads((raw_dir / "config.json").read_text())
+    out_dir.mkdir(parents=True)
+    (out_dir / "config.json").write_text(json.dumps(shape_config(raw_cfg), indent=2))
+    carried = []
+    shards = sorted(p.name for p in raw_dir.glob("*.safetensors") if p.name not in CARRY)
+    for name in CARRY + shards:
+        src = raw_dir / name
+        if not src.exists():
+            continue
+        dst = out_dir / name
+        if copy:
+            shutil.copy2(src, dst)
+        else:
+            os.symlink(src.resolve(), dst)
+        carried.append(name)
+    if not any(n.endswith(".safetensors") or n.endswith(".index.json") for n in carried):
+        shutil.rmtree(out_dir)
+        raise ValueError(f"no weights (*.safetensors) found in {raw_dir}")
+    return carried
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -117,7 +148,7 @@ def main() -> int:
     raw_cfg = json.loads(cfg_path.read_text())
 
     arch = raw_cfg.get("architectures", [])
-    if "Qwen3_5DLLMForConditionalGeneration" in arch:
+    if is_shaped(raw_cfg):
         sys.exit(f"{raw_dir} already looks shaped (arch={arch})")
 
     out_dir = (args.out or raw_dir.parent / f"{raw_dir.name}_sglang").resolve()
@@ -125,33 +156,18 @@ def main() -> int:
         if not args.force:
             sys.exit(f"{out_dir} exists (use --force to overwrite)")
         shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
-
-    (out_dir / "config.json").write_text(json.dumps(shape_config(raw_cfg), indent=2))
-
-    carried = []
-    shards = sorted(p.name for p in raw_dir.glob("*.safetensors") if p.name not in CARRY)
-    for name in CARRY + shards:
-        src = raw_dir / name
-        if not src.exists():
-            continue
-        dst = out_dir / name
-        if args.copy:
-            shutil.copy2(src, dst)
-        else:
-            os.symlink(src, dst)
-        carried.append(name)
-
-    if not any(n.endswith(".safetensors") or n.endswith(".index.json") for n in carried):
-        sys.exit(f"no weights (*.safetensors) found in {raw_dir}")
+    try:
+        carried = shape(raw_dir, out_dir, args.copy)
+    except ValueError as e:
+        sys.exit(str(e))
 
     print(f"shaped: {out_dir}")
     print(f"  arch : {arch[0] if arch else '?'} -> Qwen3_5DLLMForConditionalGeneration")
     print(f"  files: config.json (rewritten) + {len(carried)} "
           f"{'copied' if args.copy else 'symlinked'} ({', '.join(carried)})")
-    print(f"  serve: python inference/zoro-1/serve.py {out_dir} --mode diffusion --port 30000")
+    print(f"  serve: python inference/zoro-1/serve.py {out_dir} --port 30000")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

@@ -219,13 +219,14 @@ Two ways to run the decode kernels behind `serve.py`'s API — pick one.
 
 ### SGLang (wrapped by `serve.py`)
 
-The default path. `serve.py` launches an SGLang server built from its public upstream. One-time setup: **clone → patch → install → shape** (see [`sglang/README.md`](sglang/README.md)). A raw two-stream checkpoint needs the one-time shaping step:
+The default path. `serve.py` launches an SGLang server built from its public upstream. One-time setup: **clone → patch → install** (see [`sglang/README.md`](sglang/README.md)), then:
 
 ```bash
-python sglang/tools/shape_for_sglang.py <raw_ckpt>   # -> <raw_ckpt>_sglang
 export SGLANG_PYTHON=/path/to/backend-venv/bin/python
-python serve.py <raw_ckpt>_sglang --port 30000
+python serve.py --port 30000
 ```
+
+SGLang loads Zoro-1 through the two-stream `Qwen3_5DLLMForConditionalGeneration` architecture, so on first use `serve.py` downloads the checkpoint and writes a small shim for it (rewritten `config.json`, symlinked weights) under `$TRIDA_SHAPED_DIR` (default `~/.cache/trida/sglang`), then reuses it. `--no-shape` serves a path as given; [`sglang/tools/shape_for_sglang.py`](sglang/tools/shape_for_sglang.py) does the same step by hand.
 
 ### vLLM (native plugin, no fork)
 

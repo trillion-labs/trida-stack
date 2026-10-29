@@ -22,11 +22,18 @@ The model is the optional positional argument; when omitted it falls back to $TR
 $TRIDA_DECIDE_MODEL), then to `trillionlabs/Zoro-1`. It is passed straight to the backend, so a Hugging Face id is
 auto-downloaded. Zoro-1 is gated: request access on its model page, then `hf auth login` or set HF_TOKEN.
 
+SGLang loads Zoro-1 through the two-stream architecture, so for causal / self-spec the checkpoint is shaped once
+(sglang/tools/shape_for_sglang.py): an HF id is downloaded, then a shim with a rewritten config.json and symlinked
+weights is written to $TRIDA_SHAPED_DIR (default ~/.cache/trida/sglang) and served. --no-shape serves the path as is.
+
 Dependency seam: causal and self-spec wrap the diffusion-serving SGLang backend (sglang/README.md). Point
 SGLANG_PYTHON at the interpreter that has it installed (defaults to current python). decide runs on stock SGLang
 instead: DECIDE_PYTHON names that interpreter (defaults to current python).
 """
 import argparse
+import hashlib
+import importlib.util
+import json
 import os
 import shlex
 import signal
@@ -50,6 +57,42 @@ MODES = {
 
 # Served by serve_decide.py rather than sglang.launch_server; not a decode algorithm, so not in MODES.
 DECIDE_MODE = "decide"
+
+
+def _shape_tool():
+    spec = importlib.util.spec_from_file_location("shape_for_sglang",
+                                                  Path(__file__).parent / "sglang" / "tools" / "shape_for_sglang.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def for_sglang(model, cache=None):
+    """The checkpoint directory the SGLang backend should load: `model` itself when it is already shaped, else a
+    shim of it under `cache` (made once, reused after). An HF id is downloaded first (the HF cache is reused)."""
+    raw = Path(model)
+    if not raw.is_dir():
+        from huggingface_hub import snapshot_download
+        raw = Path(snapshot_download(model))
+    raw = raw.resolve()
+    tool = _shape_tool()
+    if tool.is_shaped(json.loads((raw / "config.json").read_text())):
+        return str(raw)
+    cache = Path(cache or os.environ.get("TRIDA_SHAPED_DIR", Path.home() / ".cache" / "trida" / "sglang"))
+    # an HF snapshot dir is named by its revision; keep the repo name too so the cache reads well
+    if Path(model).is_dir():
+        name = f"{raw.name}-{hashlib.sha1(str(raw).encode()).hexdigest()[:8]}"
+    else:
+        name = f"{model.replace('/', '--')}-{raw.name[:12]}"
+    out = cache / name
+    if out.is_dir() and tool.is_shaped(json.loads((out / "config.json").read_text())):
+        return str(out)
+    if out.exists():
+        import shutil
+        shutil.rmtree(out)
+    tool.shape(raw, out)
+    print(f"[serve] shaped {raw} -> {out}", flush=True)
+    return str(out)
 
 
 def build_decide_command(args):
@@ -111,7 +154,9 @@ def main():
                          "for tokens-per-forward")
     ap.add_argument("--no-stats", dest="stats", action="store_false",
                     help="self-spec: don't log the periodic tok/fwd + acceptance stats line")
-    ap.add_argument("--dry-run", action="store_true", help="print the launch command and exit")
+    ap.add_argument("--no-shape", dest="shape", action="store_false",
+                    help="causal / self-spec: serve the checkpoint as given, without shaping it for SGLang")
+    ap.add_argument("--dry-run", action="store_true", help="print the launch command and exit (no download, no shaping)")
     ap.add_argument("passthrough", nargs="*",
                     help="extra flags forwarded verbatim to sglang.launch_server (serve_decide.py for decide)")
     args = ap.parse_args()
@@ -120,6 +165,8 @@ def main():
     if args.model is None:
         args.model = os.environ.get("TRIDA_MODEL", DEFAULT_MODEL)
 
+    if args.mode in MODES and args.shape and not args.dry_run:
+        args.model = for_sglang(args.model)
     cmd = build_command(args)
     print("[serve]", " ".join(shlex.quote(c) for c in cmd), flush=True)
     if args.dry_run:

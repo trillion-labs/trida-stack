@@ -4,8 +4,7 @@
 config and launches an SGLang server. The heavy lifting (batching, KV cache, the
 two-stream decode kernels) lives in an SGLang backend that is **not vendored in
 this repo**. This directory is the reproducible recipe for building that backend
-from its public upstream, so `--mode diffusion` / `self-spec` / `causal` work
-against a two-stream Qwen3.5 checkpoint.
+from its public upstream, so `--mode self-spec` / `causal` work against Zoro-1.
 
 ## What the patch adds
 
@@ -102,6 +101,8 @@ vision-language wrapper — the vision tower is built but never used for text). 
 for: serving it raw fails at load (`causal`) or at the first decode block
 (`diffusion`, with `missing the decode seed`).
 
+`serve.py` does this automatically for `causal` / `self-spec` (it shapes once into
+`$TRIDA_SHAPED_DIR`, default `~/.cache/trida/sglang`, and reuses it). By hand,
 `tools/shape_for_sglang.py` fixes this by writing a lightweight *shim* directory:
 a rewritten `config.json` plus symlinks of the (unchanged) weights and tokenizer.
 Run it once per checkpoint:
@@ -123,10 +124,9 @@ and serve the **shaped** directory from step 4:
 ```bash
 export SGLANG_PYTHON=/persistent/hybrid-diffusion-cache/venvs/hybrid-diffusion-eval/bin/python
 
-# <CKPT> = the shaped directory from step 4 (…_sglang)
-python inference/zoro-1/serve.py <CKPT> --mode diffusion  --port 30000
-python inference/zoro-1/serve.py <CKPT> --mode self-spec  --port 30000
-python inference/zoro-1/serve.py <CKPT> --mode causal     --port 30000
+# trillionlabs/Zoro-1 by default (shaped automatically, step 4), or a local checkpoint as <CKPT>
+python inference/zoro-1/serve.py --mode self-spec  --port 30000
+python inference/zoro-1/serve.py --mode causal     --port 30000
 ```
 
 Add `--dry-run` to print the launch command without starting the server.
