@@ -182,16 +182,17 @@ class DecideEngine:
 
     # ---- decisions ----------------------------------------------------------------------------------
 
-    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768):
+    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768,
+                      allow_paths=True):
         """-> {"answers": {qid: answer}, "timing_ms"} (+ "reasoning", "reasoning_ms" when reasoning=True)."""
         t0 = time.perf_counter()
         extra = {}
         if reasoning:
-            img = parse(request, image).image   # fail fast on a bad request, before generating
+            img = parse(request, image, allow_paths).image   # fail fast on a bad request, before generating
             text = "".join([p async for p in self.athink_stream(request, max_reasoning_tokens, image=img)]).strip()
             extra = {"reasoning": text, "reasoning_ms": round((time.perf_counter() - t0) * 1000, 1)}
             request = with_reasoning(request, text)
-        req = parse(request, image)
+        req = parse(request, image, allow_paths)
         enc = req.encode(self.tok, self.proc)
         T = temperature or (self.image_T if enc.has_image else self.text_T)
         z = await self.alogits(enc, self._sized(req.image, enc.grid) if enc.has_image else None)

@@ -143,3 +143,53 @@ def test_turn_splitter_plain_and_no_thinking():
     assert got == {"reasoning_content": "a < b </thi"} and not calls
     got, calls = _stream("391", thinking=False)
     assert got == {"content": "391"} and not calls
+
+
+TOOLS = [{"type": "function", "function": {"name": "f", "parameters": {"type": "object", "properties": {
+    "n": {"type": "integer"}, "ok": {"type": "boolean"}, "zip": {"type": "string"}, "note": {"type": ["string", "null"]}}}}}]
+
+
+def _args(raw, tools=None):
+    import json
+    _, _, calls = split_turn(raw, thinking=False, tools=tools)
+    return json.loads(calls[0]["function"]["arguments"])
+
+
+def test_tool_call_values_are_typed_by_the_schema():
+    raw = ("<tool_call>\n<function=f>\n<parameter=n>\n3\n</parameter>\n<parameter=ok>\ntrue\n</parameter>\n"
+           "<parameter=zip>\n02134\n</parameter>\n<parameter=note>\n123\n</parameter>\n<parameter=x>\nnull\n"
+           "</parameter>\n</function>\n</tool_call>")
+    assert _args(raw, TOOLS) == {"n": 3, "ok": True, "zip": "02134", "note": "123", "x": None}
+    # no schema: every value that is JSON is read as JSON, anything else stays text
+    assert _args(raw) == {"n": 3, "ok": True, "zip": "02134", "note": 123, "x": None}
+    sp = TurnSplitter(thinking=False, tools=TOOLS)
+    sp.feed(raw)
+    assert sp.finish()[1][0]["function"] == split_turn(raw, thinking=False, tools=TOOLS)[2][0]["function"]
+
+
+def test_http_requests_cannot_name_server_files():
+    pytest.importorskip("PIL")
+    for path in ("/etc/hosts", "/nonexistent/file.png", "file:///etc/hosts"):
+        with pytest.raises(RequestError) as e:
+            parse({**REQ, "image": path}, allow_paths=False)
+        assert "file" not in str(e.value) and "/" not in str(e.value)   # same answer whether or not the path exists
+    with pytest.raises(RequestError, match="no file at"):   # Python callers may still pass paths
+        parse({**REQ, "image": "/nonexistent/file.png"})
+
+
+def test_decide_endpoint_parses_without_paths():
+    pytest.importorskip("httpx")
+    testclient = pytest.importorskip("fastapi.testclient")
+    from serve_decide import create_app
+
+    class Engine:
+        ckpt = "/ckpt/m"
+
+        async def adecide(self, request, image=None, temperature=None, reasoning=False, allow_paths=True):
+            parse(request, image, allow_paths)
+            return {"answers": {}}
+
+    pytest.importorskip("PIL")
+    client = testclient.TestClient(create_app(Engine()))
+    r = client.post("/v1/decide", json={"request": {**REQ, "image": "/etc/hosts"}})
+    assert r.status_code == 400 and "/etc" not in r.text

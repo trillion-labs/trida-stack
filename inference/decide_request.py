@@ -154,7 +154,9 @@ def image_input(image, proc, max_pixels, min_pixels):
     return out["pixel_values"], grid, int(grid.prod(-1)[0]) // proc.merge_size ** 2
 
 
-def _load_image(ref):
+def _load_image(ref, allow_paths=True):
+    """A PIL image, a path (only when allow_paths) or a base64 string / data URL -> RGB image. Over HTTP allow_paths
+    is False: a client must not make the server open its own files, nor learn which paths exist."""
     from PIL import Image
     if ref is None:
         return None
@@ -164,11 +166,13 @@ def _load_image(ref):
         if isinstance(ref, (str, os.PathLike)):
             s = str(ref)
             path = s[len("file://"):] if s.startswith("file://") else s
-            if not s.startswith("data:") and os.path.exists(path):
+            if allow_paths and not s.startswith("data:") and os.path.exists(path):
                 return Image.open(path).convert("RGB")
             try:   # a data URL or bare base64
                 data = base64.b64decode(s.split(",", 1)[-1] if s.startswith("data:") else s, validate=True)
             except ValueError:
+                if not allow_paths:
+                    raise RequestError("image: give a base64 string or a data URL") from None
                 raise RequestError(f"image: no file at {path[:200]!r}, and it is not base64 either") from None
             return Image.open(io.BytesIO(data)).convert("RGB")
     except RequestError:
@@ -217,7 +221,7 @@ def _pixels(req, key, default):
     return v
 
 
-def parse(request, image=None):
+def parse(request, image=None, allow_paths=True):
     """dict -> Request, or RequestError naming the first problem found."""
     if not isinstance(request, dict):
         raise RequestError(f"a request must be an object with 'state' and 'questions', got {type(request).__name__}")
@@ -233,7 +237,7 @@ def parse(request, image=None):
     questions = [_question(qid, q) for qid, q in qs.items()]
     max_px = _pixels(request, "max_image_pixels", MAX_IMAGE_PIXELS)
     min_px = _pixels(request, "min_image_pixels", None)
-    img = _load_image(image if image is not None else request.get("image"))
+    img = _load_image(image if image is not None else request.get("image"), allow_paths)
     return Request(render(request["state"]), questions, img, min_px, max_px, request)
 
 

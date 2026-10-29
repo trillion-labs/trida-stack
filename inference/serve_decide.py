@@ -30,14 +30,31 @@ _CALL = re.compile(r"<tool_call>\s*<function=([\w.-]+)>(.*?)</function>\s*</tool
 _PARAM = re.compile(r"<parameter=([\w.-]+)>\n?(.*?)\n?</parameter>", re.S)
 
 
-def _tool_calls(text):
+def _string_params(tools):
+    """{function name: names of its parameters typed string} from the request's OpenAI `tools`."""
+    out = {}
+    for t in tools or []:
+        f = t.get("function", t) if isinstance(t, dict) else {}
+        props = (f.get("parameters") or {}).get("properties") or {}
+        types = {k: p.get("type") for k, p in props.items() if isinstance(p, dict)}
+        out[f.get("name")] = {k for k, ty in types.items() if ty == "string" or (isinstance(ty, list) and "string" in ty)}
+    return out
+
+
+def _tool_calls(text, tools=None):
+    """<parameter> values are plain text: a parameter the tool schema types as string stays text, any other value is
+    read as JSON (3, true, null, [..], {..}) and stays text when it is not JSON."""
+    strings = _string_params(tools)
     calls = []
     for m in _CALL.finditer(text):
         args = {}
         for k, v in _PARAM.findall(m.group(2)):
             v = v.strip()
+            if k in strings.get(m.group(1), ()):
+                args[k] = v
+                continue
             try:
-                args[k] = json.loads(v) if v[:1] in "[{" else v
+                args[k] = json.loads(v)
             except ValueError:
                 args[k] = v
         calls.append({"id": f"call_{uuid.uuid4().hex[:12]}", "type": "function",
@@ -45,7 +62,7 @@ def _tool_calls(text):
     return calls
 
 
-def split_turn(raw, thinking=True, truncated=False):
+def split_turn(raw, thinking=True, truncated=False, tools=None):
     """A raw assistant turn -> (reasoning, visible text, [tool calls in OpenAI format]). A turn that never closed its
     thinking is all reasoning when max_tokens cut it (thinking on), else all text: some turns skip the close and
     answer anyway, and clients read the answer from the text."""
@@ -55,7 +72,7 @@ def split_turn(raw, thinking=True, truncated=False):
         reasoning, rest = raw, ""
     else:
         reasoning, rest = "", raw
-    calls = _tool_calls(rest)
+    calls = _tool_calls(rest, tools)
     return reasoning.replace("<think>", "").strip(), _CALL.sub("", rest).strip(), calls
 
 
@@ -64,8 +81,9 @@ class TurnSplitter:
     <tool_call> starts (tool calls are parsed from the whole turn at the end). Holds back a tail that could be the
     start of a tag, so a tag split across chunks is never emitted as text."""
 
-    def __init__(self, thinking=True):
+    def __init__(self, thinking=True, tools=None):
         self.field = "reasoning_content" if thinking else "content"
+        self.tools = tools
         self.buf, self.raw, self.in_calls = "", "", False
 
     def feed(self, piece):
@@ -99,7 +117,7 @@ class TurnSplitter:
         """-> (remaining deltas, tool calls)."""
         out = [] if self.in_calls or not self.buf else [(self.field, self.buf)]
         rest = self.raw.rpartition(END_THINK)[2] if END_THINK in self.raw else self.raw
-        return out, _tool_calls(rest)
+        return out, _tool_calls(rest, self.tools)
 
 
 def create_app(engine):
@@ -124,7 +142,9 @@ def create_app(engine):
         if "request" not in body:
             raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float}")
         try:
-            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")))
+            # allow_paths=False: an HTTP client may not have the server open its files as images
+            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
+                                        allow_paths=False)
         except RequestError as e:
             raise HTTPException(400, str(e)) from e
 
@@ -150,7 +170,7 @@ def create_app(engine):
                         c["usage"] = usage
                     return f"data: {json.dumps(c)}\n\n"
                 yield chunk({"role": "assistant"})
-                split, stats = TurnSplitter(thinks), {}
+                split, stats = TurnSplitter(thinks, kw["tools"]), {}
                 async for piece in engine.achat_stream(messages, **kw):
                     if isinstance(piece, dict):
                         stats = piece
@@ -171,7 +191,7 @@ def create_app(engine):
             return StreamingResponse(events(), media_type="text/event-stream")
 
         out = await engine.achat(messages, **kw)
-        reasoning, text, calls = split_turn(out["text"], thinks, out["finish_reason"] == "length")
+        reasoning, text, calls = split_turn(out["text"], thinks, out["finish_reason"] == "length", kw["tools"])
         # content is a string (possibly empty) unless the turn is a tool call, as OpenAI's API returns it
         msg = {"role": "assistant", "content": (text or None) if calls else text, "reasoning_content": reasoning or None}
         if calls:
