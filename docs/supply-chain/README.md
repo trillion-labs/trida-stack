@@ -23,8 +23,8 @@ sources **at build time** from a pinned upstream commit:
 | path | recipe |
 |---|---|
 | two-stream training kernels | `train/block_gated_delta_rule/fetch_kernels.sh` |
-| SGLang diffusion backend | `inference/sglang/` |
-| vLLM block-end readout kernel | `inference/vllm/vllm_native_diffusion/KERNELS.md` |
+| SGLang diffusion backend | `inference/zoro-1/sglang/` |
+| vLLM block-end readout kernel | `inference/zoro-1/vllm/vllm_native_diffusion/KERNELS.md` |
 
 All three resolve to `yuchen-zhu-zyc/HybridDiffusion@6ca547a`, which is
 PolyForm Noncommercial 1.0.0 and is therefore **never committed here**. See
@@ -165,7 +165,7 @@ restriction attaches to whoever runs them. The AR path has no such dependency.
   ruleset has `require_code_owner_review: false` and `required_approving_review_count: 0`,
   so the file currently documents intent rather than gating anything.
 - Dependencies are declared as ranges in `requirements.txt`; the resolved set lives in
-  `requirements-lock.txt` (85 packages) and `inference/requirements-lock.txt` (49).
+  `requirements-lock.txt` (85 packages) and `inference/zoro-1/requirements-lock.txt` (49).
   Regenerate with the command in each file's header -- the flags matter, since the
   resolution is platform-specific. Advisory scanning still reads the declared ranges;
   the lockfiles exist so the release SBOM describes something real.

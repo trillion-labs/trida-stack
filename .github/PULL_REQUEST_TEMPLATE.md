@@ -14,7 +14,7 @@
 
 - [ ] `ruff check .` passes
 - [ ] `ruff format --check .` passes
-- [ ] CPU-safe tests pass (`pytest -q inference/test_smoke.py inference/vllm/vllm_native_diffusion/test_two_stream_cpu.py`)
+- [ ] CPU-safe tests pass (`pytest -q inference/zoro-1/test_smoke.py inference/zoro-1/vllm/vllm_native_diffusion/test_two_stream_cpu.py`)
 - [ ] Docs updated if behavior, flags, or the model contract changed
 - [ ] `COMPLIANCE.md` / `NOTICE` updated if dependencies or third-party code changed
 - [ ] No PolyForm-Noncommercial kernels bundled (they stay as fetch/patch recipes — see `CONTRIBUTING.md`)

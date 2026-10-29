@@ -9,7 +9,7 @@ the same GPUs and protocol as our self-spec sweeps, on both engines.
 - `serve_sglang.sh` — recent upstream SGLang: `ar`, `dflash` (`--speculative-algorithm DFLASH`)
 - `bench_job.sh` — one-node Slurm job: one server per GPU, then `sweep_client.py` (64 GSM8K prompts, fixed 512 output
   tokens, greedy, C = 1/4/8/16). `SMOKE=1` = 10 prompts, C=1, prints two outputs.
-- The sweep client is `inference/vllm/tools/comprehensive_run/sweep_client.py` (shared with the self-spec sweeps).
+- The sweep client is `inference/zoro-1/vllm/tools/comprehensive_run/sweep_client.py` (shared with the self-spec sweeps).
 
 Targets differ (stock Qwen3.5-4B for DFlash, trida for self-spec), so compare each method's speedup over its own AR
 on the same engine, plus absolute tok/s side by side. Block ladder: 4 / 8 / 16 (DFlash) and N = 4 / 8 / 16 / 32 (self-spec).

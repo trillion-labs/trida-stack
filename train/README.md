@@ -102,7 +102,7 @@ same checkpoint.
   Its projector was trained against the original Qwen3.5 text model, so expect to need image data
   before image inputs work well.
 - Saved checkpoints keep the VL layout (`model.language_model.*`, `model.visual.*`) plus
-  `preprocessor_config.json`; `inference/sglang/tools/shape_for_sglang.py` shapes them for serving
+  `preprocessor_config.json`; `inference/zoro-1/sglang/tools/shape_for_sglang.py` shapes them for serving
   (text requests; image serving is not wired up yet).
 
 ## Typed-decision training (`jev.py`)

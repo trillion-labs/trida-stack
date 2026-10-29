@@ -5,9 +5,9 @@
 # ruff config (target-version, line-length) lives in pyproject.toml [tool.ruff].
 # Never rewrite these: .patch files are applied with exact context matching (trimming
 # whitespace breaks `git apply`, and those patches are how the noncommercial kernels are
-# reconstituted); inference/ifeval_lib/ is redistributed third-party code that NOTICE
+# reconstituted); inference/zoro-1/ifeval_lib/ is redistributed third-party code that NOTICE
 # describes as unmodified; LICENSE and the upstream licence/notice files are legal text.
-exclude: '(\.patch$|^inference/ifeval_lib/|^LICENSE$|LICENSE\..*$|NOTICE\..*$)'
+exclude: '(\.patch$|^inference/zoro-1/ifeval_lib/|^LICENSE$|LICENSE\..*$|NOTICE\..*$)'
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit

@@ -168,8 +168,8 @@ def test_none_pair_present_and_absent():
 
 
 def test_train_encoder_matches_inference_encoder():
-    # inference/jev.py says it is this encoder unchanged; train rows must stay identical to what serving scores
-    spec = importlib.util.spec_from_file_location("inference_jev", Path(__file__).parents[1] / "inference" / "jev.py")
+    # inference/zoro-1/jev.py says it is this encoder unchanged; train rows must stay identical to what serving scores
+    spec = importlib.util.spec_from_file_location("inference_jev", Path(__file__).parents[1] / "inference" / "zoro-1" / "jev.py")
     inf = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(inf)
     tok = CharTok()

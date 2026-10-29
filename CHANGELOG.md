@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `inference/zoro-1/speedrun/`: a NanoGPT-style speedrun for Zoro-1 inference. The task is GSM8K at
+  client concurrency 1 with fixed sampling; the record is `eval.py`'s wall-clock, with an 87.0%
+  accuracy floor. There are three hardware tracks (1× H100, 1× L40S, Apple Silicon MLX).
+  `leaderboard.py add` checks a run against the rules and records it, `render` draws the README
+  tables and SVG charts, and `check` (run in CI) fails if they drift from the record files.
 - Image+text training for Qwen3.5 vision-language checkpoints. Conversations under
   `--pack --multiturn` may carry image parts. The vision encoder is frozen and the
   projector trains at `--projector_lr_scale` × `--lr`. Images above
@@ -27,6 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LRs) and `--adam_beta2`.
 
 ### Changed
+
+- **nano-inference is now one stack per model.** `inference/` moved to `inference/zoro-1/` and serves
+  only `trillionlabs/Zoro-1`:
+  - the default model is `trillionlabs/Zoro-1` (gated) instead of `trillionlabs/Trida2.0-4B`
+  - `self-spec` uses the model card's setting, `configs/zoro1_self_spec_b15_g8.yaml` (generation
+    block 8, top-k 20), and `eval.py` defaults to top-k 20 to match
+  - `--mode decide` defaults to the same checkpoint, since Zoro-1 carries `jev_head.pt`
+  - `inference/` is no longer a Python package (`pyproject.toml` packages `train` only); the scripts
+    keep their sibling imports, and paths across docs, CI and tooling point at `inference/zoro-1/`
 
 - Vulnerability reports have a second private channel: GitHub private vulnerability
   reporting is enabled, so the Security tab's **Report a vulnerability** button now
@@ -59,6 +73,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lateness was 38-40 minutes every weekday on `0 0` and 13-24 on `0 3`. The
   snapshot now runs last, so it sees that morning's results rather than last
   week's.
+
+### Removed
+
+- `serve.py --mode diffusion` (Zoro-1 does not support pure diffusion decoding) and the third-party
+  `sdar`, `llada2-0`, `llada2-1-speed` and `llada2-1-quality` modes with their configs.
 
 ### Fixed
 

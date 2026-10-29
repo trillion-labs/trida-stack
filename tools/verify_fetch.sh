@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Verify that the third-party kernel fetch recipe still works.
 #
-# The recipes in train/block_gated_delta_rule/, inference/sglang/ and
-# inference/vllm/vllm_native_diffusion/ ARE the install path for both two-stream
+# The recipes in train/block_gated_delta_rule/, inference/zoro-1/sglang/ and
+# inference/zoro-1/vllm/vllm_native_diffusion/ ARE the install path for both two-stream
 # code paths. If upstream moves, renames, force-pushes, or the subpath changes,
 # nobody can build -- and we would normally find out from a bug report.
 #
