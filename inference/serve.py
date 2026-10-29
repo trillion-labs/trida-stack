@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""nano-inference — serve a diffusion LLM.
+"""nano-inference — serve a diffusion LLM, or a decision checkpoint.
 
 Three decode modes over the SAME checkpoint (one set of weights):
 
@@ -9,8 +9,12 @@ Three decode modes over the SAME checkpoint (one set of weights):
   self-spec   self-speculative: diffusion draft + autoregressive verify (block 7 / gen 4)
               DEFAULT — the recommended mode for the reference model (lossless vs causal)
 
+Plus `decide`: a decision checkpoint (one with jev_head.pt) served for typed decisions, reason-then-decide and
+OpenAI-compatible chat from one in-process engine (serve_decide.py, causal decoding on stock SGLang >= 0.5.22).
+
 Usage:
   python serve.py --port 30000                                    # $TRIDA_MODEL, self-spec
+  python serve.py /path/to/decision-ckpt --mode decide --port 30001     # or $TRIDA_DECIDE_MODEL
   python serve.py trillionlabs/Trida2.0-4B --mode causal --port 30000   # HF id or local path
 
 The model is the optional positional argument; when omitted it falls back to
@@ -19,7 +23,8 @@ passed straight to the backend's --model-path, so a Hugging Face repo id is
 auto-downloaded; a local checkpoint directory works too. Private HF repos need `huggingface-cli login` or HF_TOKEN in the environment first; the default model is public.
 
 Dependency seam: this wraps the diffusion-serving SGLang backend. Point
-SGLANG_PYTHON at the interpreter that has it installed (defaults to current python).
+SGLANG_PYTHON at the interpreter that has it installed (defaults to current python). `decide` runs on stock
+SGLang instead: DECIDE_PYTHON names that interpreter (defaults to current python).
 """
 import argparse
 import os
@@ -50,7 +55,19 @@ MODES = {
 }
 
 
+# Served by serve_decide.py rather than sglang.launch_server; not a decode algorithm, so not in MODES.
+DECIDE_MODE = "decide"
+
+
+def build_decide_command(args):
+    python = os.environ.get("DECIDE_PYTHON", sys.executable)
+    return [python, str(Path(__file__).parent / "serve_decide.py"), args.model, "--host", args.host,
+            "--port", str(args.port), "--mem-fraction", str(args.mem_fraction)] + args.passthrough
+
+
 def build_command(args):
+    if args.mode == DECIDE_MODE:
+        return build_decide_command(args)
     algo, cfg_name, extra = MODES[args.mode]
     python = os.environ.get("SGLANG_PYTHON", sys.executable)
     cmd = [
@@ -78,12 +95,13 @@ def build_command(args):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Serve a diffusion LLM (causal / diffusion / self-spec).")
+        description="Serve a diffusion LLM (causal / diffusion / self-spec) or a decision checkpoint (decide).")
     ap.add_argument("model", nargs="?", default=None,
                     help="HF repo id (auto-downloaded) or local checkpoint path "
-                         f"(default: $TRIDA_MODEL, else {DEFAULT_MODEL})")
-    ap.add_argument("--mode", choices=list(MODES), default="self-spec",
-                    help="decode mode (default self-spec: the recommended mode for Trida2.0-4B)")
+                         f"(default: $TRIDA_MODEL, else {DEFAULT_MODEL}; --mode decide: $TRIDA_DECIDE_MODEL)")
+    ap.add_argument("--mode", choices=list(MODES) + [DECIDE_MODE], default="self-spec",
+                    help="decode mode (default self-spec: the recommended mode for Trida2.0-4B); decide serves a "
+                         "decision checkpoint (serve_decide.py)")
     ap.add_argument("--port", type=int, default=30000)
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--tp", type=int, default=1, help="tensor-parallel size (1 = one full model per GPU)")
@@ -102,8 +120,12 @@ def main():
                     help="self-spec: don't log the periodic tok/fwd + acceptance stats line")
     ap.add_argument("--dry-run", action="store_true", help="print the launch command and exit")
     ap.add_argument("passthrough", nargs="*",
-                    help="extra flags forwarded verbatim to sglang.launch_server")
+                    help="extra flags forwarded verbatim to sglang.launch_server (serve_decide.py for decide)")
     args = ap.parse_args()
+    if args.model is None and args.mode == DECIDE_MODE:
+        args.model = os.environ.get("TRIDA_DECIDE_MODEL")
+        if not args.model:   # the default model has no decision head
+            ap.error("--mode decide needs a decision checkpoint (positional) or $TRIDA_DECIDE_MODEL")
     if args.model is None:
         args.model = os.environ.get("TRIDA_MODEL", DEFAULT_MODEL)
 

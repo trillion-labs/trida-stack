@@ -11,3 +11,10 @@ ifeval_lib/  —  IFEval (Instruction-Following Eval)
   https://github.com/google-research/google-research/tree/master/instruction_following_eval
   Used unmodified (aside from packaging) to score the `eval_ifeval.py` benchmark.
 ------------------------------------------------------------------------------
+kev  —  decision request format (decide_request.py)
+  Copyright 2026 Jared Palmer.
+  Licensed under the Apache License, Version 2.0.
+  https://github.com/jaredpalmer/kev
+  decide_request.py's request rendering and token-row encoding follow kev's, so
+  that requests are encoded exactly as decision checkpoints are trained.
+------------------------------------------------------------------------------
