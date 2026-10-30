@@ -27,6 +27,8 @@ trida-mlx-convert = "trida_mlx.convert:main"
 trida-mlx-verify = "trida_mlx.verify:main"
 trida-mlx-bench = "trida_mlx.bench:main"
 trida-mlx-profile = "trida_mlx.profile:main"
+trida-mlx-datamine = "trida_mlx.datamine:main"
+trida-mlx-simuser = "trida_mlx.simuser:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

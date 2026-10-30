@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Typed decisions in the MLX server (`POST /v1/decide`): Zoro-1's pointer head answers choice / yes-no /
+  score questions over a state (one shared state prefill, a branch per question), and below a confidence
+  threshold the model reasons once (self-spec) and decides again. The server also gained a `<tool_call>`
+  ban for `tool_choice: "none"` (tools stay in the prompt, so the prompt cache still matches), and two
+  opt-in generation guards, off by default so evals and speedrun runs decode unguarded: a tool-call gate
+  (`--tool-call-gate P`, a call only where its raw probability is at least P) and a loop guard
+  (`--loop-guard`: exact and n-gram repeats; a loop while thinking closes the thinking and answers).
+  `/v1/models` reports both. Also `--log-requests`.
+- Zoro-1 Chat, a native macOS app for the MLX server (`inference/mlx/app`): streaming chat with decode
+  stats, images, agent tools (files, a per-chat terminal, screenshots, UI control), decision-model tool
+  routing, reply checks with one rewrite, `/decide`, compaction near the context limit, saved chats, and a
+  self-contained bundle / DMG build.
+- `trida-mlx-datamine` (the app's chats and request logs → scrubbed candidate training data: preference
+  pairs, feedback, tool use, decisions, failures, trajectories) and `trida-mlx-simuser` (an LLM plays the
+  user of the app to collect more trajectories, through a local, token-protected automation API).
+
 - Image+text training for Qwen3.5 vision-language checkpoints. Conversations under
   `--pack --multiturn` may carry image parts. The vision encoder is frozen and the
   projector trains at `--projector_lr_scale` × `--lr`. Images above

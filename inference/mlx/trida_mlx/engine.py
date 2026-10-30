@@ -69,6 +69,7 @@ class Engine:
         self.image_token_id = int(self.cfg.get("image_token_id", 248056))
         self.image_pad = self.tokenizer.convert_tokens_to_ids("<|image_pad|>")
         self.image_proc = ImageProcessorConfig.from_files(self.path, max_image_pixels)
+        self._procs: dict = {}
         self.image_cache = image_cache
         self.rt = TridaRuntime(self.model, prefill_chunk=prefill_chunk, fused_gdn=fused_gdn,
                                vision=self.vision, image_token_id=self.image_token_id)
@@ -149,14 +150,20 @@ class Engine:
     def supports_vision(self) -> bool:
         return self.vision is not None
 
-    def add_image(self, src) -> tuple:
+    def add_image(self, src, max_pixels: Optional[int] = None) -> tuple:
         """Decode + preprocess one image (any thread). Returns ``(key, n_tokens)``; the vision
-        features are computed lazily on the worker at prefill time and cached by content."""
+        features are computed lazily on the worker at prefill time and cached by content.
+        ``max_pixels`` overrides the chat budget (typed decisions use the training size, 448x448)."""
         img, data = load_image(src)
-        key = image_key(data, self.image_proc)
+        proc = self.image_proc
+        if max_pixels:
+            proc = self._procs.get(max_pixels)
+            if proc is None:
+                proc = self._procs[max_pixels] = ImageProcessorConfig.from_files(self.path, max_pixels)
+        key = image_key(data, proc)
         ent = self.rt.images.get(key)
         if ent is None:
-            pixels, grid = preprocess(img, self.image_proc)
+            pixels, grid = preprocess(img, proc)
             ent = {"pixels": pixels, "grid": grid, "features": None}
             self.rt.images[key] = ent
             while len(self.rt.images) > self.image_cache:  # drop the oldest entry
@@ -164,7 +171,7 @@ class Engine:
         else:  # refresh LRU position
             self.rt.images[key] = self.rt.images.pop(key)
         t, h, w = ent["grid"]
-        m = self.image_proc.merge_size
+        m = proc.merge_size
         return key, t * (h // m) * (w // m)
 
     # -- prompt cache -----------------------------------------------------------
@@ -220,9 +227,11 @@ class Engine:
     # -- generation -------------------------------------------------------------
     def generate_ids(self, prompt: list, *, max_tokens: int = 2048, sampling: Optional[SamplingParams] = None,
                      mode: Optional[str] = None, stats: Optional[DecodeStats] = None,
-                     progress=None) -> Iterator[list]:
+                     progress=None, stop_ids: Optional[set] = None) -> Iterator[list]:
         """Yields lists of new token ids. Caller must hold ``self.lock``.
-        ``progress(done, total)`` is called between prefill chunks (keep-alives for clients)."""
+        ``progress(done, total)`` is called between prefill chunks (keep-alives for clients).
+        ``stop_ids``: extra tokens that end the generation like EOS (e.g. ``</think>``)."""
+        eos_ids = self.eos_ids | set(stop_ids or ())
         sp = sampling or SamplingParams()
         mode = mode or self.mode
         stats = stats if stats is not None else DecodeStats()
@@ -244,11 +253,11 @@ class Engine:
             raise
         pre_s = time.perf_counter() - t
         if mode in ("causal", "ar"):
-            gen = ar_generate(self.rt, self.cache, prompt, max_new_tokens=max_tokens, eos_ids=self.eos_ids,
+            gen = ar_generate(self.rt, self.cache, prompt, max_new_tokens=max_tokens, eos_ids=eos_ids,
                               sp=sp, stats=stats)
         else:
             gen = selfspec_generate(self.rt, self.cache, prompt, max_new_tokens=max_tokens,
-                                    eos_ids=self.eos_ids, sp=sp, mask_id=self.mask_id, n=self.n, stats=stats)
+                                    eos_ids=eos_ids, sp=sp, mask_id=self.mask_id, n=self.n, stats=stats)
         try:
             for i, chunk in enumerate(gen):
                 if i == 0:

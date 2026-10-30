@@ -53,7 +53,7 @@ def resolve_model_path(path_or_id: str) -> Path:
     return Path(
         snapshot_download(
             path_or_id,
-            allow_patterns=["*.json", "*.safetensors", "*.jinja", "*.txt", "*.model", "*.tiktoken"],
+            allow_patterns=["*.json", "*.safetensors", "*.jinja", "*.txt", "*.model", "*.tiktoken", "jev_head.pt"],
         )
     )
 
@@ -81,7 +81,7 @@ def load_model(path_or_id: str = DEFAULT_MODEL, *, dtype=mx.bfloat16, load_visio
     cfg = json.loads((path / "config.json").read_text())
     model = build_model(_text_config(cfg))
     weights = {}
-    for f in sorted(path.glob("*.safetensors")):
+    for f in sorted(p for p in path.glob("*.safetensors") if not p.name.startswith("jev_head")):  # head: decision.py
         weights.update(mx.load(str(f)))
     if not weights:
         raise FileNotFoundError(f"no *.safetensors in {path}")
@@ -334,7 +334,10 @@ class TridaRuntime:
         return self.lm.lm_head(h)
 
     def _forward(self, ids: mx.array, cache: SeqCache, attn_mask, n_clean, last_only: bool,
-                 rows: Optional[int] = None, embeds: Optional[mx.array] = None, mrope=None):
+                 rows: Optional[int] = None, embeds: Optional[mx.array] = None, mrope=None,
+                 hidden_rows: Optional[list] = None):
+        """Logits (``last_only`` / ``rows`` select which), or with ``hidden_rows`` the final-normed
+        hidden states [1, len(hidden_rows), D] at those chunk positions (no LM head)."""
         h = self.backbone.embed_tokens(ids) if embeds is None else embeds
         offset = cache.pos
         recs = [] if n_clean is not None else None
@@ -354,6 +357,8 @@ class TridaRuntime:
             h = h + r
             h = h + layer.mlp(layer.post_attention_layernorm(h))
         h = self.backbone.norm(h)
+        if hidden_rows is not None:
+            return h[:, mx.array(hidden_rows, dtype=mx.int32)], recs
         if last_only:
             h = h[:, -1:]
         elif rows is not None:
@@ -392,11 +397,13 @@ class TridaRuntime:
             i += n
         return pos3, (mx.concatenate(feats, axis=0) if feats else None), p
 
-    def prefill(self, cache: SeqCache, tokens: list) -> mx.array:
+    def prefill(self, cache: SeqCache, tokens: list, hidden_positions: Optional[list] = None) -> mx.array:
         """Causal prefill of ``tokens`` after whatever ``cache`` already holds.
         Negative ids are image keys (see ``self.images``): their rows take the vision
         features and the whole call uses multimodal RoPE positions.
-        Returns the float32 logits [V] of the last token."""
+        Returns the float32 logits [V] of the last token, or with ``hidden_positions`` (indices
+        into ``tokens``) the float32 final-normed hidden states [len(hidden_positions), D] there,
+        which is what the typed-decision head reads (see decision.py)."""
         assert cache.pending is None and tokens
         has_image = any(t < 0 for t in tokens)
         if has_image:
@@ -407,9 +414,15 @@ class TridaRuntime:
             section = (self.args.rope_scaling or {}).get("mrope_section", [11, 11, 10])
             feat_row = 0
         logits = None
+        hidden = [] if hidden_positions is not None else None
         for s in range(0, len(tokens), self.prefill_chunk):
             chunk = tokens[s : s + self.prefill_chunk]
             mask = "causal" if len(chunk) > 1 else None
+            hrows = None
+            if hidden is not None:
+                hrows = [p - s for p in hidden_positions if s <= p < s + len(chunk)]
+                hrows = hrows or [len(chunk) - 1]  # keep the forward shape-valid; dropped below
+                keep = any(s <= p < s + len(chunk) for p in hidden_positions)
             if has_image:
                 real = [self.image_token_id if t < 0 else t for t in chunk]
                 ids = mx.array([real], dtype=mx.int32)
@@ -420,11 +433,14 @@ class TridaRuntime:
                     emb[0, mx.array(img_idx)] = rows
                     feat_row += len(img_idx)
                 cos, sin = mrope_cos_sin(pos3[:, s : s + len(chunk)], dims, self.args.rope_theta, section)
-                logits, _ = self._forward(ids, cache, mask, None, last_only=True, embeds=emb, mrope=(cos, sin))
+                logits, _ = self._forward(ids, cache, mask, None, last_only=True, embeds=emb, mrope=(cos, sin),
+                                          hidden_rows=hrows)
             else:
                 ids = mx.array([chunk], dtype=mx.int32)
-                logits, _ = self._forward(ids, cache, mask, None, last_only=True)
+                logits, _ = self._forward(ids, cache, mask, None, last_only=True, hidden_rows=hrows)
                 cache.pos += len(chunk)
+            if hidden is not None and keep:
+                hidden.append(logits[0].astype(mx.float32))
             cache.tokens.extend(chunk)
             if s + self.prefill_chunk < len(tokens):
                 mx.eval([l.ssm if isinstance(l, GDNState) else l.keys for l in cache.layers])
@@ -432,6 +448,8 @@ class TridaRuntime:
                     self.progress_cb(len(chunk))
         if has_image:
             cache.pos = next_pos
+        if hidden is not None:
+            return mx.concatenate(hidden, axis=0)
         return logits[0, -1].astype(mx.float32)
 
     def ar_step(self, cache: SeqCache, token: int) -> mx.array:
