@@ -44,7 +44,7 @@
 | 계열 | 어텐션 | 비고 |
 |---|---|---|
 | **Qwen3** | **전체 어텐션**(full attention, dense) | 기본 구현: dense 블록 마스크와 일반 KV 캐시 사용 |
-| **Qwen3.5** | **하이브리드**: gated-delta *선형 어텐션* 층과 주기적으로 배치된 *전체 어텐션* 층 | 하이브리드 구조에 맞는 마스킹과 캐시 관리가 필요합니다. 선형 어텐션 층에는 길이 축을 따라 잘라낼 수 있는 KV 캐시가 없으므로, 추측 디코딩 중 롤백할 때 conv/recurrent **상태의 스냅샷을 저장하고 복원**합니다 |
+| **Qwen3.5** | **하이브리드**: gated-delta *선형 어텐션* 층과 주기적으로 배치된 *전체 어텐션* 층 | 하이브리드 구조에 맞는 마스킹과 캐시 관리가 필요합니다. 선형 어텐션 층에는 길이 축을 따라 잘라낼 수 있는 KV 캐시가 없으므로, self-speculative 디코딩 중 롤백할 때 conv/recurrent **상태의 스냅샷을 저장하고 복원**합니다 |
 
 Zoro-1은 하이브리드(Qwen3.5) 구조의 **투스트림** 모델이며, `inference/zoro-1/`에서 서빙할 수 있습니다
 (`--mode causal / self-spec / decide`).
@@ -67,13 +67,13 @@ Fast-dLLM v2 방식의 블록 디퓨전 SFT를 사용합니다. 각 학습 시�
 - **x_0 (원본 응답)**: 블록 단위의 인과적 어텐션을 적용합니다. AR 보조 손실을 사용하면 토큰 단위의 인과적 어텐션을 적용합니다.
 
 디퓨전 손실은 x_t의 마스킹된 위치에 대한 교차엔트로피로 계산합니다. 선택적으로 x_0의 다음 토큰 예측 교차엔트로피를 AR 보조 손실로 추가하며,
-최종 손실은 `(diff + w·ar) / (1 + w)`로 계산합니다. Fast-dLLM v2의 **상보적 마스킹(complementary masking)**을 사용하므로, 서로 짝을 이루는 두 마스킹 뷰를 합치면 모든 토큰이 한 번씩 학습 대상에 포함됩니다.
+최종 손실은 `(diff + w·ar) / (1 + w)`로 계산합니다. Fast-dLLM v2의 **상보적 마스킹**(complementary masking)을 사용하므로, 서로 짝을 이루는 두 마스킹 뷰를 합치면 모든 토큰이 한 번씩 학습 대상에 포함됩니다.
 
 주요 설정은 다음 두 가지입니다.
 
 - **`--bd_size`**: 블록 길이(예: 32)를 지정합니다. 디코딩 시 한 번에 하나의 블록을 채웁니다.
-- **`--ar_loss_weight`** (w): AR 보조 손실의 가중치입니다. `> 0`으로 설정하면 **자기회귀 생성 기능(causal head)**을 함께 학습하므로,
-  동일한 체크포인트로 추측 디코딩과 일반 AR 서빙을 수행할 수 있습니다.
+- **`--ar_loss_weight`** (w): AR 보조 손실의 가중치입니다. `> 0`으로 설정하면 **자기회귀 생성 기능**(causal head)을 함께 학습하므로,
+  동일한 체크포인트로 self-speculative 디코딩과 일반 AR 서빙을 수행할 수 있습니다.
 
 `--within_block_causal`을 사용하면 x_t의 블록 내부에도 토큰 단위의 인과적 어텐션을 적용합니다. x_0에도 토큰 단위의 인과적 어텐션을 적용하면
 모델 전체가 *완전한 인과적 구조*를 따르므로 일반 자기회귀 서빙 엔진에서도 사용할 수 있습니다. 다만 초안(draft)의 품질은 다소 낮아집니다.
@@ -144,7 +144,7 @@ fused CE 등 전체 옵션은 `python train.py --help`에서 확인할 수 있�
 [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1)
 
 nanoGPT처럼 작고 읽기 쉬운 서빙 스택을 모델별로 `inference/<model>/` 아래에 구성합니다.
-[`inference/zoro-1/`](inference/zoro-1/)은 **[`trillionlabs/Zoro-1`](https://huggingface.co/trillionlabs/Zoro-1)**을 서빙합니다
+[`inference/zoro-1/`](inference/zoro-1/)은 [**`trillionlabs/Zoro-1`**](https://huggingface.co/trillionlabs/Zoro-1)을 서빙합니다
 (접근 권한을 요청한 뒤 `hf auth login`으로 인증해야 합니다).
 
 ```bash
@@ -159,7 +159,7 @@ Self-speculative 디코딩은 동일한 샘플링 설정에서 **무손실**로 
 
 ### 의사결정 서빙 (`--mode decide`)
 
-`--mode decide`는 **기본 SGLang 배포판(≥ 0.5.22)**에서 `serve_decide.py`를 실행합니다. 별도의 포크나 패치가 필요하지 않습니다.
+`--mode decide`는 **기본 SGLang 배포판**(≥ 0.5.22)에서 `serve_decide.py`를 실행합니다. 별도의 포크나 패치가 필요하지 않습니다.
 단일 엔진과 동일한 모델 가중치로 `POST /v1/decide`를 통한 유형별 의사결정, 추론 후 의사결정(`"reasoning": true`),
 도구 호출이 가능한 OpenAI 호환 채팅을 모두 지원합니다.
 
@@ -200,7 +200,7 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
 train/                         AR → 디퓨전 SFT 학습 코드 (진입점: train.py → train.train:main)
   README.md                    실행·학습 재개 방법, 모델 계열별 유의사항
   hf_block_diffusion.py        블록 마스크, 손실 함수, HF 모델 래퍼 (dense / Qwen3)
-  hf_block_diffusion_hybrid.py  하이브리드 구현 (Qwen3.5: gated-delta 선형 어텐션 + 전체 어텐션)
+  hf_block_diffusion_hybrid.py 하이브리드 구현 (Qwen3.5: gated-delta 선형 어텐션 + 전체 어텐션)
   jev.py                       유형별 의사결정 목적 함수 (포인터 헤드, kev 방식)
   tools/                       체크포인트 내보내기·비전 타워 결합·동등성 및 FSDP 검증 도구
   getting_started.ipynb        학습 튜토리얼
@@ -216,7 +216,7 @@ inference/                     nano-inference: 모델별로 구성된 간결한 
     serve_decide.py, decide_*.py, jev*.py
                                기본 SGLang 배포판에서 실행하는 의사결정 서버 (/v1/decide)
     chat.py                    OpenAI 호환 클라이언트
-    eval.py / eval_ifeval.py    gsm8k / mmlu_pro / ifeval 품질·처리량 평가
+    eval.py / eval_ifeval.py   gsm8k / mmlu_pro / ifeval 품질·처리량 평가
     speedrun/                  리더보드 규칙, 하드웨어 트랙별 기록, 차트
     ifeval_lib/                저장소에 포함된 IFEval 채점 코드
     configs/                   self-spec 디코딩 설정 (b15_g8)
