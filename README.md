@@ -1,16 +1,38 @@
 # trida-stack
 
+**English** | [한국어](README.ko.md)
+
 **One repo for turning an autoregressive LLM into a block-diffusion LLM, and for serving it.**
+
+[![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97%20Zoro--1-diffusion%20%2B%20decisions-yellow)](https://huggingface.co/trillionlabs/Zoro-1)
+[![Trida2.0-4B](https://img.shields.io/badge/%F0%9F%A4%97%20Trida2.0--4B-block%20diffusion-yellow)](https://huggingface.co/trillionlabs/Trida2.0-4B)
+[![Trida-2.0-4B-1006](https://img.shields.io/badge/%F0%9F%A4%97%20Trida--2.0--4B--1006-vision--language-yellow)](https://huggingface.co/trillionlabs/Trida-2.0-4B-1006)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 Two independent stacks:
 
 | | stack | what it does |
 |---|---|---|
-| 🏋️ | **`train/`** | **AR → diffusion conversion.** Block-diffusion SFT starting from a *pretrained AR checkpoint* (no diffusion pretraining), with an AR auxiliary loss so the same weights keep a working causal head. |
+| 🏋️ | **`train/`** | **AR → diffusion conversion.** Block-diffusion SFT starting from a *pretrained AR checkpoint* (no diffusion pretraining), with an AR auxiliary loss so the same weights keep a working causal head. Optional **typed-decision joint training** (a pointer head for yes/no, choice and score questions) and **image inputs** for vision-language checkpoints. |
 | ⚡ | **`inference/<model>/`** | **nano-inference: one small, nanoGPT-style serving stack per model.** [`inference/zoro-1/`](inference/zoro-1/) serves `trillionlabs/Zoro-1`: self-speculative generation and typed decisions from one checkpoint, OpenAI-compatible, on **SGLang**, **vLLM** or **MLX**, with a [speedrun leaderboard](inference/zoro-1/README.md#speedrun). |
 
 `train/` and `inference/` do not import each other. `benchmark/` holds the heavier agentic eval
 harnesses; `inference/` ships its own quick quality/throughput benchmarks (gsm8k / mmlu_pro / ifeval).
+
+---
+
+## Models
+
+Checkpoints trained with this repo, on Hugging Face:
+
+| model | what it is | serve it with |
+|---|---|---|
+| [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) | 4B two-stream block-diffusion model (Qwen3.5-4B), jointly trained as an agent model **and** a decision model (`jev_head.pt` pointer head). Gated: request access, then `hf auth login`. | [`inference/zoro-1/`](inference/zoro-1/): `--mode self-spec` (default) / `causal` / `decide` |
+| [![Trida2.0-4B](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FTrida2.0--4B-yellow)](https://huggingface.co/trillionlabs/Trida2.0-4B) | 4B block-diffusion model (Qwen3.5-4B, hybrid attention) with a causal head for lossless self-speculative decoding. Apache-2.0. | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) (Apple Silicon), [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) |
+| [![Trida-2.0-4B-1006](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FTrida--2.0--4B--1006-yellow)](https://huggingface.co/trillionlabs/Trida-2.0-4B-1006) | vision-language variant (Qwen3.5 vision tower + projector). | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) (image input) |
+
+The agentic benchmark harnesses in [`benchmark/`](benchmark/) also run
+[`trillionlabs/Trida-7B-Preview`](https://huggingface.co/trillionlabs/Trida-7B-Preview).
 
 ---
 
@@ -60,9 +82,44 @@ Two knobs matter most:
 makes the model *fully causal* — loadable by a standard autoregressive serving engine — at the cost
 of some draft quality.
 
+### Typed decisions (joint training)
+
+[![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-decision%20model%3A%20Zoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1)
+
+The same weights can also be trained as a **decision model**: given a *state* (any JSON, plus an
+optional image) and typed *questions*, it returns calibrated probabilities instead of free text.
+
+| type | question | answer |
+|---|---|---|
+| `noul` | yes/no | P(yes) |
+| `choice` | `{key: description}` | a distribution over the keys |
+| `score` | a list of levels, lowest first | the expected level |
+
+`--jev_data <kev-format JSONL>` adds this objective in [kev](https://github.com/jaredpalmer/kev)'s
+scheme (`train/jev.py`): a small **pointer head** on the clean causal stream scores each option's
+`</opt>` state against the question's `<decide>` state. Each optimizer step runs the usual SFT
+micro-batches, then `--jev_micro_per_step` decision micro-batches whose loss is added with weight
+`--jev_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_kev_checkpoint.py`
+exports kev's layout. Details: [`train/README.md`](train/README.md#typed-decision-training-jevpy).
+
+### Images (vision-language checkpoints)
+
+A Qwen3.5 checkpoint with a `vision_config` trains on conversations with image parts
+(`{"type": "image", "image": "imgs/0001.png"}`) alongside text-only data. The vision encoder is
+frozen; the projector trains at `--projector_lr_scale` × `--lr`; images above `--max_image_pixels`
+are downscaled. `train/tools/compose_vl_checkpoint.py` attaches a base vision tower to a text-only
+checkpoint. Details: [`train/README.md`](train/README.md#images-vision-language-checkpoints).
+
 ---
 
 ## Quickstart
+
+### Tutorials
+
+| notebook | what it walks through | model |
+|---|---|---|
+| [`train/getting_started.ipynb`](train/getting_started.ipynb) | the data format and a minimal block-diffusion SFT run (1 GPU, 2 steps) | your own AR base (e.g. Qwen3.5-4B) |
+| [`inference/zoro-1/getting_started.ipynb`](inference/zoro-1/getting_started.ipynb) | serve, call, benchmark, and read the numbers | [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-Zoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) |
 
 ### Train (AR → diffusion)
 > Qwen3.5 two-stream (hybrid) runs need the one-time kernel fetch first —
@@ -78,11 +135,17 @@ PYTHONPATH=. torchrun --nproc_per_node=8 train.py \
 Native-torch **FSDP2**, no DeepSpeed. `python train.py --help` lists all flags (packing,
 length/response bucketing, multi-turn supervision, activation offload, fused CE, …).
 
+Add a typed-decision objective to the same run with `--jev_data <kev-format JSONL files/dirs>`
+(see [Typed decisions](#typed-decisions-joint-training)); `--jev_only` trains the decision objective alone (no SFT data, no diffusion loss).
+
 The saved checkpoint is a **stock HF causal LM** plus an added `<|mask|>` token and a
 `block_diffusion.json` sidecar (`bd_size`, `mask_id`, `ar_loss_weight`) — so it loads with plain
 `AutoModelForCausalLM.from_pretrained`.
 
 ### Inference (serving — `nano-inference`, one stack per model)
+
+[![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1)
+
 Each model gets its own small, readable serving stack under `inference/<model>/`, in the spirit of nanoGPT.
 [`inference/zoro-1/`](inference/zoro-1/) serves **[`trillionlabs/Zoro-1`](https://huggingface.co/trillionlabs/Zoro-1)**
 (gated: request access, then `hf auth login`):
@@ -96,9 +159,37 @@ either an accepted draft that equals the AR token, or the AR correction. Its ben
 **tokens per forward**, not a different answer. See [`inference/zoro-1/README.md`](inference/zoro-1/README.md)
 for chat, decisions, benchmarks, the model contract and the **speedrun leaderboard** (H100, L40S, MLX).
 
-### Serving
-Served via **SGLang**: true block-diffusion (bidirectional-within-block attention,
-variable-length commits) and the self-speculative path.
+### Decisions (`--mode decide`)
+`--mode decide` runs `serve_decide.py` on **stock SGLang ≥ 0.5.22** (no fork or patch): typed
+decisions at `POST /v1/decide`, reason-then-decide (`"reasoning": true`), and OpenAI chat with tool
+calls, from one engine and one copy of the weights.
+```bash
+curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
+  "request": {
+    "state": {"ticket": "Order #W1 arrived broken. I want my money back."},
+    "questions": {
+      "intent": {"type": "choice", "instructions": "What does the customer want?",
+                 "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
+      "urgent": {"type": "noul", "instructions": "Should this jump the queue?"}}},
+  "reasoning": false}'
+# -> {"answers": {"intent": {"type": "choice", "choice": "refund", "probabilities": {...}},
+#                 "urgent": {"type": "noul", "noul": 0.93}}, ...}
+```
+See [`inference/zoro-1/README.md#decisions`](inference/zoro-1/README.md#decisions).
+
+### Backends
+| backend | where | what |
+|---|---|---|
+| **SGLang** (patched) | [`inference/zoro-1/sglang/`](inference/zoro-1/sglang/) | true block-diffusion (bidirectional-within-block attention, variable-length commits) and the self-speculative path |
+| **SGLang** (stock) | `inference/zoro-1/serve_decide.py` | `--mode decide`: typed decisions + chat |
+| **vLLM** | [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) | out-of-tree plugin, self-spec |
+| **MLX** | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) | on-device (Apple Silicon): lossless self-spec, OpenAI-compatible server, image input, a small agent; q8 fits 16–18 GB |
+
+### Speedrun
+A [NanoGPT-speedrun](https://github.com/KellerJordan/modded-nanogpt)-style leaderboard: answer a fixed
+GSM8K subsample with Zoro-1, one request at a time, as fast as possible, with accuracy ≥ 87.0%.
+Tracks: 1× H100, 1× L40S, Apple Silicon (MLX). Rules and records:
+[`inference/zoro-1/README.md#speedrun`](inference/zoro-1/README.md#speedrun).
 
 ---
 
@@ -109,12 +200,16 @@ train/                   AR -> diffusion SFT trainer    (entry: train.py -> trai
   README.md                  launching, resume, model-family notes
   hf_block_diffusion.py      block masks, loss, HF model wrapper (dense / Qwen3)
   hf_block_diffusion_hybrid.py   hybrid path (Qwen3.5: gated-delta linear + full attention)
+  jev.py                     typed-decision objective (pointer head, kev's scheme)
+  tools/                     export_kev_checkpoint.py, compose_vl_checkpoint.py, parity/FSDP checks
+  getting_started.ipynb      training tutorial
   block_gated_delta_rule/    fetch recipe for the block-causal gated-delta Triton kernels
                              (PolyForm-NC upstream, NOT vendored -- run fetch_kernels.sh first)
   data/text_sft_data.py      packing / bucketing / multi-turn
 inference/               nano-inference: one small serving stack per model
   zoro-1/                    trillionlabs/Zoro-1
     README.md                  serving, decisions, benchmarks, speedrun leaderboard
+    getting_started.ipynb      serving tutorial
     MODEL_CONTRACT.md          what the serving code expects from the checkpoint
     serve.py                   --mode causal | self-spec | decide; launches the server
     serve_decide.py, decide_*.py, jev*.py   typed-decision server (/v1/decide) on stock SGLang
@@ -160,16 +255,16 @@ license** — see `NOTICE` and `COMPLIANCE.md`.
 
 | | |
 |---|---|
-| 설치·사용 질문 | [Discussions · Q&A](https://github.com/trillion-labs/trida-stack/discussions/categories/q-a) |
-| 재현 가능한 결함 | [Issues](https://github.com/trillion-labs/trida-stack/issues/new/choose) |
-| 기능 아이디어 | [Discussions · Ideas](https://github.com/trillion-labs/trida-stack/discussions/categories/ideas) |
-| 모델 revision 문제 | [Zoro-1 Community](https://huggingface.co/trillionlabs/Zoro-1/discussions) |
-| 기여하려면 | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| 보안 취약점 | **공개 Issue가 아니라** [SECURITY.md](SECURITY.md)의 비공개 경로 |
+| Questions about install or usage | [Discussions · Q&A](https://github.com/trillion-labs/trida-stack/discussions/categories/q-a) |
+| A reproducible bug | [Issues](https://github.com/trillion-labs/trida-stack/issues/new/choose) |
+| A feature idea | [Discussions · Ideas](https://github.com/trillion-labs/trida-stack/discussions/categories/ideas) |
+| A problem with a model revision | [Zoro-1 Community](https://huggingface.co/trillionlabs/Zoro-1/discussions) |
+| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| A security vulnerability | the private channel in [SECURITY.md](SECURITY.md), **not a public issue** |
 
-채널별 기준과 응답 기대치는 [COMMUNITY.md](COMMUNITY.md), 행동 규범은
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), 누가 무엇을 결정하고 그 결정이 어디에
-기록되는지는 [GOVERNANCE.md](GOVERNANCE.md)에 있습니다.
+What each channel is for and what response to expect: [COMMUNITY.md](COMMUNITY.md). Code of conduct:
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Who decides what, and where decisions are recorded:
+[GOVERNANCE.md](GOVERNANCE.md).
 
 ## License
 See `LICENSE`, plus `NOTICE` and `COMPLIANCE.md` for third-party attribution.
