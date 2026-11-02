@@ -36,6 +36,7 @@ import numpy as np
 
 from . import jev
 from .decode import DecodeStats, SamplingParams
+from .model import GDNState
 
 _CONTEXT = jev.training_context(7552)          # the vision run's state limit, as the public demo uses
 MAX_STATE, MAX_BRANCH = _CONTEXT["max_state"], _CONTEXT["max_branch"]   # 7552, 8192
@@ -254,6 +255,97 @@ def softmax(z, temperature: float) -> list:
     return (z / z.sum()).tolist()
 
 
+# ---- state cache -----------------------------------------------------------------------------------
+
+class StateCache:
+    """Reuses a decision state's prefix across requests, so a long context that many requests share (a file
+    list asked about by many queries, a chat history several decisions look at) is prefilled once.
+
+    It works like automatic prefix caching, without hints from the client: each request's state ids are
+    remembered, and when a new state shares at least ``min_prefix`` leading tokens with a remembered one, that
+    shared prefix is prefilled into a cache of its own and snapshotted. Later states that start with it
+    restore the snapshot and prefill only their tail. (GDN layers can't be rolled back to an arbitrary
+    length, so the snapshot has to be taken at the shared length; the first two requests pay full price.)
+    After every request ``account`` rolls each entry back to its prefix (so it holds one set of GDN states,
+    not also the ones the request ended with), re-measures it, and evicts beyond ``max_bytes``. Eviction resists
+    scans: entries that have been reused are kept over ones that never were, and among never-reused ones the
+    newest go first, so a cycle of more prefixes than fit keeps some of them cached instead of evicting each
+    just before it comes round again (plain LRU's failure). The entry in use is always kept. Image states are
+    not cached."""
+
+    def __init__(self, max_mb: float = 1024, min_prefix: int = 128, remember: int = 64):
+        self.max_bytes, self.min_prefix = int(max_mb * 2**20), min_prefix
+        self.entries: "collections.OrderedDict[tuple, dict]" = collections.OrderedDict()
+        self.recent: collections.deque = collections.deque(maxlen=remember)
+        self.hits = self.misses = 0
+        self.current: Optional[tuple] = None
+        self._clock = 0
+
+    @staticmethod
+    def _lcp(a, b) -> int:
+        n = min(len(a), len(b))
+        i = 0
+        while i < n and a[i] == b[i]:
+            i += 1
+        return i
+
+    def prefill(self, rt, ids: list) -> tuple:
+        """-> (a cache holding ``ids``, how many leading tokens came from the cache)."""
+        key = max((k for k in self.entries if len(k) <= len(ids) and tuple(ids[: len(k)]) == k), key=len, default=None)
+        have = len(key) if key is not None else 0
+        shared = max((self._lcp(ids, r) for r in self.recent), default=0)
+        self.recent.append(tuple(ids))
+        if key is not None and shared < have + self.min_prefix:     # nothing longer worth caching: use the entry
+            self.hits += 1
+            self.entries.move_to_end(key)
+            e = self.entries[key]
+            e["hits"] += 1
+            self.current = key
+            e["cache"].restore(e["snap"])
+            if len(ids) > have:
+                rt.prefill(e["cache"], ids[have:])
+            return e["cache"], have
+        self.misses += 1
+        cache = rt.make_cache()
+        if shared >= self.min_prefix:          # a new (or longer) shared prefix: cache it at its length
+            rt.prefill(cache, ids[:shared])
+            self._clock += 1
+            self.current = tuple(ids[:shared])
+            self.entries[self.current] = {"cache": cache, "snap": cache.snapshot(), "bytes": 0, "hits": 0,
+                                          "born": self._clock}
+            if len(ids) > shared:
+                rt.prefill(cache, ids[shared:])
+        else:
+            rt.prefill(cache, ids)
+        return cache, 0
+
+    @staticmethod
+    def _bytes(e) -> int:
+        """The cache (its KV buffers and current GDN states) plus the snapshot's GDN states where they differ."""
+        extra = sum(s.conv.nbytes + s.ssm.nbytes for s, cur in zip(e["snap"][1], e["cache"].layers)
+                    if isinstance(s, GDNState) and s is not cur)
+        return e["cache"].nbytes() + extra
+
+    def account(self) -> None:
+        """Re-measure every entry and evict least-recently-used ones beyond the budget (call after a request)."""
+        for e in self.entries.values():
+            e["cache"].restore(e["snap"])        # drop what the last request appended; the prefix is what's kept
+            e["bytes"] = self._bytes(e)
+        evicted = False
+        while len(self.entries) > 1 and sum(e["bytes"] for e in self.entries.values()) > self.max_bytes:
+            others = [k for k in self.entries if k != self.current]
+            never = [k for k in others if self.entries[k]["hits"] == 0]
+            victim = max(never, key=lambda k: self.entries[k]["born"]) if never else others[0]   # else LRU
+            del self.entries[victim]
+            evicted = True
+        if evicted:
+            mx.clear_cache()      # hand the freed buffers back instead of keeping them in MLX's pool
+
+    def stats(self) -> dict:
+        return {"entries": len(self.entries), "hits": self.hits, "misses": self.misses,
+                "mb": round(sum(e["bytes"] for e in self.entries.values()) / 2**20, 1)}
+
+
 # ---- the decider ----------------------------------------------------------------------------------
 
 class Decider:
@@ -264,6 +356,8 @@ class Decider:
         tok = engine.tokenizer
         self.image_pad = tok.convert_tokens_to_ids(jev.VISION[1])
         self.think_end = tok.convert_tokens_to_ids("</think>")
+        self.state_cache: Optional[StateCache] = None    # set by the server (--decision-cache-mb)
+        self.last_hit = 0
 
     @classmethod
     def load(cls, engine, text_temperature=None, image_temperature=None) -> Optional["Decider"]:
@@ -307,8 +401,12 @@ class Decider:
     def logits(self, rows: list, state_len: int) -> list:
         """Option logits per row: the shared state is prefilled once, each branch runs from its snapshot."""
         rt = self.engine.rt
-        cache = rt.make_cache()
-        rt.prefill(cache, rows[0]["ids"][:state_len])
+        state = rows[0]["ids"][:state_len]
+        if self.state_cache is not None and min(state) >= 0:
+            cache, self.last_hit = self.state_cache.prefill(rt, state)
+        else:
+            cache, self.last_hit = rt.make_cache(), 0
+            rt.prefill(cache, state)
         snap = cache.snapshot()
         out = []
         for r in rows:
@@ -318,6 +416,8 @@ class Decider:
             h = rt.prefill(cache, r["ids"][state_len:], hidden_positions=pos)   # [K + 1, D]
             out.append(self.head(h[-1], h[:-1]))
         mx.eval(out)
+        if self.state_cache is not None:
+            self.state_cache.account()
         return [np.array(z) for z in out]
 
     def decide(self, request: dict, image=None, temperature: Optional[float] = None) -> dict:
@@ -326,7 +426,8 @@ class Decider:
         qs, rows, state_len = self.encode(request, image)
         T = float(temperature) if temperature else self.temps["image" if image is not None else "text"]
         answers = {q["qid"]: to_answer(q, softmax(z, T)) for q, z in zip(qs, self.logits(rows, state_len))}
-        return {"answers": answers, "timing_ms": round((time.perf_counter() - t0) * 1000, 1), "temperature": T}
+        return {"answers": answers, "timing_ms": round((time.perf_counter() - t0) * 1000, 1), "temperature": T,
+                "state_tokens": state_len, "cached_tokens": self.last_hit}
 
     # reasoning ---------------------------------------------------------------------------------------
     def think(self, request: dict, image=None, max_tokens: int = 8192, on_piece: Optional[Callable] = None,

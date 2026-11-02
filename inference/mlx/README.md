@@ -112,6 +112,13 @@ curl -s localhost:8000/v1/decide -d '{
   pins it): one causal row per question, `state` first, the pointer head scores each option's `</opt>`
   hidden state against the `<decide>` one. The state is prefilled once and every question branches
   from a snapshot of it, so N questions cost one state prefill plus N short branches.
+- **State cache** (`--decision-cache-mb`, default 1024; 0 = off): when a state starts with the same
+  ≥128 tokens as an earlier one (a file list asked about by many queries, a chat history several
+  decisions look at), that shared prefix is prefilled once, snapshotted, and later states restore it
+  and prefill only their tail. Responses report `state_tokens` / `cached_tokens`; `/v1/models` shows
+  `decision_cache` and the process's `memory_mb`. Eviction keeps reused entries over never-reused ones,
+  so a cycle of more prefixes than fit still hits for part of it. Put the shared part first in the state
+  to benefit. `--mlx-cache-limit-mb` (default 1024) caps the freed buffers MLX keeps for reuse.
 - `image` (data URL, URL or path) puts the picture in the state; `max_image_pixels` defaults to the
   head's training size (448×448).
 - Temperatures: text 1.52 (the Zoro-1 card), image 1.0 (not calibrated yet); override with

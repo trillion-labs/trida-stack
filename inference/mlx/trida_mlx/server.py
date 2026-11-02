@@ -24,7 +24,9 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .decision import Decider, DecisionError
+import mlx.core as mx
+
+from .decision import Decider, DecisionError, StateCache
 from .decode import DecodeStats, SamplingParams
 from .engine import Engine, IncrementalDetokenizer
 from .parsing import StreamSplitter, parse_tool_calls, split_reasoning, to_openai_tool_calls
@@ -308,6 +310,8 @@ class _Worker(threading.Thread):
             ENGINE.warmup()
             DECIDER = Decider.load(ENGINE, DEFAULTS.get("decision_text_temperature"),
                                    DEFAULTS.get("decision_image_temperature"))
+            if DECIDER is not None and DEFAULTS.get("decision_cache_mb", 0) > 0:
+                DECIDER.state_cache = StateCache(DEFAULTS["decision_cache_mb"])
         except BaseException as e:  # noqa: BLE001
             self.error = e
             self.ready.set()
@@ -376,7 +380,11 @@ class Handler(BaseHTTPRequestHandler):
                 "decision": DECIDER is not None,
                 # generation guards this server runs with (record them with eval / speedrun results)
                 "loop_guard": bool(DEFAULTS.get("loop_guard")), "tool_call_gate": DEFAULTS.get("tool_call_gate", 0.0),
-                "decision_temperatures": ({k: DECIDER.temps[k] for k in ("text", "image")} if DECIDER else None)}
+                "decision_temperatures": ({k: DECIDER.temps[k] for k in ("text", "image")} if DECIDER else None),
+                "decision_cache": (DECIDER.state_cache.stats() if DECIDER and DECIDER.state_cache else None),
+                "memory_mb": {k: round(f() / 2**20) for k, f in (("active", mx.get_active_memory),
+                                                                  ("pool", mx.get_cache_memory),
+                                                                  ("peak", mx.get_peak_memory))}}
 
     def do_GET(self):
         path = self.path.split("?")[0].rstrip("/")
@@ -667,6 +675,12 @@ def main(argv=None):
                          "temperature.json, else 1.52 from the Zoro-1 card)")
     ap.add_argument("--decision-image-temperature", type=float, default=None,
                     help="the same for requests with an image (default: temperature.json, else 1.0 = uncalibrated)")
+    ap.add_argument("--decision-cache-mb", type=float, default=1024,
+                    help="memory for reusing decision-state prefixes across requests (a file list or chat history "
+                         "many decisions share is prefilled once); 0 = off")
+    ap.add_argument("--mlx-cache-limit-mb", type=float, default=1024,
+                    help="cap on freed GPU buffers MLX keeps for reuse (its default is close to the memory limit, "
+                         "so the process can hold far more than it uses); 0 = MLX's default")
     a = ap.parse_args(argv)
     from . import decode as _decode
     _decode._Emitter.loop_guard = a.loop_guard
@@ -675,7 +689,10 @@ def main(argv=None):
                     served_name=a.served_model_name, log_requests=a.log_requests,
                     decision_text_temperature=a.decision_text_temperature,
                     decision_image_temperature=a.decision_image_temperature,
+                    decision_cache_mb=a.decision_cache_mb,
                     tool_call_gate=a.tool_call_gate, loop_guard=a.loop_guard)
+    if a.mlx_cache_limit_mb > 0:
+        mx.set_cache_limit(int(a.mlx_cache_limit_mb * 2**20))
     print(f"[trida-mlx] loading {a.model} ...", flush=True)
     WORKER = _Worker(dict(model=a.model, mode=a.mode, gen_block=a.gen_block, prefill_chunk=a.prefill_chunk,
                           prompt_cache=not a.no_prompt_cache, fused_gdn=not a.no_fused_gdn,

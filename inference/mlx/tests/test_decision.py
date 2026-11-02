@@ -153,7 +153,8 @@ def test_server_decide_round_trip():
             break
         except Exception:
             time.sleep(0.1)
-    assert card["decision"] is True
+    assert card["decision"] is True and card["decision_cache"]["entries"] == 0   # on by default
+    assert card["memory_mb"]["active"] > 0
 
     def post(body):
         return urllib.request.urlopen(urllib.request.Request(f"{base}/decide", data=json.dumps(body).encode(),
@@ -187,3 +188,70 @@ def test_long_reasoning_is_trimmed_to_fit_the_state():
     finally:
         DEC.think = real
     assert out["escalated"] and "reasoning_trimmed" in out and out["answers"] == out["reasoned"]["answers"]
+
+
+def test_state_cache_reuses_a_shared_prefix_exactly():
+    """A file list shared by several requests: the third request restores the prefix the first two share and
+    prefills only its tail, with the same answers as without the cache; image states bypass the cache."""
+    files = "\n".join(f"[{i}] file{i}.py handles part {i} of the printer queue" for i in range(12))
+    reqs = [{"state": {"candidates": files, "question": q}, "questions": REQ["questions"]}
+            for q in ("which file jams", "which file bills", "which file fixes the tray")]
+    plain = [DEC.decide(r)["answers"] for r in reqs]
+    DEC.state_cache = decision.StateCache(64, min_prefix=8)
+    try:
+        cached = [DEC.decide(r) for r in reqs] + [DEC.decide(reqs[0])]
+        with_image = DEC.decide(REQ, tiny_vl.png(3))
+        stats = DEC.state_cache.stats()
+    finally:
+        DEC.state_cache = None
+    assert [c["cached_tokens"] for c in cached[:2]] == [0, 0]
+    assert cached[2]["cached_tokens"] >= 8 and cached[3]["cached_tokens"] == cached[2]["cached_tokens"]
+    assert with_image["cached_tokens"] == 0 and stats["entries"] == 1 and stats["hits"] == 2
+    for p, c in zip(plain + plain[:1], cached):
+        for qid, a in p.items():
+            got = c["answers"][qid]
+            if a["type"] == "noul":
+                assert abs(a["noul"] - got["noul"]) < 1e-3
+            else:
+                assert all(abs(a["probabilities"][k] - got["probabilities"][k]) < 1e-3 for k in a["probabilities"])
+
+
+def test_state_cache_stays_within_its_budget():
+    """Measured sizes, least-recently-used eviction, and the newest entry is always kept."""
+    def req(i, q):
+        files = "\n".join(f"[{j}] {'abcdefgh'[i] * 3} file{j}.py handles part {j}" for j in range(12))
+        return {"state": {"candidates": files, "question": q}, "questions": {"u": REQ["questions"]["urgent"]}}
+    DEC.state_cache = sc = decision.StateCache(64, min_prefix=24)
+    try:
+        for i in range(4):
+            DEC.decide(req(i, "first question")), DEC.decide(req(i, "second question"))
+        one = max(e["bytes"] for e in sc.entries.values())
+        assert len(sc.entries) == 4 and one > 0
+        sc.max_bytes = int(one * 2.5)
+        DEC.decide(req(4, "first question")), DEC.decide(req(4, "second question"))
+        assert len(sc.entries) <= 2 and sum(e["bytes"] for e in sc.entries.values()) <= sc.max_bytes
+        assert DEC.decide(req(4, "third question"))["cached_tokens"] >= 24
+        sc.max_bytes = 1
+        DEC.decide(req(5, "a")), DEC.decide(req(5, "b"))
+        assert len(sc.entries) == 1 and DEC.decide(req(5, "c"))["cached_tokens"] >= 24
+    finally:
+        DEC.state_cache = None
+
+
+def test_state_cache_keeps_part_of_a_cycle_too_big_to_fit():
+    """Eight prefixes asked about in a fixed order with room for about three: plain LRU would evict each just
+    before it comes round again and never hit; this cache keeps some of them hitting every round."""
+    def req(i, q):
+        files = "\n".join(f"[{j}] {'abcdefgh'[i] * 3} file{j}.py handles part {j}" for j in range(12))
+        return {"state": {"candidates": files, "question": q}, "questions": {"u": REQ["questions"]["urgent"]}}
+    DEC.state_cache = sc = decision.StateCache(64, min_prefix=24)
+    try:
+        for q in ("alpha", "bravo"):            # different first letters: the shared prefix ends before the question
+            for i in range(8):
+                DEC.decide(req(i, q))
+        sc.max_bytes = int(max(e["bytes"] for e in sc.entries.values()) * 3.5)
+        rounds = [[DEC.decide(req(i, f"{'xyz'[r]} round"))["cached_tokens"] > 0 for i in range(8)] for r in range(3)]
+    finally:
+        DEC.state_cache = None
+    assert all(sum(r) >= 2 for r in rounds[1:]), rounds
+    assert len(sc.entries) <= 4
