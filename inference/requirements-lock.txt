@@ -76,7 +76,7 @@ multidict==7.1.0
     #   yarl
 multiprocess==0.70.19
     # via datasets
-nltk==3.10.3
+nltk==3.10.4
     # via -r inference/requirements.txt
 numpy==2.2.6
     # via
