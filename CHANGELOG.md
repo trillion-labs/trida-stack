@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `README.ko.md`: a Korean README, linked from the English one (#57).
-- README: a Models table with Hugging Face links for Zoro-1, Trida2.0-4B and Trida-2.0-4B-1006, and
+- README: a Models table with Hugging Face links for Zoro-1 and Zoro (formerly Trida2.0-4B), and
   sections on typed-decision joint training, image training, `--mode decide` serving, the backends
   (SGLang, vLLM, MLX), the speedrun and the two getting-started notebooks (#57).
 - `inference/zoro-1/speedrun/`: a NanoGPT-style speedrun for Zoro-1 inference. The task is GSM8K at

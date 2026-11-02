@@ -2,11 +2,12 @@
 
 [English](README.md) | **한국어**
 
+<sub>영문 [README.md](README.md)가 기준 문서이며, 이 번역은 최신 내용을 반영하지 못할 수 있습니다.</sub>
+
 **자기회귀(AR) LLM을 블록 디퓨전(block diffusion) LLM으로 전환하고 서빙하기 위한 학습·추론 도구를 제공합니다.**
 
 [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97%20Zoro--1-diffusion%20%2B%20decisions-yellow)](https://huggingface.co/trillionlabs/Zoro-1)
-[![Trida2.0-4B](https://img.shields.io/badge/%F0%9F%A4%97%20Trida2.0--4B-block%20diffusion-yellow)](https://huggingface.co/trillionlabs/Trida2.0-4B)
-[![Trida-2.0-4B-1006](https://img.shields.io/badge/%F0%9F%A4%97%20Trida--2.0--4B--1006-vision--language-yellow)](https://huggingface.co/trillionlabs/Trida-2.0-4B-1006)
+[![Zoro](https://img.shields.io/badge/%F0%9F%A4%97%20Zoro-block%20diffusion-yellow)](https://huggingface.co/trillionlabs/Zoro)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 학습과 추론을 위한 두 개의 독립적인 스택으로 구성되어 있습니다.
@@ -28,11 +29,10 @@
 | 모델 | 설명 | 서빙 방법 |
 |---|---|---|
 | [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) | Qwen3.5-4B 기반의 4B 투스트림 블록 디퓨전 모델입니다. 에이전트 작업과 **의사결정 작업**을 함께 학습했습니다(`jev_head.pt` 포인터 헤드). 접근이 제한된 모델이므로 접근 권한을 요청한 뒤 `hf auth login`으로 인증해야 합니다. | [`inference/zoro-1/`](inference/zoro-1/): `--mode self-spec`(기본) / `causal` / `decide` |
-| [![Trida2.0-4B](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FTrida2.0--4B-yellow)](https://huggingface.co/trillionlabs/Trida2.0-4B) | Qwen3.5-4B 기반의 4B 블록 디퓨전 모델로, 하이브리드 어텐션을 사용합니다. 자기회귀 생성 기능을 유지해 무손실 self-speculative 디코딩을 지원합니다. Apache-2.0 라이선스로 배포됩니다. | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) (Apple Silicon), [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) |
-| [![Trida-2.0-4B-1006](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FTrida--2.0--4B--1006-yellow)](https://huggingface.co/trillionlabs/Trida-2.0-4B-1006) | Qwen3.5 비전 타워와 프로젝터를 결합한 비전-언어 모델입니다. | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) (이미지 입력) |
+| [![Zoro](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro-yellow)](https://huggingface.co/trillionlabs/Zoro) | Qwen3.5-4B 기반의 4B 블록 디퓨전 모델로, 하이브리드 어텐션을 사용합니다(이전 이름 `Trida2.0-4B`). 자기회귀 생성 기능을 유지해 무손실 self-speculative 디코딩을 지원합니다. Apache-2.0 라이선스로 배포됩니다. | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) (Apple Silicon), [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) |
 
-[`benchmark/`](benchmark/)의 에이전트 평가 도구는
-[`trillionlabs/Trida-7B-Preview`](https://huggingface.co/trillionlabs/Trida-7B-Preview) 모델로도 실행할 수 있습니다.
+[`benchmark/`](benchmark/)의 에이전트 평가 도구는 아직 이전 모델인
+[`trillionlabs/Trida-7B-Preview`](https://huggingface.co/trillionlabs/Trida-7B-Preview)를 기본값으로 사용합니다. Zoro-1로의 전환은 #62에서 진행 중입니다.
 
 ---
 
@@ -114,7 +114,7 @@ Fast-dLLM v2 방식의 블록 디퓨전 SFT를 사용합니다. 각 학습 시�
 
 | 노트북 | 다루는 내용 | 모델 |
 |---|---|---|
-| [`train/getting_started.ipynb`](train/getting_started.ipynb) | 데이터 형식과 최소 블록 디퓨전 SFT 실행(GPU 1장, 2스텝) | 사용자가 선택한 AR 기반 모델(예: Qwen3.5-4B) |
+| [`train/getting_started.ipynb`](train/getting_started.ipynb) | 데이터 형식과 최소 블록 디퓨전 SFT 실행(GPU 1장, 2스텝) | 사용자가 선택한 AR 기반 모델(예: [`Qwen/Qwen3.5-4B`](https://huggingface.co/Qwen/Qwen3.5-4B)). 학습 결과의 예: [Zoro-1](https://huggingface.co/trillionlabs/Zoro-1) |
 | [`inference/zoro-1/getting_started.ipynb`](inference/zoro-1/getting_started.ipynb) | 모델 서빙, API 호출, 벤치마크 실행 및 결과 해석 | [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-Zoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) |
 
 ### 학습 (AR → 디퓨전 전환)
@@ -181,7 +181,7 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
 
 | 백엔드 | 위치 | 내용 |
 |---|---|---|
-| **SGLang** (패치) | [`inference/zoro-1/sglang/`](inference/zoro-1/sglang/) | 블록 내 양방향 어텐션과 가변 길이 토큰 확정을 지원하는 블록 디퓨전 및 self-speculative 디코딩 |
+| **SGLang** (패치) | [`inference/zoro-1/sglang/`](inference/zoro-1/sglang/) | self-speculative 디코딩(디퓨전 초안, AR 검증)과 causal 디코딩 |
 | **SGLang** (기본 배포판) | `inference/zoro-1/serve_decide.py` | `--mode decide`: 유형별 의사결정 + 채팅 |
 | **vLLM** | [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) | 외부 플러그인(out-of-tree) 방식의 self-spec 디코딩 |
 | **MLX** | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) | Apple Silicon 기기 내 실행: 무손실 self-spec 디코딩, OpenAI 호환 서버, 이미지 입력, 경량 에이전트. q8 모델은 메모리 16–18 GB의 Mac에서 실행할 수 있습니다 |

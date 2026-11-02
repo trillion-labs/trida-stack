@@ -2,11 +2,12 @@
 
 **English** | [한국어](README.ko.md)
 
+<sub>This English README is the source of truth; the Korean translation may lag behind it.</sub>
+
 **One repo for turning an autoregressive LLM into a block-diffusion LLM, and for serving it.**
 
 [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97%20Zoro--1-diffusion%20%2B%20decisions-yellow)](https://huggingface.co/trillionlabs/Zoro-1)
-[![Trida2.0-4B](https://img.shields.io/badge/%F0%9F%A4%97%20Trida2.0--4B-block%20diffusion-yellow)](https://huggingface.co/trillionlabs/Trida2.0-4B)
-[![Trida-2.0-4B-1006](https://img.shields.io/badge/%F0%9F%A4%97%20Trida--2.0--4B--1006-vision--language-yellow)](https://huggingface.co/trillionlabs/Trida-2.0-4B-1006)
+[![Zoro](https://img.shields.io/badge/%F0%9F%A4%97%20Zoro-block%20diffusion-yellow)](https://huggingface.co/trillionlabs/Zoro)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 Two independent stacks:
@@ -28,11 +29,10 @@ Checkpoints trained with this repo, on Hugging Face:
 | model | what it is | serve it with |
 |---|---|---|
 | [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) | 4B two-stream block-diffusion model (Qwen3.5-4B), jointly trained as an agent model **and** a decision model (`jev_head.pt` pointer head). Gated: request access, then `hf auth login`. | [`inference/zoro-1/`](inference/zoro-1/): `--mode self-spec` (default) / `causal` / `decide` |
-| [![Trida2.0-4B](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FTrida2.0--4B-yellow)](https://huggingface.co/trillionlabs/Trida2.0-4B) | 4B block-diffusion model (Qwen3.5-4B, hybrid attention) with a causal head for lossless self-speculative decoding. Apache-2.0. | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) (Apple Silicon), [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) |
-| [![Trida-2.0-4B-1006](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FTrida--2.0--4B--1006-yellow)](https://huggingface.co/trillionlabs/Trida-2.0-4B-1006) | vision-language variant (Qwen3.5 vision tower + projector). | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) (image input) |
+| [![Zoro](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro-yellow)](https://huggingface.co/trillionlabs/Zoro) | 4B block-diffusion model (Qwen3.5-4B, hybrid attention), formerly `Trida2.0-4B`, with a causal head for lossless self-speculative decoding. Apache-2.0. | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) (Apple Silicon), [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) |
 
-The agentic benchmark harnesses in [`benchmark/`](benchmark/) also run
-[`trillionlabs/Trida-7B-Preview`](https://huggingface.co/trillionlabs/Trida-7B-Preview).
+The agentic benchmark harnesses in [`benchmark/`](benchmark/) still default to the legacy
+[`trillionlabs/Trida-7B-Preview`](https://huggingface.co/trillionlabs/Trida-7B-Preview); moving them to Zoro-1 is tracked in #62.
 
 ---
 
@@ -118,7 +118,7 @@ checkpoint. Details: [`train/README.md`](train/README.md#images-vision-language-
 
 | notebook | what it walks through | model |
 |---|---|---|
-| [`train/getting_started.ipynb`](train/getting_started.ipynb) | the data format and a minimal block-diffusion SFT run (1 GPU, 2 steps) | your own AR base (e.g. Qwen3.5-4B) |
+| [`train/getting_started.ipynb`](train/getting_started.ipynb) | the data format and a minimal block-diffusion SFT run (1 GPU, 2 steps) | your own AR base, e.g. [`Qwen/Qwen3.5-4B`](https://huggingface.co/Qwen/Qwen3.5-4B); [Zoro-1](https://huggingface.co/trillionlabs/Zoro-1) is an example output |
 | [`inference/zoro-1/getting_started.ipynb`](inference/zoro-1/getting_started.ipynb) | serve, call, benchmark, and read the numbers | [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-Zoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) |
 
 ### Train (AR → diffusion)
@@ -180,7 +180,7 @@ See [`inference/zoro-1/README.md#decisions`](inference/zoro-1/README.md#decision
 ### Backends
 | backend | where | what |
 |---|---|---|
-| **SGLang** (patched) | [`inference/zoro-1/sglang/`](inference/zoro-1/sglang/) | true block-diffusion (bidirectional-within-block attention, variable-length commits) and the self-speculative path |
+| **SGLang** (patched) | [`inference/zoro-1/sglang/`](inference/zoro-1/sglang/) | the self-speculative path (diffusion draft, AR verify) and causal decoding |
 | **SGLang** (stock) | `inference/zoro-1/serve_decide.py` | `--mode decide`: typed decisions + chat |
 | **vLLM** | [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) | out-of-tree plugin, self-spec |
 | **MLX** | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) | on-device (Apple Silicon): lossless self-spec, OpenAI-compatible server, image input, a small agent; q8 fits 16–18 GB |
