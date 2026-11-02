@@ -33,8 +33,9 @@ enum ToolRouter {
     }
 
     static let groups: [Group] = [
-        Group(key: "files", description: "the user's files: list a folder, find, read or search files, look at an image file, write a file",
-              tools: ["list_dir", "read_file", "find_files", "search_files", "view_image", "write_file", "pick_file"]),
+        Group(key: "files", description: "the user's files: list a folder, find files (by name, or which file is about something), read or search files, look at an image file, write a file",
+              tools: ["list_dir", "read_file", "find_files", "search_files", "view_image", "write_file", "pick_file",
+                      "locate_files"]),
         Group(key: "screen", description: "look at what is on the user's screen now (screenshot)", tools: ["screenshot"]),
         Group(key: "time", description: "the current date or time", tools: ["now"]),
         Group(key: "math", description: "an exact arithmetic calculation", tools: ["calculator"]),

@@ -263,3 +263,83 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(r2.answers["q1"]?.pick, "b")
     }
 }
+
+final class FileLocatorTests: XCTestCase {
+    func testSummarySkipsShebangImportsAndCommentMarks() {
+        let py = "#!/usr/bin/env python3\n# Copyright 2026\nimport os\n\"\"\"Loop guard: stops repeating n-grams.\"\"\"\n"
+        XCTAssertEqual(FileLocator.summary(py), "Loop guard: stops repeating n-grams.")
+        XCTAssertEqual(FileLocator.summary("\n\n"), "(empty)")
+        XCTAssertTrue(FileLocator.summary(String(repeating: "word ", count: 200), limit: 50).hasSuffix("…"))
+    }
+
+    func testKeywordRankFindsTheMatchingFileAndSplitsCamelCase() {
+        let e = [FileLocator.Entry(path: "a/Readme.md", summary: "", text: "nothing here"),
+                 FileLocator.Entry(path: "a/ChatStore.swift", summary: "", text: "saves chats to disk"),
+                 FileLocator.Entry(path: "b/notes.txt", summary: "", text: "shopping list")]
+        XCTAssertEqual(FileLocator.keywordRank("where are chats saved", e).first, 1)
+        XCTAssertEqual(FileLocator.keywordRank("chat store", e).first, 1)   // ChatStore -> chat, store
+    }
+
+    func testIndexSkipsHiddenBinaryAndDependencyFoldersAndSortsByPath() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("loc-\(UUID().uuidString)")
+        let fm = FileManager.default
+        for d in ["src", "node_modules/x", ".git"] { try fm.createDirectory(at: dir.appendingPathComponent(d), withIntermediateDirectories: true) }
+        try "zeta".write(to: dir.appendingPathComponent("src/z.txt"), atomically: true, encoding: .utf8)
+        try "alpha".write(to: dir.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try "dep".write(to: dir.appendingPathComponent("node_modules/x/dep.js"), atomically: true, encoding: .utf8)
+        try "git".write(to: dir.appendingPathComponent(".git/HEAD"), atomically: true, encoding: .utf8)
+        try Data([0, 1, 2, 3]).write(to: dir.appendingPathComponent("blob.bin"))
+        defer { try? fm.removeItem(at: dir) }
+        XCTAssertEqual(FileLocator.index(dir).map(\.path), ["a.txt", "src/z.txt"])
+    }
+
+    /// A fake decision model that gives each numbered candidate a weight by how many query words its line has.
+    static func fakeDecide(_ calls: Counter) -> FileLocator.Decide {
+        { body, qs in
+            calls.add()
+            guard case let .object(kv) = body, case let .object(st)? = kv.first(where: { $0.0 == "state" })?.1,
+                  case let .string(list)? = st.first(where: { $0.0 == "candidates" })?.1,
+                  case let .string(query)? = st.first(where: { $0.0 == "question" })?.1 else { throw ChatClientError.badURL }
+            XCTAssertEqual(st.first?.0, "candidates")                     // the list comes first: a cacheable prefix
+            let words = Set(query.lowercased().split(separator: " ").map(String.init))
+            let lines = list.split(separator: "\n").map { $0.lowercased() }
+            let w = lines.map { l in 0.01 + Double(words.filter { l.contains($0) }.count) }
+            let total = w.reduce(0, +)
+            let probs = Dictionary(uniqueKeysWithValues: w.enumerated().map { (String($0.offset + 1), $0.element / total) })
+            let best: [String: Any] = ["type": "choice", "probabilities": probs]
+            let response: [String: Any] = ["answers": ["best": best] as [String: Any]]
+            return DecisionResult(response, questions: qs)!
+        }
+    }
+
+    final class Counter: @unchecked Sendable {
+        private(set) var n = 0
+        private let lock = NSLock()
+        func add() { lock.lock(); n += 1; lock.unlock() }
+    }
+
+    func testLocateBatchesPoolsAndAddsKeywordCandidates() async throws {
+        var entries = (0..<95).map { FileLocator.Entry(path: String(format: "f%03d.txt", $0), summary: "filler \($0)", text: "filler") }
+        entries[57] = FileLocator.Entry(path: "f057.txt", summary: "saves chats to disk", text: "saves chats")
+        entries[3] = FileLocator.Entry(path: "f003.txt", summary: "filler", text: "the word persistence appears here")
+        let calls = Counter()
+        let r = try await FileLocator().locate("saves chats persistence", in: entries, top: 30,
+                                               decide: Self.fakeDecide(calls))
+        XCTAssertEqual(r.hits.first?.path, "f057.txt")
+        XCTAssertEqual(r.requests, 4)              // 3 batches of <= 40, then the final choice
+        XCTAssertEqual(calls.n, 4)
+        XCTAssertEqual(r.searched, 95)
+        XCTAssertTrue(r.hits.contains { $0.path == "f003.txt" })   // keyword search adds it (its text, not summary)
+        XCTAssertLessThanOrEqual(r.hits.count, 15 + 10)            // 5 per batch, plus keyword search's top 10
+        XCTAssertTrue(FileLocator.report("q", r, folder: "docs").contains("1. docs/f057.txt"))
+    }
+
+    func testLocateJudgesOnlyKeywordTopFilesWhenTheFolderIsLarge() async throws {
+        let entries = (0..<30).map { FileLocator.Entry(path: "f\($0).txt", summary: "s", text: $0 == 7 ? "needle" : "hay") }
+        var loc = FileLocator()
+        loc.maxFiles = 10
+        let r = try await loc.locate("needle", in: entries, decide: Self.fakeDecide(Counter()))
+        XCTAssertEqual(r.searched, 10)
+        XCTAssertTrue(FileLocator.report("needle", r, folder: ".").contains("Only the 10 of 30 files"))
+    }
+}

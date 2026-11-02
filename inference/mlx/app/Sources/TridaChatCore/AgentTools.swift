@@ -182,6 +182,9 @@ public struct AgentTools: Sendable {
         }.sorted().prefix(limit))
     }
 
+    /// A workspace folder from a tool argument (relative path, "." or an absolute path inside it).
+    public func directory(_ rel: String?) throws -> URL { try existingDirectory(rel) }
+
     func existingDirectory(_ rel: String?) throws -> URL {
         let url = try resolve(rel)
         var isDir: ObjCBool = false

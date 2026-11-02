@@ -7,7 +7,7 @@ import TridaChatCore
 /// Offered in agent mode when the served checkpoint has the decision head. None of them change anything.
 @MainActor
 enum DecisionTools {
-    static let names: Set<String> = ["decide_choice", "decide_yes_no", "pick_file", "ui_check"]
+    static let names: Set<String> = ["decide_choice", "decide_yes_no", "pick_file", "locate_files", "ui_check"]
 
     private static func fn(_ name: String, _ desc: String, _ props: [String: Any], _ required: [String]) -> [String: Any] {
         ["type": "function",
@@ -32,6 +32,13 @@ enum DecisionTools {
                + "the folder's file names. Returns the top candidates with probabilities.",
                ["goal": str, "path": ["type": "string", "description": "Folder relative to the workspace (default \".\")."]],
                ["goal"]),
+            fn("locate_files", "Find which files in the workspace most likely hold what a question is about, by "
+               + "meaning and in any language (e.g. \"where is the code that saves chats?\", \"계약 해지 조건이 "
+               + "적힌 문서\"): the decision model reads every file's path and opening lines. Returns the top 5 paths. "
+               + "Use it when you don't know the file's name; find_files matches names, search_files exact text.",
+               ["query": ["type": "string", "description": "What you are looking for, in the user's words."],
+                "path": ["type": "string", "description": "Folder relative to the workspace (default \".\")."]],
+               ["query"]),
         ]
         if ui {
             s.append(fn("ui_check", "Ask the decision model whether a goal is already done in the operated app, "
@@ -42,7 +49,8 @@ enum DecisionTools {
 
     static let systemPrompt = "When the user asks you to classify something, choose between options or make a yes/no "
         + "judgement, you can call decide_choice or decide_yes_no (a calibrated decision model) and report its pick "
-        + "and probability."
+        + "and probability. To find where something is in the user's files when you don't know the file name "
+        + "(\"where is…\", \"which file…\"), call locate_files, then read_file the best match."
 }
 
 extension AppState {
@@ -145,6 +153,21 @@ extension AppState {
                 guard let ans = r.answers["file"] else { return ToolOutput(text: "error: no answer") }
                 return ToolOutput(text: "Best match in \(path): \(ans.pick) (\(String(format: "%.2f", ans.top)))\(Self.note(r))\n"
                                   + "Top candidates: \(Self.ranked(ans, top: 5))")
+
+            case "locate_files":
+                guard let query = a["query"] as? String, !query.isEmpty else {
+                    return ToolOutput(text: "error: missing argument 'query'")
+                }
+                guard let tools else { return ToolOutput(text: "error: agent mode is off") }
+                let path = (a["path"] as? String) ?? "."
+                let dir = try tools.directory(path)
+                progress("Indexing \(path)…")
+                let entries = await Task.detached(priority: .userInitiated) { FileLocator.index(dir) }.value
+                let c = client
+                let r = try await FileLocator().locate(query, in: entries,
+                                                       decide: { b, q in try await c.decide(b, questions: q) },
+                                                       progress: progress)
+                return ToolOutput(text: FileLocator.report(query, r, folder: path))
 
             case "ui_check":
                 guard let goal = a["goal"] as? String, !goal.isEmpty else { return ToolOutput(text: "error: missing argument 'goal'") }

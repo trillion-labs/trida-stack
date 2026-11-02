@@ -316,6 +316,9 @@ final class AppState: ObservableObject {
             }
             // The server's generation guards are off by default (evals, speedrun); the app runs with them.
             extra += ["--loop-guard", "--tool-call-gate", "0.7"]
+            // locate_files keeps a folder's file list cached between searches: ~150 MB per 40 files on q8,
+            // so 1.5 GB holds a ~400-file folder (plus the chat-history prefixes the app's decisions share)
+            extra += ["--decision-cache-mb", "1536"]
             if cfg.genBlock > 0 { extra += ["--gen-block", String(cfg.genBlock)] }
             do {
                 try server.start(.init(runtime: runtime, model: model.url, port: cfg.port,
