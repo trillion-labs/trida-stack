@@ -10,17 +10,17 @@ model-card license.
 
 | Component | Path | Upstream | License |
 |---|---|---|---|
-| IFEval scorer | `inference/ifeval_lib/` | [google-research · instruction_following_eval](https://github.com/google-research/google-research/tree/master/instruction_following_eval) | **Apache-2.0** |
-| Jev request encoding (vendored, adapted) | `inference/jev.py`, `inference/jev_head.py`, `scripts/export_kev_checkpoint.py`, `inference/decide_request.py`, `inference/decide_engine.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
+| IFEval scorer | `inference/zoro-1/ifeval_lib/` | [google-research · instruction_following_eval](https://github.com/google-research/google-research/tree/master/instruction_following_eval) | **Apache-2.0** |
+| Jev request encoding (vendored, adapted) | `inference/zoro-1/jev.py`, `inference/zoro-1/jev_head.py`, `scripts/export_kev_checkpoint.py`, `inference/zoro-1/decide_request.py`, `inference/zoro-1/decide_engine.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
 | Typed-decision training, kev scheme (vendored, adapted) | `train/jev.py`, `train/tools/export_kev_checkpoint.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
-| mlx-vlm Qwen3-VL vision encoder (adapted) | `inference/mlx/trida_mlx/vision.py` | [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) `mlx_vlm/models/qwen3_vl/vision.py` | **MIT** |
-| MLX gated-delta Metal kernel (adapted) | `inference/mlx/trida_mlx/kernels.py` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) `mlx_lm/models/gated_delta.py` | **MIT** |
-| Qwen3.5 / Trida chat template (test fixture) | `inference/mlx/tests/fixtures/trida_chat_template.jinja` | shipped with `trillionlabs/Trida2.0-4B` (from Qwen3.5) | **Apache-2.0** |
+| mlx-vlm Qwen3-VL vision encoder (adapted) | `inference/zoro-1/mlx/trida_mlx/vision.py` | [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) `mlx_vlm/models/qwen3_vl/vision.py` | **MIT** |
+| MLX gated-delta Metal kernel (adapted) | `inference/zoro-1/mlx/trida_mlx/kernels.py` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) `mlx_lm/models/gated_delta.py` | **MIT** |
+| Qwen3.5 / Trida chat template (test fixture) | `inference/zoro-1/mlx/tests/fixtures/trida_chat_template.jinja` | shipped with `trillionlabs/Trida2.0-4B` (from Qwen3.5) | **Apache-2.0** |
 
 These are the only third-party source code redistributed in the repository (see
-[`NOTICE`](NOTICE)); `inference/jev.py` and `inference/jev_head.py` vendor kev's request
+[`NOTICE`](NOTICE)); `inference/zoro-1/jev.py` and `inference/zoro-1/jev_head.py` vendor kev's request
 mapping, encoding and pointer head, and `scripts/export_kev_checkpoint.py` writes kev's
-checkpoint format; `inference/decide_request.py` and `inference/decide_engine.py` (the
+checkpoint format; `inference/zoro-1/decide_request.py` and `inference/zoro-1/decide_engine.py` (the
 decision server) follow the same encoding and pointer head. On the training side `train/jev.py` vendors the same mapping and
 encoding plus kev's augmentation, pointer head and loss, adapted to this trainer's packed
 rows, and `train/tools/export_kev_checkpoint.py` writes the same format. Everything else
@@ -35,8 +35,8 @@ in this repo. They are fetched/patched from upstream at setup time and are
 | Component | Recipe | Upstream | License |
 |---|---|---|---|
 | Training kernels | `train/block_gated_delta_rule/` (`fetch_kernels.sh` + `trillion_mods.patch`) | [yuchen-zhu-zyc/HybridDiffusion](https://github.com/yuchen-zhu-zyc/HybridDiffusion) @ `6ca547a` | **PolyForm-NC 1.0.0** |
-| sglang two-stream backend | `inference/sglang/two_stream_diffusion.patch` | same upstream @ `6ca547a` | **PolyForm-NC 1.0.0** |
-| vLLM diffusion readout | `inference/vllm/vllm_native_diffusion/KERNELS.md` | sglang `block_gdn` backend (above) | **PolyForm-NC 1.0.0** |
+| sglang two-stream backend | `inference/zoro-1/sglang/two_stream_diffusion.patch` | same upstream @ `6ca547a` | **PolyForm-NC 1.0.0** |
+| vLLM diffusion readout | `inference/zoro-1/vllm/vllm_native_diffusion/KERNELS.md` | sglang `block_gdn` backend (above) | **PolyForm-NC 1.0.0** |
 
 Trillion Labs' patches/modifications against these kernels are derivative works and
 are likewise PolyForm-NC. **The two-stream training and diffusion-serving paths are
@@ -53,11 +53,11 @@ noncommercial code.
 | HF Datasets | eval-data loading | [huggingface/datasets](https://github.com/huggingface/datasets) | **Apache-2.0** |
 | HF Accelerate | training | [huggingface/accelerate](https://github.com/huggingface/accelerate) | **Apache-2.0** |
 | Pillow | image loading for image+text training | [python-pillow/Pillow](https://github.com/python-pillow/Pillow) | **MIT-CMU (HPND)** |
-| SGLang | diffusion serving backend; stock ≥ 0.5.22 for the decision server (`inference/serve_decide.py`, no patch) | [sgl-project/sglang](https://github.com/sgl-project/sglang) | **Apache-2.0** |
+| SGLang | diffusion serving backend; stock ≥ 0.5.22 for the decision server (`inference/zoro-1/serve_decide.py`, no patch) | [sgl-project/sglang](https://github.com/sgl-project/sglang) | **Apache-2.0** |
 | FastAPI / Uvicorn | decision server HTTP layer (optional) | [fastapi/fastapi](https://github.com/fastapi/fastapi), [encode/uvicorn](https://github.com/encode/uvicorn) | **MIT** / **BSD-3-Clause** |
 | vLLM | optional AR serving backend | [vllm-project/vllm](https://github.com/vllm-project/vllm) | **Apache-2.0** |
-| MLX | on-device backend (`inference/mlx/`) | [ml-explore/mlx](https://github.com/ml-explore/mlx) | **MIT** |
-| mlx-lm | Qwen3.5 model + kernels for `inference/mlx/` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) | **MIT** |
+| MLX | on-device backend (`inference/zoro-1/mlx/`) | [ml-explore/mlx](https://github.com/ml-explore/mlx) | **MIT** |
+| mlx-lm | Qwen3.5 model + kernels for `inference/zoro-1/mlx/` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) | **MIT** |
 
 ## 3. Benchmark harnesses (invoked from `benchmark/`, not bundled)
 
@@ -83,9 +83,9 @@ None are redistributed from this repo — all are downloaded at eval time. See
 
 | Dataset | Used by | Source | License |
 |---|---|---|---|
-| GSM8K | `inference/eval.py` | openai/gsm8k | **MIT** |
-| MMLU-Pro | `inference/eval.py` | [TIGER-Lab/MMLU-Pro](https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro) | **MIT** |
-| IFEval | `inference/eval_ifeval.py` | google/IFEval | **Apache-2.0** |
+| GSM8K | `inference/zoro-1/eval.py` | openai/gsm8k | **MIT** |
+| MMLU-Pro | `inference/zoro-1/eval.py` | [TIGER-Lab/MMLU-Pro](https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro) | **MIT** |
+| IFEval | `inference/zoro-1/eval_ifeval.py` | google/IFEval | **Apache-2.0** |
 | benchmark suites | `benchmark/` | each harness's own datasets | per upstream |
 
 ## 4b. Model weights — base model and derived checkpoint

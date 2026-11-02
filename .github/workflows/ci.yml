@@ -48,7 +48,7 @@ jobs:
           # and pulls no model, but it is not in the default install because requirements.txt
           # targets a GPU cluster and is skipped by --no-deps below.
           pip install transformers
-          # inference/test_decide_cpu.py: image requests need Pillow, the /v1/decide handler test
+          # inference/zoro-1/test_decide_cpu.py: image requests need Pillow, the /v1/decide handler test
           # needs FastAPI's TestClient (httpx); both skip without them.
           pip install pillow fastapi httpx
           pip install -e . --no-deps
