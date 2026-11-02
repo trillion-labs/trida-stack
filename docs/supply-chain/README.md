@@ -17,7 +17,7 @@ about a finding. The register holds that, which is why both exist.
 
 ## What is unusual about this repository
 
-The install path is not only `pip install`. Three code paths assemble third-party
+The install path is not only `pip install`. Four code paths assemble third-party
 sources **at build time** from a pinned upstream commit:
 
 | path | recipe |
@@ -25,12 +25,20 @@ sources **at build time** from a pinned upstream commit:
 | two-stream training kernels | `train/block_gated_delta_rule/fetch_kernels.sh` |
 | SGLang diffusion backend | `inference/zoro-1/sglang/` |
 | vLLM block-end readout kernel | `inference/zoro-1/vllm/vllm_native_diffusion/KERNELS.md` |
+| GravityOCR SGLang backend | `inference/gravityocr/sglang/setup.sh` |
 
-All three resolve to `yuchen-zhu-zyc/HybridDiffusion@6ca547a`, which is
+The first three resolve to `yuchen-zhu-zyc/HybridDiffusion@6ca547a`, which is
 PolyForm Noncommercial 1.0.0 and is therefore **never committed here**. See
 [`../../COMPLIANCE.md`](../../COMPLIANCE.md) §1b.
 
-Two consequences shape the CI below.
+The fourth is upstream `sgl-project/sglang` at tag v0.5.10, the commit recorded in
+`inference/gravityocr/sglang/BASE_COMMIT.txt`. It is Apache-2.0, so our patch against it
+and the four new files the patch needs (copied in by `sglang/setup.sh`) are committed in
+that folder, and only the upstream checkout is fetched. Its environment, `sglang==0.5.10` included, is committed as a
+resolved lock that the advisory job and the release SBOM both read.
+
+Two consequences of the first three shape the CI below. What the fourth lacks is under
+[Known gaps](#known-gaps).
 
 **Dependency scanners cannot see these components.** They are not in any manifest, so
 `dependency-review` and the dependency graph are blind to them. The register records
@@ -78,7 +86,7 @@ recorded hashes additionally detect the history being rewritten under the same r
 |---|---|---|
 | Pinned-commit drift | PR, push | the recorded pin disagreeing with `fetch_kernels.sh` |
 | Action pins | PR, push | a workflow running a GitHub Action from a tag instead of a commit SHA |
-| Dependency advisories | PR, push, weekly | a finding with no unexpired exception |
+| Dependency advisories | PR, push, weekly | a finding with no unexpired exception, or no report from the GravityOCR lock scan |
 | Fetch recipe | weekly | the recipe or its integrity check failing |
 | Published model card | weekly | HF licence or visibility disagreeing with `COMPLIANCE.md` §4b |
 | Release SBOM | on release | invalid SBOM, or a finding with no exception |
@@ -150,9 +158,11 @@ therefore accurate about what we distribute, and the register covers what gets f
 publishes. The repository cannot fix a wrong model card — it can refuse to go on
 describing it incorrectly.
 
-Apache-2.0 on the weights does not make the serving stack permissive: the diffusion and
+Apache-2.0 on the weights does not make the serving stack permissive: Zoro-1's diffusion and
 self-speculative decode paths run §1b kernels that are PolyForm Noncommercial, and that
-restriction attaches to whoever runs them. The AR path has no such dependency.
+restriction attaches to whoever runs them. The AR path has no such dependency, and neither
+does `inference/gravityocr/`, whose self-speculative path is upstream SGLang plus our
+Apache-2.0 patch.
 
 ## Known gaps
 
@@ -166,6 +176,17 @@ restriction attaches to whoever runs them. The AR path has no such dependency.
   so the file currently documents intent rather than gating anything.
 - Dependencies are declared as ranges in `requirements.txt`; the resolved set lives in
   `requirements-lock.txt` (85 packages) and `inference/zoro-1/requirements-lock.txt` (49).
-  Regenerate with the command in each file's header -- the flags matter, since the
-  resolution is platform-specific. Advisory scanning still reads the declared ranges;
-  the lockfiles exist so the release SBOM describes something real.
+  GravityOCR's server environment is resolved separately, for Python 3.12, into
+  `inference/gravityocr/sglang/requirements-lock.txt` (174) from the `requirements.in` and
+  `overrides.txt` beside it. Regenerate with the command in each file's header -- the
+  flags matter, since the resolution is platform-specific. Advisory scanning still reads
+  the declared ranges for the first two; the lockfiles exist so the release SBOM describes
+  something real. The GravityOCR lock is scanned as pinned (`pip-audit --no-deps
+  --disable-pip`), since it targets Python 3.12 and CI runs 3.10; that mode skips the
+  four `+cu129` builds (torchvision, torchaudio, torchao, torchcodec), which PyPI does not
+  carry.
+- **GravityOCR's SGLang recipe is not exercised in CI.** No job applies its patch or
+  builds its environment, and the pin-drift and fetch-recipe checks cover only the
+  HybridDiffusion pin, so a change to `inference/gravityocr/sglang/` needs a manual run on
+  a GPU host. `tools/check_model_card.py` reads only the Trida row of `COMPLIANCE.md` §4b,
+  so the GravityOCR and GLM-OCR rows are not re-checked against Hugging Face.
