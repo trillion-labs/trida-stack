@@ -62,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Metrics snapshots are labelled with the ISO week in KST. The weekly run moved to Monday 07:17 KST
+  (#54), which is still Sunday in UTC, so labelling by the UTC date named the first post-change run
+  2026-W44 again and its PR (#71) would have overwritten the reviewed W44 snapshot. Every existing
+  label is unchanged; that run is 2026-W45.
 - The metrics population split is read from `docs/metrics/first-party.txt` instead
   of an API lookup. Organisation membership here is private, so neither
   `/collaborators` nor `author_association` can answer it from a workflow: both
