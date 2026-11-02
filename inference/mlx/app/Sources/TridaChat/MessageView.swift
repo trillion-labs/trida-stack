@@ -246,68 +246,6 @@ struct ToolRunView: View {
     }
 }
 
-/// Inline Markdown (bold, italics, code, links) per paragraph; fenced code blocks in monospace.
-struct MarkdownText: View {
-    let blocks: [Block]
-
-    enum Block: Hashable {
-        case text(String)
-        case code(String)
-    }
-
-    init(_ source: String) {
-        var out: [Block] = []
-        var buf: [Substring] = []
-        var inCode = false
-        func flush() {
-            let s = buf.joined(separator: "\n")
-            if inCode {
-                out.append(.code(s))
-            } else if !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                out.append(.text(s))
-            }
-            buf = []
-        }
-        for line in source.split(separator: "\n", omittingEmptySubsequences: false) {
-            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
-                flush()
-                inCode.toggle()
-            } else {
-                buf.append(line)
-            }
-        }
-        flush()
-        blocks = out
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, b in
-                switch b {
-                case let .text(s):
-                    Text(Self.attributed(s))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                case let .code(s):
-                    ScrollView(.horizontal) {
-                        Text(s)
-                            .font(.system(size: 12, design: .monospaced))
-                            .textSelection(.enabled)
-                            .padding(10)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.1)))
-                }
-            }
-        }
-    }
-
-    static func attributed(_ s: String) -> AttributedString {
-        let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: s, options: opts)) ?? AttributedString(s)
-    }
-}
-
 /// A /decide result in the chat: one probability bar per option, the reasoning collapsed.
 struct DecisionCardView: View {
     let card: DecisionCard?

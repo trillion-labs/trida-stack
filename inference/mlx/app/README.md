@@ -12,6 +12,10 @@ of the prompt came from the cache.
   `Trida-2.0-4B-1006-mlx-q8`). The default is Zoro-1 q8. Switching models restarts the server.
 - **Decoding.** Self-spec / AR toggle per message, with no restart: it sends `trida_mode`.
   Thinking is always on; the reasoning streams above each reply and collapses when it is done.
+- **Rendered replies.** Replies are rendered from Markdown natively (no web view): headings, nested
+  and task lists, quotes, tables with column alignment, rules, code blocks with their language and a
+  copy button, and display math (`$$ … $$`, `\[ … \]`) shown as monospaced LaTeX. The copy button under a
+  reply copies the raw Markdown.
 - **Images.** Drag an image onto the composer, choose one, or paste one. Only enabled when the
   served model has a vision encoder (Zoro-1, Trida-2.0-4B-1006).
 - **Agent mode.** The model gets the same tools as `trida_mlx/agent.py`, confined to a

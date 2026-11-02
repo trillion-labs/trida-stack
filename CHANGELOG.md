@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Zoro-1 Chat renders replies from Markdown natively: headings, nested and task lists, quotes,
+  aligned tables, rules, code blocks with a language label and a copy button, and display math shown as
+  LaTeX source. The parser is `Markdown.parse` in TridaChatCore.
 - `inference/mlx`: a decision-state prefix cache. `/v1/decide` reuses a state's leading tokens across
   requests (`--decision-cache-mb`, default 1024), with scan-resistant eviction. `--mlx-cache-limit-mb`
   caps MLX's buffer pool. `/v1/models` reports `decision_cache` and `memory_mb`, and responses report

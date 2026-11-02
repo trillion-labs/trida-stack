@@ -343,3 +343,60 @@ final class FileLocatorTests: XCTestCase {
         XCTAssertTrue(FileLocator.report("needle", r, folder: ".").contains("Only the 10 of 30 files"))
     }
 }
+
+final class MarkdownTests: XCTestCase {
+    func testBlocks() {
+        let md = """
+        # Title ##
+        Some **bold** text
+        on two lines.
+
+        - one
+          - nested
+        - [x] done
+        1. first
+        2) second
+
+        > a quote
+        > continues
+
+        | name | n | note |
+        |:-----|--:|:----:|
+        | a \\| b | 1 | `x|y` |
+        | c |
+
+        ---
+        ```swift
+        let x = 1
+        ```
+        $$
+        x^2 + y^2
+        $$
+        Inline \\(a+b\\) math.
+        """
+        let b = Markdown.parse(md)
+        XCTAssertEqual(b[0], .heading(level: 1, text: "Title"))
+        XCTAssertEqual(b[1], .paragraph("Some **bold** text\non two lines."))
+        guard case let .list(items) = b[2] else { return XCTFail("\(b[2])") }
+        XCTAssertEqual(items.map(\.depth), [0, 1, 0, 0, 0])
+        XCTAssertEqual(items.map(\.marker), ["•", "•", "", "1.", "2)"])
+        XCTAssertEqual(items[2].checked, true)
+        XCTAssertEqual(b[3], .quote("a quote\ncontinues"))
+        XCTAssertEqual(b[4], .table(header: ["name", "n", "note"], alignments: [.leading, .trailing, .center],
+                                    rows: [["a | b", "1", "`x|y`"], ["c", "", ""]]))
+        XCTAssertEqual(b[5], .rule)
+        XCTAssertEqual(b[6], .code(language: "swift", text: "let x = 1"))
+        XCTAssertEqual(b[7], .math("x^2 + y^2"))
+        XCTAssertEqual(b[8], .paragraph("Inline `a+b` math."))
+        XCTAssertEqual(b.count, 9)
+    }
+
+    func testStreamingAndLookalikes() {
+        // an unclosed fence (mid-stream) is code so far; "C#" keeps its hash; a lone "---" is a rule, not a table
+        XCTAssertEqual(Markdown.parse("```py\nprint(1)"), [.code(language: "py", text: "print(1)")])
+        XCTAssertEqual(Markdown.parse("## C#"), [.heading(level: 2, text: "C#")])
+        XCTAssertEqual(Markdown.parse("a | b\n---"), [.paragraph("a | b"), .rule])
+        XCTAssertEqual(Markdown.parse("*not a list*"), [.paragraph("*not a list*")])
+        XCTAssertEqual(Markdown.parse("#hashtag"), [.paragraph("#hashtag")])
+    }
+}
