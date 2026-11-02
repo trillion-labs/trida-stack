@@ -8,7 +8,7 @@
 수정포함,HybridDiffusion block_causal_readout,6ca547a,PolyForm-NC-1.0.0,inference/zoro-1/vllm/vllm_native_diffusion/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,build-time fetch,research team,2026-10-01,양호,저장소에 미포함. KERNELS.md 레시피.
 외부유입,IFEval scorer,vendored snapshot,Apache-2.0,inference/zoro-1/ifeval_lib/,https://github.com/google-research/google-research,vendored,research team,2026-10-01,조치중,저장소에 포함된 유일한 3rd-party 소스. 버전 미고정.
 외부유입,torch,2.11.0,BSD-3-Clause,전체,https://github.com/pytorch/pytorch,pip,research team,2026-10-01,조치중,PYSEC-2025-194 — exceptions.md 참조.
-외부유입,transformers,">=4.57,<5",Apache-2.0,train/ inference/,https://github.com/huggingface/transformers,pip,research team,2026-10-01,수정보류+사유,PYSEC-2026-2289/3929 — 5.x 핀 제약. exceptions.md 참조.
+외부유입,transformers,">=4.57,<5",Apache-2.0,train/ inference/,https://github.com/huggingface/transformers,pip,research team,2026-10-01,수정보류+사유,PYSEC-2026-2289/3929/4174 — 5.x 핀 제약. exceptions.md 참조. 4174는 2026-10-30 별도 항목으로 분리 (이전에는 PYSEC-2025-217 별칭으로 잘못 매칭).
 외부유입,datasets,">=5.0.1",Apache-2.0,inference/ eval,https://github.com/huggingface/datasets,pip,research team,2026-10-13,수정,GHSA-379c-qx7v-6h59 (경로 순회) 때문에 하한 설정. 미고정일 때 2.14.4로 해석되던 것을 PR #26에서 상향.
 외부유입,huggingface_hub,unpinned,Apache-2.0,모델 다운로드,https://github.com/huggingface/huggingface_hub,pip,research team,2026-10-01,양호,버전 미고정.
 외부유입,accelerate,unpinned,Apache-2.0,train/,https://github.com/huggingface/accelerate,pip,research team,2026-10-01,양호,버전 미고정.
@@ -25,3 +25,12 @@
 외부유입,nltk,unpinned,Apache-2.0,eval_ifeval.py,PyPI,pip,research team,2026-10-01,양호,punkt 토크나이저 별도 다운로드.
 외부유입,vLLM,">=0.27,<0.28",Apache-2.0,inference/zoro-1/vllm/ (선택),https://github.com/vllm-project/vllm,pip,research team,2026-10-01,양호,stock wheel.
 외부유입,setuptools,">=83",MIT,빌드 백엔드,https://github.com/pypa/setuptools,build,research team,2026-10-01,양호,PYSEC-2026-3447 대응으로 하한 상향.
+직접개발,gravityocr nano-inference,—,Apache-2.0,inference/gravityocr/,https://github.com/trillion-labs/trida-stack,first-party,research team,2026-10-30,양호,serve.sh 런처 + ocr_request.py 클라이언트 + CPU 테스트. 기본 127.0.0.1 바인드 — 비-loopback은 API_KEY 필수. §1b 커널 미사용.
+직접개발,trillionlabs/GravityOCR (모델 가중치),—,MIT,inference/gravityocr/ 기본 서빙 모델,https://huggingface.co/trillionlabs/GravityOCR,HF download,research team,2026-10-30,양호,저장소에 미포함. 공개·비게이트. 베이스 zai-org/GLM-OCR (MIT). model.safetensors만 — remote code 없음.
+외부유입,zai-org/GLM-OCR (베이스 모델),—,MIT,파생 모델 GravityOCR의 베이스,https://huggingface.co/zai-org/GLM-OCR,HF download,research team,2026-10-30,양호,저장소에 미포함. 사용 제한 조항 없음. 파생물에 전파되는 제약 없음.
+수정포함,SGLang (GravityOCR self-spec),v0.5.10 (1519acf),Apache-2.0,inference/gravityocr/sglang/,https://github.com/sgl-project/sglang,build-time fetch,research team,2026-10-30,수정보류+사유,상위 커밋 1519acf37c23f2189adb93f57ca9cd2db1bebf18 (태그 v0.5.10). gravityocr_selfspec.patch로 상위 24개 파일 + python/pyproject.toml 수정 · 신규 4개 파일 커밋. 별도 Python 3.12 venv (sglang/requirements-lock.txt). PYSEC-2026-535/536/538/3695/3064 — 적용 가능한 수정 릴리스 없음. exceptions.md 참조.
+외부유입,flashinfer-python,0.6.7.post2,Apache-2.0,inference/gravityocr/ 서버 env,https://github.com/flashinfer-ai/flashinfer,pip,research team,2026-10-30,양호,SGLang 0.5.10이 정확 고정. 패치의 fast path가 이 버전을 확인하고 비공개 plan API를 호출 — 버전 변경 시 재검증.
+외부유입,torch (gravityocr 서버 env),2.9.1,BSD-3-Clause,inference/gravityocr/ 서버 env,https://github.com/pytorch/pytorch,pip,research team,2026-10-30,수정보류+사유,SGLang 0.5.10이 torch==2.9.1 정확 고정 (별도 venv). PYSEC-2026-2286/2025-195/2026-139/2025-194 — exceptions.md 참조. SGLang 리베이스와 함께 상향.
+외부유입,transformers (gravityocr 서버 env),5.3.0,Apache-2.0,inference/gravityocr/ 서버 env,https://github.com/huggingface/transformers,pip,research team,2026-10-30,수정보류+사유,SGLang 0.5.10이 transformers==5.3.0 정확 고정 (별도 venv). PYSEC-2026-2290/3929/4174 — exceptions.md 참조.
+외부유입,diskcache,5.6.3,Apache-2.0,inference/gravityocr/ 서버 env (outlines 경유),https://github.com/grantjenks/python-diskcache,pip,research team,2026-10-30,수정보류+사유,SGLang이 고정한 outlines==0.1.11의 전이 의존성. 수정 릴리스 없음. PYSEC-2026-2447 — exceptions.md 참조.
+외부유입,pycountry,26.2.16,LGPL-2.1-only,inference/gravityocr/ 서버 env (outlines · pydantic-extra-types 경유),https://github.com/pycountry/pycountry,pip,research team,2026-10-30,양호,조건부 라이선스 (LGPL). 수정 없이 별도 설치·런타임 import만 — 저장소에 미포함. 0010 참조.

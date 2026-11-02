@@ -1,0 +1,73 @@
+GravityOCR nano-inference
+Copyright 2026 Trillion Labs
+
+This folder contains code by Trillion Labs, licensed under the Apache License,
+Version 2.0, and a patch to SGLang. It does not vendor SGLang itself:
+sglang/setup.sh fetches it from its public upstream at the pinned commit below.
+Each component retains its own license; consult the upstream repositories for
+full terms.
+
+------------------------------------------------------------------------------
+Base project — SGLang
+  sgl-project/sglang @ commit 1519acf37c23f2189adb93f57ca9cd2db1bebf18 (tag v0.5.10)
+  https://github.com/sgl-project/sglang
+  Copyright 2023-2024 SGLang Team.
+  Licensed under the Apache License, Version 2.0.
+  https://www.apache.org/licenses/LICENSE-2.0
+------------------------------------------------------------------------------
+Patch — sglang/gravityocr_selfspec.patch
+  Copyright 2026 Trillion Labs. Licensed under the Apache License, Version 2.0.
+  A diff against the base commit above. It modifies 24 upstream source files
+  under python/sglang/srt/ and python/pyproject.toml, where it relaxes the
+  torchao and torchcodec pins (sglang/overrides.txt records the versions used).
+  The changes register the SELFSPEC_DIFFUSION speculative-decoding algorithm
+  (block-diffusion draft, autoregressive verify) for GLM-OCR checkpoints, add
+  the scheduler, cache and CUDA-graph support it needs, and add optional runtime
+  optimizations. The modified files keep their upstream copyright headers.
+  Pure code; no model weights.
+------------------------------------------------------------------------------
+New files — sglang/python/sglang/srt/
+  speculative/selfspec_diffusion_worker.py
+  speculative/selfspec_fast_attn.py
+  speculative/selfspec_fast_commit.py
+  multimodal/glm_vit_graph_runner.py
+  Copyright 2026 Trillion Labs. Licensed under the Apache License, Version 2.0.
+  Copied into the patched checkout by sglang/setup.sh. Portions of
+  selfspec_diffusion_worker.py and selfspec_fast_commit.py are adapted from
+  sglang/srt/speculative/ngram_info.py (Copyright 2023-2024 SGLang Team,
+  Apache License, Version 2.0): the n-gram verify and accept bookkeeping.
+------------------------------------------------------------------------------
+Launcher, client and tests — serve.sh, ocr_request.py, test_gravityocr_*.py
+  Copyright 2026 Trillion Labs. Licensed under the Apache License, Version 2.0.
+  serve.sh and ocr_request.py are adapted from serve/serve_sglang_ocr.sh and
+  serve/test_request.py in https://github.com/trillion-labs/GravityOCR, where
+  Trillion Labs publishes them under the MIT License.
+------------------------------------------------------------------------------
+
+The patch, the new files and the launcher are also published in
+https://github.com/trillion-labs/GravityOCR. Comments in the new files that
+mention "natcache", src/fast_sampling.py or docs/SGLANG_SELFSPEC_IMPL.md refer
+to that repository.
+
+Referenced, NOT bundled
+------------------------------------------------------------------------------
+Model weights — trillionlabs/GravityOCR
+  https://huggingface.co/trillionlabs/GravityOCR
+  Licensed under the MIT License. A fine-tune of zai-org/GLM-OCR
+  (https://huggingface.co/zai-org/GLM-OCR, MIT License, Zhipu AI / Z.ai).
+  Downloaded from the Hugging Face Hub when the server starts; not
+  redistributed here.
+------------------------------------------------------------------------------
+FlashInfer — flashinfer-python 0.6.7.post2
+  https://github.com/flashinfer-ai/flashinfer
+  Licensed under the Apache License, Version 2.0.
+  Runtime dependency of the patched server, installed from PyPI by
+  sglang/setup.sh. The patch's attention path calls its planning API.
+------------------------------------------------------------------------------
+The other server dependencies, pinned in sglang/requirements-lock.txt (among
+them PyTorch, transformers and Triton), are installed from PyPI and the PyTorch
+package index by sglang/setup.sh and retain their own licenses.
+
+Because both the base and the patch are Apache-2.0, the patched SGLang is
+Apache-2.0 throughout. This recipe does not build on the noncommercial SGLang
+fork that inference/zoro-1/sglang/ uses.

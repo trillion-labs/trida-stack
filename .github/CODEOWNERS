@@ -23,3 +23,7 @@
 # The fetch recipes are the install path for both two-stream code paths.
 /train/block_gated_delta_rule/   @guks-trl @hongjoonahn-trl @usik-luke-trl
 /inference/zoro-1/sglang/        @guks-trl @hongjoonahn-trl @usik-luke-trl
+
+# The install path for GravityOCR serving: a pinned upstream SGLang (Apache-2.0), our patch
+# against it, the files the patch adds, and the environment lock the advisory job scans.
+/inference/gravityocr/sglang/    @guks-trl @hongjoonahn-trl @usik-luke-trl
