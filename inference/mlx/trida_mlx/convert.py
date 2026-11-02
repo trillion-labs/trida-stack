@@ -26,7 +26,8 @@ from .model import _text_config, load_model
 
 CARRY = ["tokenizer.json", "tokenizer_config.json", "chat_template.jinja", "generation_config.json",
          "block_diffusion.json", "special_tokens_map.json", "vocab.json", "merges.txt", "added_tokens.json",
-         "preprocessor_config.json", "processor_config.json", "video_preprocessor_config.json"]
+         "preprocessor_config.json", "processor_config.json", "video_preprocessor_config.json",
+         "jev_head.pt", "jev_head.safetensors", "temperature.json"]  # typed-decision head (decision.py)
 # multimodal config keys carried next to the (flattened) text config
 VISION_KEYS = ["vision_config", "image_token_id", "video_token_id", "vision_start_token_id",
                "vision_end_token_id"]
