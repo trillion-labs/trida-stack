@@ -1,0 +1,25 @@
+# GravityOCR SGLang server env, declared. Resolved into requirements-lock.txt (its header records the
+# command); setup.sh installs the lock, never this file.
+#
+# SGLang itself is not installed from PyPI: setup.sh builds upstream sgl-project/sglang at the commit
+# in BASE_COMMIT.txt (tag v0.5.10) with gravityocr_selfspec.patch applied. It is listed so the resolver
+# applies its dependency metadata (torch==2.9.1, transformers==5.3.0, flashinfer-python==0.6.7.post2,
+# ...) and so the lock, and any SBOM built from it, names the real base version.
+sglang==0.5.10
+
+# Security floors. Each clears every OSV advisory (queried 2026-10-30) against the version in the
+# GPU-validated freeze ("was"). SGLang 0.5.10 pins none of these.
+pillow>=13.0.0          # was 12.2.0: 54 advisories, 5 CRITICAL (GHSA-332p-7hrc-92wf GHSA-5x8w-8jj5-q52h GHSA-8g5g-8vmr-9782 GHSA-v9pv-5gc8-w2m6 GHSA-w889-685w-c8fh) (+49); needs Python >= 3.11
+aiohttp>=3.14.4         # was 3.14.1: GHSA-2g87-pp6c-29x5 GHSA-5wr8-gcqf-gqf3 GHSA-9xw5-w5jj-pvcg GHSA-cq5v-8q36-5273 (HIGH) (+7)
+yarl>=1.25.1            # no advisory of its own; aiohttp >= 3.14.4 requires it
+multidict>=6.9.1        # was 6.7.1: GHSA-54p9-h82j-f925
+urllib3>=2.8.0          # was 2.7.0: GHSA-8988-9cw3-xx77 GHSA-vxq7-64xx-v4gw (HIGH) GHSA-gh4c-6fx4-qh6g
+filelock>=4.2.1         # was 3.29.4: GHSA-v4x8-3wr5-3wq8 (HIGH) (+8)
+setuptools>=84.1.0      # was 82.0.1: GHSA-h35f-9h28-mq5c (PYSEC-2026-3447) GHSA-xmj3-9gf7-h52w
+datasets>=5.0.1         # was 5.0.0: GHSA-379c-qx7v-6h59
+fsspec>=2026.6.0        # was 2026.4.0: GHSA-27vj-qcqg-25rc (HIGH)
+anyio>=4.14.2           # was 4.14.1: GHSA-82r6-8w77-94w6 (CRITICAL) GHSA-3w57-8xmc-8v26 GHSA-5p39-cfhj-2xmp
+certifi>=2026.10.19     # was 2026.6.17: GHSA-6q48-6c7w-9gw2 (CRITICAL; PYSEC-2026-4320 records 2026.10.19 as the fix)
+
+# Pre-release pin carried over from the GPU-validated freeze (SGLang 0.5.10 needs >= 4.0.0b4).
+flash-attn-4==4.0.0b19

@@ -7,7 +7,7 @@ Two independent stacks:
 | | stack | what it does |
 |---|---|---|
 | 🏋️ | **`train/`** | **AR → diffusion conversion.** Block-diffusion SFT starting from a *pretrained AR checkpoint* (no diffusion pretraining), with an AR auxiliary loss so the same weights keep a working causal head. |
-| ⚡ | **`inference/<model>/`** | **nano-inference: one small, nanoGPT-style serving stack per model.** [`inference/zoro-1/`](inference/zoro-1/) serves `trillionlabs/Zoro-1`: self-speculative generation and typed decisions from one checkpoint, OpenAI-compatible, on **SGLang**, **vLLM** or **MLX**, with a [speedrun leaderboard](inference/zoro-1/README.md#speedrun). |
+| ⚡ | **`inference/<model>/`** | **nano-inference: one small, nanoGPT-style serving stack per model.** [`inference/zoro-1/`](inference/zoro-1/) serves `trillionlabs/Zoro-1`: self-speculative generation and typed decisions from one checkpoint, OpenAI-compatible, on **SGLang**, **vLLM** or **MLX**, with a [speedrun leaderboard](inference/zoro-1/README.md#speedrun). [`inference/gravityocr/`](inference/gravityocr/) serves `trillionlabs/GravityOCR` (document OCR, GLM-OCR based) with self-speculative decoding on upstream SGLang. |
 
 `train/` and `inference/` do not import each other. `benchmark/` holds the heavier agentic eval
 harnesses; `inference/` ships its own quick quality/throughput benchmarks (gsm8k / mmlu_pro / ifeval).
@@ -126,6 +126,12 @@ inference/               nano-inference: one small serving stack per model
     sglang/                    recipe for the patched SGLang backend
     vllm/                      out-of-tree vLLM plugin (self-spec)
     mlx/                       on-device backend (Apple Silicon): MLX self-spec decoder, OpenAI server, agent
+  gravityocr/                trillionlabs/GravityOCR (document OCR, GLM-OCR based)
+    README.md                  install, serving, request format, security, known limits
+    MODEL_CONTRACT.md          what the serving code expects from the checkpoint
+    serve.sh                   MODE=self-spec | causal; launches the patched SGLang server
+    ocr_request.py             one-crop OCR client (OpenAI-compatible, image as a data URL)
+    sglang/                    upstream SGLang v0.5.10 + self-spec patch, its new files, env lock, setup.sh
 benchmark/               heavier agentic eval harnesses (bfcl_v4, tau2, functionchat, ko_agentbench,
                          swe_bench, terminal_bench) + serving/
 data/                    dataset download scripts + catalog
@@ -139,6 +145,9 @@ pip install -r inference/zoro-1/requirements.txt    # serving/eval client
 Serving needs the diffusion-serving **SGLang** backend — install separately (not vendored here);
 see [`inference/zoro-1/README.md`](inference/zoro-1/README.md). The **vLLM** backend is a plugin:
 `pip install -e inference/zoro-1/vllm` and `VLLM_PLUGINS=trida_diffusion` — see [`inference/zoro-1/vllm/README.md`](inference/zoro-1/vllm/README.md).
+GravityOCR builds its own patched upstream-SGLang environment (Python 3.12) with
+`SGLANG_SRC=<dir outside this repo> bash inference/gravityocr/sglang/setup.sh`
+and needs none of the fetches below — see [`inference/gravityocr/README.md`](inference/gravityocr/README.md).
 
 ### Third-party kernels — one-time fetch (required)
 

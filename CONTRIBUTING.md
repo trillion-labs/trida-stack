@@ -132,6 +132,11 @@ CI's) is registered and never run.
 - `inference/zoro-1/vllm/vllm_native_diffusion/test_two_stream_cpu.py` — pins the
   two-stream GDN snapshot/restore decode algorithm in pure PyTorch on tiny
   tensors; needs `torch` (CPU is fine), no GPU or vLLM.
+- `inference/gravityocr/test_gravityocr_patch.py`, `test_gravityocr_launcher.py` and
+  `test_gravityocr_request.py` — the committed SGLang patch and its pinned base, `sglang/setup.sh`
+  and the server lock (read, never run), `serve.sh`'s command line and guards (run under `bash`
+  against a stub server binary and a local checkpoint directory), and the OCR request client.
+  They need only what CI installs: no GPU, no SGLang, no network.
 - `tools/test_chat.py` — the chat CLI's offline paths.
 - `train/test_stream_pack.py` — buffered first-fit packing for `--pack --multiturn`,
   on synthetic docs; needs `torch` and `transformers` (its import chain reaches
@@ -150,8 +155,8 @@ level is installed by the `Install CPU deps` step in `.github/workflows/ci.yml` 
 2. Make focused commits; keep unrelated changes out of the PR.
 3. Run `ruff check .`, `pre-commit run` (on your staged files), and the CPU-safe
    tests locally.
-4. Update docs (`README.md`, `inference/zoro-1/README.md`, `train/README.md`) when you
-   change behavior, flags, or the model contract.
+4. Update docs (`README.md`, `inference/zoro-1/README.md`, `inference/gravityocr/README.md`,
+   `train/README.md`) when you change behavior, flags, or the model contract.
 5. If you touch dependencies or third-party code, update
    [`COMPLIANCE.md`](COMPLIANCE.md) and [`NOTICE`](NOTICE) accordingly — and never
    introduce a copyleft or bundle a noncommercial dependency.

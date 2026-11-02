@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accuracy floor. There are three hardware tracks (1× H100, 1× L40S, Apple Silicon MLX).
   `leaderboard.py add` checks a run against the rules and records it, `render` draws the README
   tables and SVG charts, and `check` (run in CI) fails if they drift from the record files.
+- `inference/gravityocr/`: serving for `trillionlabs/GravityOCR`, a GLM-OCR-based document OCR
+  model, with self-speculative decoding. It runs on upstream SGLang v0.5.10 (Apache-2.0) plus a
+  committed patch and the four new files the patch needs, in a separate Python 3.12
+  environment that `sglang/setup.sh` builds from a resolved lock (it also copies those files
+  into the checkout). `serve.sh` launches it (`MODE=self-spec` by default, or `causal`), binds
+  to 127.0.0.1 by default, and refuses a non-loopback `SERVE_HOST` without `API_KEY`. With a
+  key it runs one tokenizer worker, the only mode in which SGLang checks keys; with one worker
+  it also locks SGLang's management endpoints with a random admin key. `EXTRA_ARGS` accepts only
+  a fixed list of logging and capacity options. `ocr_request.py` sends one crop through the
+  OpenAI-compatible API. CPU tests cover the patch and its pin, `setup.sh` and the lock, the
+  launcher's command line and guards, and the request client.
+  The advisory job scans the lock; the findings its SGLang, torch, transformers and diskcache
+  pins cannot fix carry exceptions in `docs/supply-chain/exceptions.md`. None of it uses the
+  PolyForm-NC kernels.
 - Image+text training for Qwen3.5 vision-language checkpoints. Conversations under
   `--pack --multiturn` may carry image parts. The vision encoder is frozen and the
   projector trains at `--projector_lr_scale` × `--lr`. Images above
