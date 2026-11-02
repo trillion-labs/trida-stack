@@ -77,3 +77,6 @@ benchmark/**/predictions*.jsonl
 inference/vllm/vllm_native_diffusion/block_causal_readout.py
 build/
 dist/
+
+# inference/mlx/filesearch/eval.py output
+filesearch_results/
