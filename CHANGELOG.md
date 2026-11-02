@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `inference/mlx`: a decision-state prefix cache. `/v1/decide` reuses a state's leading tokens across
+  requests (`--decision-cache-mb`, default 1024), with scan-resistant eviction. `--mlx-cache-limit-mb`
+  caps MLX's buffer pool. `/v1/models` reports `decision_cache` and `memory_mb`, and responses report
+  `state_tokens` / `cached_tokens`.
+- `inference/mlx/filesearch/`: an offline eval of file search with the decision model
+  (DecisionRAG-style, arXiv:2610.35868): 35 questions with known answer files over a pinned snapshot of
+  this repository, comparing BM25, per-file yes/no, per-batch choice and tree navigation.
+- Zoro-1 Chat: a `locate_files` decision tool that finds files by meaning in any language. It ranks
+  every file's opening lines with per-batch choice questions, plus keyword search's top 10.
 - Typed decisions in the MLX server (`POST /v1/decide`): Zoro-1's pointer head answers choice / yes-no /
   score questions over a state (one shared state prefill, a branch per question), and below a confidence
   threshold the model reasons once (self-spec) and decides again. The server also gained a `<tool_call>`
@@ -44,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Zoro-1 Chat reply review is one direct decision, with no reasoning pass. P(yes) below 0.2 fails and
+  triggers the rewrite; 0.2–0.5 is shown as unsure and changes nothing. "Claims match results" runs only
+  after an action tool or a failed or refused call, and is split into two questions: does the reply
+  claim an action, and did the tools show it succeeded.
 - Vulnerability reports have a second private channel: GitHub private vulnerability
   reporting is enabled, so the Security tab's **Report a vulnerability** button now
   works, and `SECURITY.md` names it beside the role-alias email. `community-check`

@@ -2,9 +2,11 @@ import Foundation
 import TridaChatCore
 
 /// Reply review: after the model finishes a text reply, the decision model checks it against a few
-/// yes/no criteria (language, does what was asked, complete, not a repeat of the previous reply), reasoning
-/// first when unsure. If one fails, the app asks the model once to rewrite the reply with that feedback;
-/// the failed draft stays visible (collapsed) but is no longer part of what the model sees.
+/// yes/no criteria (language, does what was asked, complete, not a repeat of the previous reply), as one
+/// direct decision (no reasoning pass: reasoning whenever a check was unsure took minutes on long replies).
+/// Only a confident failure (P(yes) below `failBelow`) makes the app ask the model once to rewrite the reply
+/// with that feedback; an unsure check is shown with "?" and changes nothing, since a rewrite costs far more
+/// than the check. The failed draft stays visible (collapsed) but is no longer part of what the model sees.
 struct ReviewCriterion {
     let key: String
     let label: String
@@ -26,10 +28,11 @@ enum ReplyReview {
         ReviewCriterion(key: "complete", label: "complete",
                         question: "Is the response complete: not cut off, and not leaving out parts of what was asked?",
                         fix: "It is incomplete or cut off. Give the complete answer."),
+        // Asked as two questions (see honestClaims / honestDone): one conditional question with an "answer yes
+        // if it claims nothing" escape was read as "is everything in the reply backed by the tool results?" and
+        // failed plain summaries of a file the model had read.
         ReviewCriterion(key: "honest", label: "claims match results",
-                        question: "If the response says it did something on the computer (created or saved a file, "
-                            + "ran a command, searched, clicked), do the tool calls above show that it actually "
-                            + "succeeded? Answer yes if the response claims no such action.",
+                        question: "",
                         fix: "It claims an action that did not happen or failed (see the tool results). Say plainly "
                             + "what was and was not done."),
         ReviewCriterion(key: "fresh", label: "not a repeat",
@@ -37,7 +40,18 @@ enum ReplyReview {
                             + "the earlier reply?",
                         fix: "It repeats the earlier reply instead of answering the latest message. Answer the latest message."),
     ]
-    /// A criterion passes when P(yes) is at least this (after reasoning, if the decision reasoned).
+    static let honestClaims = "Does the response say that it did something on the computer, such as creating, saving "
+        + "or deleting a file, running a command, or clicking or typing in an app?"
+    static let honestDone = "Do the tool calls above show that what the response says it did actually happened and "
+        + "succeeded (not an error, not refused)?"
+    /// Tools whose results a reply can misreport as done. "claims match results" runs only when one of these ran,
+    /// or a call failed or was refused: reading or searching files cannot lead to a false "I saved it".
+    static let actionTools: Set<String> = ["write_file", "run_shell", "screenshot", "ui_click", "ui_type", "ui_key",
+                                           "open_app"]
+
+    /// A criterion fails (and the reply is rewritten) only when P(yes) is below this; up to `passAt` it is unsure.
+    static let failBelow = 0.2
+    /// At or above this a criterion passes.
     static let passAt = 0.5
 
     static func clip(_ s: String, head: Int, tail: Int) -> String {
@@ -111,8 +125,11 @@ extension AppState {
         if let earlier { state.append(("earlier reply", .string(ReplyReview.clip(earlier.content, head: 600, tail: 200)))) }
         // What the tools did between the user's message and this reply (for the "claims match results" check).
         var calls: [String] = []
+        var actions = false
         for m in chat.messages[(ui + 1)..<ri] {
             for run in m.toolRuns {
+                if ReplyReview.actionTools.contains(run.call.name) || run.status == .denied
+                    || run.result.hasPrefix("error") { actions = true }
                 let res = run.status == .denied ? "not run: " + run.result : run.result
                 calls.append("\(run.call.name)(\(ReplyReview.clip(run.call.arguments, head: 200, tail: 60))) -> "
                              + ReplyReview.clip(res, head: 300, tail: 100))
@@ -120,19 +137,25 @@ extension AppState {
         }
         state.append(("tool calls", calls.isEmpty ? .string("(none)") : .strings(calls)))
         state.append(("response", .string(ReplyReview.clip(text, head: 6000, tail: 2000))))
-        // "not a repeat" needs an earlier reply; "claims match results" only applies when tools ran this turn
-        // (without tool calls it misfired on plain answers, e.g. a math solution).
+        // "not a repeat" needs an earlier reply; "claims match results" only applies after a tool that changes
+        // something, or a failed / refused call (it misfired on plain answers and on summaries of read files).
         let crits = ReplyReview.criteria.filter {
-            ($0.key != "fresh" || earlier != nil) && ($0.key != "honest" || !calls.isEmpty)
+            ($0.key != "fresh" || earlier != nil) && ($0.key != "honest" || actions)
         }
-        let qs = crits.map { DecisionQuestion.yesNo($0.key, $0.question) }
+        let qs = crits.flatMap { c -> [DecisionQuestion] in
+            c.key == "honest" ? [DecisionQuestion.yesNo("honest_claims", ReplyReview.honestClaims),
+                                 DecisionQuestion.yesNo("honest_done", ReplyReview.honestDone)]
+                : [DecisionQuestion.yesNo(c.key, c.question)]
+        }
         update(chatID, replyID) { $0.check = "Checking the reply…" }
         let r: DecisionResult
         do {
             // the user's picture (e.g. a photographed problem) lets the checks see what was asked
             let image = supportsVision ? user.images.last : nil
+            var s = decisionSettings
+            s.reasoning = "never"
             r = try await runDecision(Decision.body(state: .object(state), questions: qs, image: image,
-                                                    settings: decisionSettings), qs) {
+                                                    settings: s), qs) {
                 [weak self] t in self?.update(chatID, replyID) { $0.check = "Checking the reply: " + t }
             }
         } catch {
@@ -142,13 +165,20 @@ extension AppState {
         var failed: [ReviewCriterion] = []
         var parts: [String] = []
         for c in crits {
-            guard let a = r.answers[c.key] else { continue }
-            let ok = a.value >= ReplyReview.passAt
-            if !ok { failed.append(c) }
-            parts.append("\(ok ? "✓" : "✗") \(c.label) \(String(format: "%.2f", a.value))")
+            let value: Double
+            if c.key == "honest" {
+                // fails only if it claims an action AND the tools don't show it: P(ok) = 1 - P(claims)(1 - P(done))
+                guard let claims = r.answers["honest_claims"], let done = r.answers["honest_done"] else { continue }
+                value = 1 - claims.value * (1 - done.value)
+            } else {
+                guard let a = r.answers[c.key] else { continue }
+                value = a.value
+            }
+            let mark = value >= ReplyReview.passAt ? "✓" : value < ReplyReview.failBelow ? "✗" : "?"
+            if mark == "✗" { failed.append(c) }
+            parts.append("\(mark) \(c.label) \(String(format: "%.2f", value))")
         }
-        let how = r.escalated ? (r.cut == nil ? " (after reasoning)" : " (reasoning cut off)") : ""
-        update(chatID, replyID) { $0.check = "Check: " + parts.joined(separator: " · ") + how }
+        update(chatID, replyID) { $0.check = "Check: " + parts.joined(separator: " · ") }
         return failed
     }
 }

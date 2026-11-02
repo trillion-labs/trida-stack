@@ -60,11 +60,14 @@ of the prompt came from the cache.
 - **Reply review** (Settings → Agent → *Check replies*, on by default with a decision head). After each
   finished text reply, the decision model answers five yes/no checks about it: written in the language the
   user asked for (or wrote in); does what was asked; complete; claims match the tool results (no "saved
-  the file" when the call failed or was refused); not a repeat of the previous reply. Below
-  0.7 it reasons first. A check below 0.5 fails: the model is asked once to rewrite the reply with that
-  feedback (the user's image goes with the checks; "claims match results" only runs when tools ran), the
-  draft stays visible but collapsed and is no longer sent to the model, and the rewrite is
-  checked again (no second rewrite). The result shows under each reply, e.g. `Check: ✓ language 0.97 · …`.
+  the file" when the call failed or was refused); not a repeat of the previous reply. It is one direct
+  decision, without a reasoning pass (reasoning whenever a check was unsure took minutes on long replies).
+  P(yes) ≥ 0.5 passes (✓), below 0.2 fails (✗), in between is unsure (?) and changes nothing. A failure
+  asks the model once to rewrite the reply with that feedback (the user's image goes with the checks;
+  "claims match results" only runs after a tool that changes something, or a failed or refused call, and
+  is asked as two questions: does the reply claim an action, and do the tool results show it succeeded); the draft stays visible but collapsed and is no
+  longer sent to the model, and the rewrite is checked again (no second rewrite). The result shows under
+  each reply, e.g. `Check: ✓ language 0.97 · ? complete 0.34`.
 - **Feedback and training data.** Under each reply: 👍 / 👎, and ✏️ to edit the reply into what it should
   have been (the model sees your version from then on; the original is kept). Server → **Export Training
   Data…** asks first, then runs `trida-mlx-datamine` on the saved chats and request logs and writes JSONL to
@@ -81,8 +84,16 @@ of the prompt came from the cache.
 - **Decision tools.** With a checkpoint that has the decision head, agent mode also offers tools
   answered by the decision model rather than by generated text, each reasoning first when its top
   probability is below 0.7: `decide_choice(question, options, context)`, `decide_yes_no(question,
-  context)`, `pick_file(goal, path)` (over a folder's names) and, with the UI agent, `ui_check(goal)`
-  (is it done on screen?). They change nothing, so they never ask.
+  context)`, `pick_file(goal, path)` (over a folder's names), `locate_files(query, path)` and, with the
+  UI agent, `ui_check(goal)` (is it done on screen?). They change nothing, so they never ask.
+- **`locate_files`** finds which files hold what a question is about, by meaning and in any language,
+  without an index: every file's path and opening lines go to the decision model 40 at a time (one
+  choice question each, top 5 kept), and the pooled files plus keyword search's top 10 go to a final
+  choice. The file list comes first in each request, so the server's decision cache keeps it: on
+  Zoro-1 q8 the first search of a ~300-file folder takes ~40 s, later ones ~6 s. Folders over 480 files
+  judge only keyword search's top 480. On 35 questions about this repository it put the answer file in
+  the top 5 for 94% (keyword search alone 63%; Korean questions 90% vs 0%); see
+  [`../filesearch/`](../filesearch/).
 - **UI agent (beta).** Settings → Agent → *UI agent*. The model can operate the app you used last
   before switching to Zoro-1 Chat (shown in the status bar), through the macOS Accessibility API:
   - `ui_elements` lists the focused window's and menu bar's clickable elements, numbered, as the

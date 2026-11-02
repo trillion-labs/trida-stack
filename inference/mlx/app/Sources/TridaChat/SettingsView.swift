@@ -138,7 +138,7 @@ struct SettingsView: View {
             Text("Decision tools (offered when the model has a decision head: \(state.supportsDecision ? "yes" : "no")): decide_choice, decide_yes_no, pick_file, and ui_check with the UI agent. The decision model scores the options; below 0.7 it reasons once (self-spec) and decides again. Shift-⌘D opens the Decide window to try decisions by hand.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Check replies with the decision model", isOn: $state.reviewReplies)
-            Text("After each reply the decision model checks: the language the user asked for, does what was asked, complete, not a repeat of the previous reply (reasoning first when unsure). If one fails, the model rewrites the reply once with that feedback; the draft stays visible, collapsed. Works in chat and agent mode.")
+            Text("After each reply the decision model checks: the language the user asked for, does what was asked, complete, not a repeat of the previous reply, as one quick decision. If one clearly fails (P(yes) below 0.2), the model rewrites the reply once with that feedback; unsure checks are marked ? and change nothing; the draft stays visible, collapsed. Works in chat and agent mode.")
                 .font(.caption).foregroundStyle(.secondary)
             Picker("Tool routing", selection: $state.toolRouting) {
                 ForEach(ToolRouting.allCases) { Text($0.label).tag($0) }
