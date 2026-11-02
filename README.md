@@ -149,7 +149,7 @@ for the path you use, **before** training or serving — without it the import f
 | you are… | run | what it assembles |
 |---|---|---|
 | training the Qwen3.5 two-stream (hybrid) path | `bash train/block_gated_delta_rule/fetch_kernels.sh` | two-stream Gated-DeltaNet + ShortConv Triton kernels — [recipe](train/block_gated_delta_rule/README.md) |
-| serving via **SGLang** | follow [`inference/zoro-1/sglang/README.md`](inference/zoro-1/sglang/README.md) | the patched HybridDiffusion SGLang backend (clone → patch → install → shape) |
+| serving via **SGLang** | follow [`inference/zoro-1/sglang/README.md`](inference/zoro-1/sglang/README.md) | the patched HybridDiffusion SGLang backend (clone → patch → install; `serve.py` shapes the checkpoint on first use) |
 | serving via **vLLM** | follow [`inference/zoro-1/vllm/vllm_native_diffusion/KERNELS.md`](inference/zoro-1/vllm/vllm_native_diffusion/KERNELS.md) | `block_causal_readout.py`, the block-end readout kernel |
 
 Each recipe pins an upstream commit (`yuchen-zhu-zyc/HybridDiffusion@6ca547a`) and applies our
