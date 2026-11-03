@@ -46,6 +46,7 @@ APP="build/Zoro-1 Chat.app"
 [[ -e "$APP" ]] && chmod -R u+w "$APP" && rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/TridaChat"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -56,6 +57,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>Zoro-1 Chat</string>
   <key>CFBundleIdentifier</key><string>co.trillionlabs.zoro1chat</string>
   <key>CFBundleExecutable</key><string>TridaChat</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>

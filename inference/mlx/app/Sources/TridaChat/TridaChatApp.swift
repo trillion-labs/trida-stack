@@ -4,6 +4,8 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let state = AppState()
+    private var dockTimer: Timer?
+    private var dockLook: MascotLook?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // A bare `swift run` binary starts as a background process; make it a regular app.
@@ -11,6 +13,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         state.startServer()
         state.updateAutomation()
+        // The Dock icon is the mascot, showing what the model is doing (redrawn only when that changes).
+        dockTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateDockIcon() }
+        }
+        updateDockIcon()
+    }
+
+    private func updateDockIcon() {
+        var look = state.mascotLook
+        if case .tool = look.state { look.state = .tool("") }       // one icon per kind of state, not per tool
+        guard look != dockLook else { return }
+        dockLook = look
+        NSApp.applicationIconImage = MascotFrame.icon(look, size: 256)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

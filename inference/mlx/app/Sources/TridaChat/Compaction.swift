@@ -54,6 +54,8 @@ extension AppState {
     @discardableResult
     func compact(_ chatID: Chat.ID, keepLastUser: Bool, reason: String) async -> Bool {
         guard let ci = chats.firstIndex(where: { $0.id == chatID }) else { return false }
+        isCompacting = true
+        defer { isCompacting = false }
         let msgs = chats[ci].messages
         let lastUser = keepLastUser ? msgs.lastIndex { $0.role == .user && $0.decide != .prompt } : nil
         let cutoff = lastUser ?? msgs.count            // summarize messages before this index

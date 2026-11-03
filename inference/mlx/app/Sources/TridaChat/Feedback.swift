@@ -14,7 +14,9 @@ extension AppState {
     /// 👍 / 👎 on a reply of the current chat; the same button again clears it.
     func rate(_ messageID: UUID, _ rating: String) {
         guard let ci = currentChatIndex else { return }
+        let wasSet = chats[ci].messages.first { $0.id == messageID }?.feedback == rating
         update(chats[ci].id, messageID) { $0.feedback = $0.feedback == rating ? nil : rating }
+        if !wasSet { react(rating == "up" ? .love : .notes) }
     }
 
     func beginEdit(_ m: ChatMessage) {
@@ -34,6 +36,7 @@ extension AppState {
             if m.editedFrom == text { m.editedFrom = nil }   // edited back to the original
         }
         editTarget = nil
+        react(.scribble)
     }
 
     static let chatsDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

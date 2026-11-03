@@ -65,16 +65,26 @@ final class AppState: ObservableObject {
     let chatStore: ChatStore
     @Published var selectedChatID: Chat.ID?
     @Published var isGenerating = false {
-        didSet { if oldValue && !isGenerating { lastFinished = Date() } }
+        didSet {
+            lastActivity = Date()
+            if oldValue && !isGenerating { lastFinished = Date(); lastAcceptance = acceptanceOfLastReply() }
+        }
     }
     /// When the last reply (or decision) finished: the mascot celebrates for a moment.
     var lastFinished: Date?
+    // the mascot (Mascot.swift): reactions, clicks, idle time, compaction and the last reply's draft acceptance
+    var mascotReaction: (kind: MascotReaction, at: Date)?
+    var mascotPets: [Date] = []
+    var lastActivity = Date()
+    var isCompacting = false
+    @Published var showBadges = false
+    var lastAcceptance: Double?
     @Published var prefill: (done: Int, total: Int)? = nil
     @Published var approval: ApprovalRequest?
 
     // View state kept here rather than in @State: with only the Command Line Tools installed,
     // the SwiftUI macro plugin that implements @State is missing.
-    @Published var draft = ""
+    @Published var draft = "" { didSet { lastActivity = Date() } }
     @Published var draftImages: [Data] = []
     @Published var importingImage = false
     @Published var dropTargeted = false
@@ -530,6 +540,7 @@ final class AppState: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isGenerating, status.isUsable, !(trimmed.isEmpty && images.isEmpty),
               let ci = currentChatIndex else { return }
+        UsageDays.record()
         let chatID = chats[ci].id
         // /decide: a decision about the conversation, set up step by step in the chat.
         if decideFlow?.chatID == chatID {
