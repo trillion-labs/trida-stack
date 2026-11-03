@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Zoro-1 Chat:
+  - **Decision labels:** each reply keeps its typed decisions. You mark the right answers, and
+    `trida-mlx-datamine` writes them to `decision_labels.jsonl` as kev records (`--jev_data`).
+  - **`read_pdf`:** reads PDF text, with scanned pages as images.
+  - **Undo for `write_file`.**
+  - **Chats:** search and rename, and a context meter next to the composer.
+  - **`locate_files`:** a folder step for folders over 480 files, and an on-disk index of file summaries.
+  - **Agent mode is always on;** the toggle and `/agent` are gone.
+  - **Mascot:** a bigger panel; tool props and speed lines; tidying during compaction; numbers under the
+    caption; reactions to feedback, edits and clicks; listening and dozing; trainer levels with
+    accessories and badges; time-of-day touches; the mascot as the app icon and a live Dock icon.
+- Zoro-1 Chat:
   - **Look:** a forest-and-sand theme for light and dark mode, sand bubbles for the user, and serif
     Markdown headings.
   - **Reply footer:** one line under each reply, with a self-spec draft meter and a check seal.
@@ -63,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Zoro-1 Chat: agent mode is always on, and its toolbar toggle, setting and `/agent` command are gone.
+  With it off, the model still wrote tool calls as text that nothing could run; tool routing already
+  keeps tools out of replies that don't need them.
 - `trida-mlx-server`: without `--served-model-name`, the model id is the model folder or repo name,
   lowercased (e.g. `zoro-1-mlx-q8`), instead of always `trida2.0-4b`. Zoro-1 Chat names a server it
   did not start by the folder that server loaded.

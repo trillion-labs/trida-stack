@@ -18,16 +18,25 @@ of the prompt came from the cache.
   per step, filled to the reply's average), the speed, a seal when the reply checks pass (only failing or
   unsure checks are spelled out), and the reply's actions.
 - **Mascot.** A pixel Zoro-1 at the bottom of the sidebar shows what the model is doing: ready, reading
-  your message, thinking (a thought bubble), deciding (weighing two options, a "?"), using a tool
-  (wrench and gear), answering, checking the answer, done, an error, or waiting for the server.
-  View → Show or Hide Mascot (⇧⌘M). Reduce Motion holds one still pose per state.
+  your message (with the token count), thinking (a thought bubble), deciding (weighing two options, a
+  "?"), using a tool (it holds a prop for the tool: a magnifier, a page, a folder, a terminal, a pen or a
+  camera, with the tool's argument below), answering (speed lines when most drafted tokens are
+  accepted), checking the answer, tidying up (compaction), done (with the speed), an error, or waiting
+  for the server. It listens while you type, dozes after 5 minutes, and wears a nightcap late at night
+  and holds coffee in the morning.
+  - It reacts to you: a thumbs up gets a heart, a thumbs down a notebook, an edited reply a scribble.
+    Click it to wave; click a few times for hearts.
+  - Marking decision answers levels it up (5, 15, 30, 60): a scarf, glasses, a leaf crown, a golden Z.
+    Click "Level N" for badges.
+  - The Dock icon is the mascot in its current state; the app icon is the idle pose.
+  - View → Show or Hide Mascot (⇧⌘M). Reduce Motion holds one still pose per state.
 - **Rendered replies.** Replies are rendered from Markdown natively (no web view): headings, nested
   and task lists, quotes, tables with column alignment, rules, code blocks with their language and a
   copy button, and display math (`$$ … $$`, `\[ … \]`) shown as monospaced LaTeX. The copy button under a
   reply copies the raw Markdown.
 - **Images.** Drag an image onto the composer, choose one, or paste one. Only enabled when the
   served model has a vision encoder (Zoro-1, Trida-2.0-4B-1006).
-- **Agent mode.** The model gets the same tools as `trida_mlx/agent.py`, confined to a
+- **Agent mode** (always on). The model gets the same tools as `trida_mlx/agent.py`, confined to a
   workspace folder you choose:
   - always on: `list_dir`, `read_file`, `find_files` (by name), `search_files` (inside files),
     `calculator`, `now`. Paths may be relative or absolute, but must be inside the workspace;
@@ -43,7 +52,7 @@ of the prompt came from the cache.
     and the tool card shows a thumbnail.
 - **Slash commands.** Typing `/` in the composer opens a command menu, as in Claude Code: ↑↓ to
   choose, Return to run (`/de` + Return runs `/decide`), Tab to complete, Esc to close.
-  `/decide [question]`, `/new`, `/agent` (agent mode on/off), `/mode`
+  `/decide [question]`, `/new`, `/mode`
   (self-spec ↔ AR). Unknown `/words` are sent as normal messages.
 - **`/decide` in the chat.** Run `/decide` (or `/decide <question>`): the conversation so far, and
   its latest image, becomes the decision state, and the app asks step by step: the question, then
@@ -81,6 +90,19 @@ of the prompt came from the cache.
   is asked as two questions: does the reply claim an action, and do the tool results show it succeeded); the draft stays visible but collapsed and is no
   longer sent to the model, and the rewrite is checked again (no second rewrite). The result shows under
   each reply, e.g. `Check: ✓ language 0.97 · ? complete 0.34`.
+- **Decision labels.** Under a reply, *N decisions* lists the typed decisions made for it (tool routing,
+  reply checks, decision tools), each question with its options and the model's probabilities. Click
+  the right answer when the model got it wrong (or to confirm it); Export Training Data writes the
+  marked questions to `decision_labels.jsonl` as kev's labelled records, ready for
+  `train.py --jev_data`. Decisions with an image in the state are not kept.
+- **PDFs.** `read_pdf(path, pages)` returns a PDF's text page by page (default the first 5); pages
+  without a text layer come back as images when the model can see. `read_file` on a `.pdf` returns
+  its text too.
+- **Undo for writes.** Before `write_file` changes a file, the app keeps a copy (or notes that the file
+  did not exist); the tool card's *Undo* puts it back and tells the model in that call's result.
+  Shell commands are not covered.
+- **Chats.** Search the sidebar by title or message text; right-click → Rename…. Next to the composer,
+  a meter shows how full the context window is (summarized at 80%).
 - **Feedback and training data.** Under each reply: 👍 / 👎, and ✏️ to edit the reply into what it should
   have been (the model sees your version from then on; the original is kept). Server → **Export Training
   Data…** asks first, then runs `trida-mlx-datamine` on the saved chats and request logs and writes JSONL to
@@ -104,7 +126,10 @@ of the prompt came from the cache.
   choice question each, top 5 kept), and the pooled files plus keyword search's top 10 go to a final
   choice. The file list comes first in each request, so the server's decision cache keeps it: on
   Zoro-1 q8 the first search of a ~300-file folder takes ~40 s, later ones ~6 s. Folders over 480 files
-  judge only keyword search's top 480. On 35 questions about this repository it put the answer file in
+  get a folder step first: their subfolders (split until each is small enough, described by their
+  largest files) are judged the same way, and the files of the best ones go on. File summaries and
+  keyword counts are kept in an index (`~/Library/Caches/Zoro-1 Chat/file-index.json`, by size and
+  modification time), so a folder is read once. On 35 questions about this repository it put the answer file in
   the top 5 for 94% (keyword search alone 63%; Korean questions 90% vs 0%); see
   [`../filesearch/`](../filesearch/).
 - **UI agent (beta).** Settings → Agent → *UI agent*. The model can operate the app you used last
