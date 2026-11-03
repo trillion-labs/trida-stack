@@ -93,6 +93,10 @@ public struct ToolRun: Identifiable, Equatable, Sendable, Codable {
     public var result: String = ""
     /// PNG images the tool returned (view_image, screenshot).
     public var images: [Data] = []
+    /// write_file: the file as it was before, so the write can be undone.
+    public var undo: FileUndo.Info? = nil
+    /// The write was undone.
+    public var undone: Bool? = nil
     public var id: String { call.id }
 
     public init(call: ToolCall) {
@@ -136,6 +140,8 @@ public struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
     public var feedback: String? = nil
     /// The reply as the model wrote it, when the user edited it (training-data export: rejected vs chosen).
     public var editedFrom: String? = nil
+    /// The typed decisions made for this reply (routing, checks, decision tools), which the user can label.
+    public var decisions: [DecisionRecord]? = nil
 
     public init(role: Role, content: String, images: [Data] = []) {
         self.role = role

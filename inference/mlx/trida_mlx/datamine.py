@@ -15,6 +15,8 @@ Writes (one JSON object per line; see manifest.json for counts)
                           how they ended, refused / duplicate / gated calls, and a candidate label
   decisions.jsonl         every typed decision the server answered (tool routing, reply checks, /decide, tools):
                           state, questions, answers, reasoning; the model's own verdicts, not gold labels
+  decision_labels.jsonl   decisions whose right answers the user marked in the app (a reply's "decisions"), as
+                          kev's labelled records ({"state", "questions": {id: {..., "label"}}}): train.py --jev_data
   rollouts.jsonl          every logged generation as a trajectory: the exact request (messages, tools, template
                           switches, sampling) and the model's raw output (prompts / samples for on-policy
                           distillation or RL)
@@ -227,6 +229,39 @@ def mine_chats(chats: list, keep_images: bool):
     return pairs, feedback, tool_use, corrections
 
 
+def mine_labels(chats: list) -> list:
+    """Decisions the user marked in the app, as kev's labelled requests (train.py --jev_data): only the
+    questions with a mark; a yes/no label is 1 / 0, a score label the level index, a choice label the key."""
+    out = []
+    for chat in chats:
+        for m in chat.get("messages") or []:
+            for d in m.get("decisions") or []:
+                labels = d.get("labels") or {}
+                if not labels:
+                    continue
+                try:
+                    req = json.loads(d.get("request") or "{}")
+                    resp = json.loads(d.get("response") or "{}")
+                except json.JSONDecodeError:
+                    continue
+                qs = req.get("questions") or {}
+                questions = {}
+                for qid, key in labels.items():
+                    q = qs.get(qid)
+                    if not isinstance(q, dict):
+                        continue
+                    q = dict(q)
+                    t = q.get("type")
+                    q["label"] = (1 if key == "true" else 0) if t == "noul" else int(key) if t == "score" else key
+                    questions[qid] = q
+                if questions and "state" in req:
+                    model = (resp.get("answers") or {})
+                    out.append({"state": req["state"], "questions": questions, "source": d.get("kind"),
+                                "chat": chat.get("id"),
+                                "model_answers": {k: model.get(k) for k in questions if k in model}})
+    return out
+
+
 # ---- request logs (what the server got and produced) ------------------------------------------------------
 
 def mine_logs(d: Path):
@@ -303,7 +338,7 @@ def main(argv=None):
     pairs, feedback, tool_use, corrections = mine_chats(chats, a.keep_images)
     decisions, failures, rollouts = mine_logs(Path(a.logs).expanduser())
     files = {"preference_pairs": pairs, "feedback": feedback, "tool_use": tool_use, "decisions": decisions,
-             "failures": failures + corrections, "rollouts": rollouts}
+             "decision_labels": mine_labels(chats), "failures": failures + corrections, "rollouts": rollouts}
     if on:
         collect_names(list(files.values()), a.scrub_name)
     counts = {}

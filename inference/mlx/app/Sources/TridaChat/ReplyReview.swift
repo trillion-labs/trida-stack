@@ -155,7 +155,8 @@ extension AppState {
             var s = decisionSettings
             s.reasoning = "never"
             r = try await runDecision(Decision.body(state: .object(state), questions: qs, image: image,
-                                                    settings: s), qs) {
+                                                    settings: s), qs,
+                                          log: DecisionLog(chatID: chatID, messageID: replyID, kind: "Reply check")) {
                 [weak self] t in self?.update(chatID, replyID) { $0.check = "Checking the reply: " + t }
             }
         } catch {

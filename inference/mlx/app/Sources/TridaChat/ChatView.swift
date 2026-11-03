@@ -207,10 +207,14 @@ struct Composer: View {
             .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Theme.surface))
             .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(state.dropTargeted ? Theme.accent : Theme.border, lineWidth: state.dropTargeted ? 2 : 1))
-            Text("Return sends, Option-Return adds a line, / opens commands")
-                .font(.caption2)
-                .foregroundStyle(Theme.muted)
-                .padding(.leading, 6)
+            HStack {
+                Text("Return sends, Option-Return adds a line, / opens commands")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.muted)
+                Spacer()
+                ContextMeter()
+            }
+            .padding(.horizontal, 6)
         }
         .padding(.horizontal, 24)
         .padding(.top, 8)

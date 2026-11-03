@@ -79,6 +79,11 @@ final class AppState: ObservableObject {
     @Published var importingImage = false
     @Published var dropTargeted = false
     @Published var showLog = false
+    /// The sidebar's search text: chats whose title or messages contain it.
+    @Published var chatSearch = ""
+    /// The chat being renamed (the rename sheet) and the name being typed.
+    @Published var renaming: RenameRequest?
+    @Published var renameText = ""
     /// The mascot panel at the bottom of the sidebar (View → Show Mascot).
     @Published var showMascot = UserDefaults.standard.object(forKey: "TridaChat.showMascot") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showMascot, forKey: "TridaChat.showMascot") }
@@ -624,7 +629,8 @@ final class AppState: ObservableObject {
             let first = ChatMessage(role: .assistant, content: "")
             append(chatID, first)
             pending = first
-            let route = await routeTools(chatID: chatID, offered: ToolRouter.names(specs), mode: toolRouting) { [weak self] t in
+            let route = await routeTools(chatID: chatID, messageID: first.id, offered: ToolRouter.names(specs),
+                                         mode: toolRouting) { [weak self] t in
                 self?.update(chatID, first.id) { $0.route = t }
             }
             if Task.isCancelled {
@@ -714,7 +720,7 @@ final class AppState: ObservableObject {
                 }
                 if dec, DecisionTools.names.contains(call.name), call.name != "ui_check" || ui {
                     setRun(chatID, reply.id, call.id) { $0.status = .running }
-                    let output = await runDecisionTool(call, chatID: chatID, tools: tools) { [weak self] text in
+                    let output = await runDecisionTool(call, chatID: chatID, messageID: reply.id, tools: tools) { [weak self] text in
                         self?.setRun(chatID, reply.id, call.id) { $0.result = text }
                     }
                     setRun(chatID, reply.id, call.id) { run in
@@ -749,12 +755,18 @@ final class AppState: ObservableObject {
                     }
                 }
                 setRun(chatID, reply.id, call.id) { $0.status = .running }
+                // keep the file as it was, so the write can be undone from its tool card
+                var undo: FileUndo.Info? = nil
+                if call.name == "write_file", let p = call.argumentDict["path"] as? String, let url = try? tools.path(p) {
+                    undo = try? FileUndo.snapshot(url)
+                }
                 let output = await tools.run(call)
                 result = output.text
                 setRun(chatID, reply.id, call.id) { run in
                     run.status = .done
                     run.result = output.text
                     run.images = output.images
+                    if !output.text.hasPrefix("error") { run.undo = undo }
                 }
                 append(chatID, toolMessage(call, result, images: output.images))
             }

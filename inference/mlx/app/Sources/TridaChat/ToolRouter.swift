@@ -33,9 +33,9 @@ enum ToolRouter {
     }
 
     static let groups: [Group] = [
-        Group(key: "files", description: "the user's files: list a folder, find files (by name, or which file is about something), read or search files, look at an image file, write a file",
-              tools: ["list_dir", "read_file", "find_files", "search_files", "view_image", "write_file", "pick_file",
-                      "locate_files"]),
+        Group(key: "files", description: "the user's files: list a folder, find files (by name, or which file is about something), read or search files or PDFs, look at an image file, write a file",
+              tools: ["list_dir", "read_file", "read_pdf", "find_files", "search_files", "view_image", "write_file",
+                      "pick_file", "locate_files"]),
         Group(key: "screen", description: "look at what is on the user's screen now (screenshot)", tools: ["screenshot"]),
         Group(key: "time", description: "the current date or time", tools: ["now"]),
         Group(key: "math", description: "an exact arithmetic calculation", tools: ["calculator"]),
@@ -59,7 +59,7 @@ enum ToolRouter {
 
 extension AppState {
     /// Decides which tools the latest message may use. Errors and unsure answers fall back to every tool.
-    func routeTools(chatID: Chat.ID, offered: Set<String>, mode: ToolRouting,
+    func routeTools(chatID: Chat.ID, messageID: UUID, offered: Set<String>, mode: ToolRouting,
                     progress: @escaping (String) -> Void) async -> ToolRoute {
         let groups = ToolRouter.groups.filter { !offered.isDisjoint(with: $0.tools) }
         guard mode != .off, supportsDecision, !groups.isEmpty else { return ToolRoute(allowed: nil, note: "") }
@@ -74,7 +74,8 @@ extension AppState {
         progress("Choosing tools…")
         let r: DecisionResult
         do {
-            r = try await runDecision(body, [q], progress: { t in progress("Choosing tools: " + t) })
+            r = try await runDecision(body, [q], log: DecisionLog(chatID: chatID, messageID: messageID, kind: "Tool routing"),
+                                      progress: { t in progress("Choosing tools: " + t) })
         } catch {
             return ToolRoute(allowed: nil, note: "Tools: all (router failed: \(error.localizedDescription))")
         }

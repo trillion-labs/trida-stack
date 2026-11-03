@@ -5,6 +5,13 @@ import TridaChatCore
 /// the options come from the call (or from the workspace / the screen), Zoro-1's pointer head scores them,
 /// and when the top probability is below 0.7 the server reasons once (self-spec) and decides again.
 /// Offered in agent mode when the served checkpoint has the decision head. None of them change anything.
+/// Where a decision belongs: the reply it was made for, and what asked it.
+struct DecisionLog {
+    let chatID: Chat.ID
+    let messageID: UUID
+    let kind: String
+}
+
 @MainActor
 enum DecisionTools {
     static let names: Set<String> = ["decide_choice", "decide_yes_no", "pick_file", "locate_files", "ui_check"]
@@ -58,8 +65,9 @@ extension AppState {
         DecisionSettings(reasoning: "auto", threshold: 0.7, maxReasoningTokens: 8192, selfSpec: settings.selfSpec)
     }
 
-    /// Streams one decision, showing progress (and the reasoning as it is written) through `progress`.
-    func runDecision(_ body: OrderedJSON, _ questions: [DecisionQuestion],
+    /// Streams one decision, showing progress (and the reasoning as it is written) through `progress`. With
+    /// `log`, the request and the answer are kept on that reply, where the user can mark the right answers.
+    func runDecision(_ body: OrderedJSON, _ questions: [DecisionQuestion], log: DecisionLog? = nil,
                      progress: @escaping (String) -> Void) async throws -> DecisionResult {
         var reasoning = ""
         var why = ""
@@ -71,10 +79,20 @@ extension AppState {
                 reasoning += t
                 progress("Reasoning (\(why)):\n…" + String(reasoning.suffix(400)))
             case let .result(r):
+                if let log { recordDecision(log, body, r) }
                 return r
             }
         }
         throw ChatClientError.http(200, "the decision stream ended without a result")
+    }
+
+    /// Keeps a decision on its reply (not when the state has an image: that would put the picture in the chat
+    /// file and make a label without it).
+    func recordDecision(_ log: DecisionLog, _ body: OrderedJSON, _ r: DecisionResult) {
+        guard case let .object(kv) = body, !kv.contains(where: { $0.0 == "image" }) else { return }
+        let rec = DecisionRecord(kind: log.kind, request: String(decoding: body.data, as: UTF8.self),
+                                 response: String(decoding: r.raw, as: UTF8.self))
+        update(log.chatID, log.messageID) { m in m.decisions = (m.decisions ?? []) + [rec] }
     }
 
     private func lastUserText(_ chatID: Chat.ID?) -> String {
@@ -98,9 +116,10 @@ extension AppState {
     }
 
     /// Runs one decision tool (see DecisionTools).
-    func runDecisionTool(_ call: ToolCall, chatID: Chat.ID, tools: AgentTools?,
+    func runDecisionTool(_ call: ToolCall, chatID: Chat.ID, messageID: UUID, tools: AgentTools?,
                          progress: @escaping (String) -> Void) async -> ToolOutput {
         let a = call.argumentDict
+        let log = DecisionLog(chatID: chatID, messageID: messageID, kind: call.name)
         let request = Self.clip(lastUserText(chatID), 2000)
         do {
             switch call.name {
@@ -119,7 +138,7 @@ extension AppState {
                                                 ("context", .string((a["context"] as? String) ?? ""))])
                 progress("Deciding among \(opts.count) options…")
                 let r = try await runDecision(Decision.body(state: state, questions: [q], settings: decisionSettings), [q],
-                                              progress: progress)
+                                              log: log, progress: progress)
                 guard let ans = r.answers["answer"] else { return ToolOutput(text: "error: no answer") }
                 return ToolOutput(text: "Decision: \(ans.summary)\(Self.note(r))\nAll options: \(Self.ranked(ans, top: 20))")
 
@@ -132,7 +151,7 @@ extension AppState {
                                                 ("context", .string((a["context"] as? String) ?? ""))])
                 progress("Deciding yes / no…")
                 let r = try await runDecision(Decision.body(state: state, questions: [q], settings: decisionSettings), [q],
-                                              progress: progress)
+                                              log: log, progress: progress)
                 guard let ans = r.answers["answer"] else { return ToolOutput(text: "error: no answer") }
                 return ToolOutput(text: "Decision: \(ans.pick) (P(yes) = \(String(format: "%.2f", ans.value)))\(Self.note(r))")
 
@@ -149,7 +168,7 @@ extension AppState {
                                                 ("user request", .string(request))])
                 progress("Deciding among \(names.count) entries of \(path)…")
                 let r = try await runDecision(Decision.body(state: state, questions: [q], settings: decisionSettings), [q],
-                                              progress: progress)
+                                              log: log, progress: progress)
                 guard let ans = r.answers["file"] else { return ToolOutput(text: "error: no answer") }
                 return ToolOutput(text: "Best match in \(path): \(ans.pick) (\(String(format: "%.2f", ans.top)))\(Self.note(r))\n"
                                   + "Top candidates: \(Self.ranked(ans, top: 5))")
@@ -180,7 +199,7 @@ extension AppState {
                 let state = UITools.state(screen, goal: goal, history: uiSession.history, elements: screen.elements)
                 progress("Checking \(screen.app)…")
                 let r = try await runDecision(Decision.body(state: state, questions: [q], settings: decisionSettings), [q],
-                                              progress: progress)
+                                              log: log, progress: progress)
                 guard let ans = r.answers["done"] else { return ToolOutput(text: "error: no answer") }
                 return ToolOutput(text: "Goal done: \(ans.pick) (P(done) = \(String(format: "%.2f", ans.value)))\(Self.note(r))")
 

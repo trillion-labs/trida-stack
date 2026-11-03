@@ -57,6 +57,10 @@ public struct AgentTools: Sendable {
             Self.fn("list_dir", "List files in a directory (relative to the workspace).", ["path": str]),
             Self.fn("read_file", "Read a text file (relative to the workspace). Returns at most max_chars.",
                     ["path": str, "max_chars": ["type": "integer"]], ["path"]),
+            Self.fn("read_pdf", "Read the text of a PDF (relative to the workspace), page by page. pages is a range "
+                    + "such as '1-3' or '5' (default: the first 5 pages). Scanned pages without text come back as "
+                    + "images when you can see images.",
+                    ["path": str, "pages": str], ["path"]),
             Self.fn("find_files", "Find files by NAME under a directory (recursive). pattern is a glob such as "
                     + "'*.png' or 'report*', or plain text matched anywhere in the name (case-insensitive).",
                     ["pattern": str, "path": str], ["pattern"]),
@@ -103,7 +107,8 @@ public struct AgentTools: Sendable {
             + "picture?\" (attached) -> answer directly, no tool. \"what's in notes.txt?\" -> read_file. \"find my "
             + "invoices\" -> find_files. \"what time is it?\" -> now. \"what's on my screen?\" -> screenshot. "
             + "The workspace is \(root.path); file paths are relative to it (use \".\" for the workspace itself). "
-            + "Use find_files to locate files by name and search_files to search inside files. "
+            + "Use find_files to locate files by name and search_files to search inside files; read PDFs with "
+            + "read_pdf. "
             + "If a tool returns an error, read it and change your approach instead of repeating the call."
         if vision {
             p += " You can see images the user attaches to their messages: look at them and answer directly; "
@@ -185,6 +190,9 @@ public struct AgentTools: Sendable {
     /// A workspace folder from a tool argument (relative path, "." or an absolute path inside it).
     public func directory(_ rel: String?) throws -> URL { try existingDirectory(rel) }
 
+    /// A workspace path from a tool argument (it need not exist).
+    public func path(_ rel: String?) throws -> URL { try resolve(rel) }
+
     func existingDirectory(_ rel: String?) throws -> URL {
         let url = try resolve(rel)
         var isDir: ObjCBool = false
@@ -198,6 +206,18 @@ public struct AgentTools: Sendable {
     public func run(_ call: ToolCall) async -> ToolOutput {
         let a = call.argumentDict
         switch call.name {
+        case "read_pdf":
+            guard let p = a["path"] as? String else { return ToolOutput(text: "error: missing argument 'path'") }
+            do {
+                let url = try resolve(p)
+                guard FileManager.default.fileExists(atPath: url.path) else {
+                    return ToolOutput(text: "error: no such file: \(p)")
+                }
+                let r = PDFText.read(url, pages: a["pages"] as? String, maxChars: 24_000, renderScans: vision)
+                return ToolOutput(text: r.text, images: r.images)
+            } catch {
+                return ToolOutput(text: "error: \(error.localizedDescription)")
+            }
         case "view_image":
             guard vision else { return ToolOutput(text: "error: view_image is not enabled") }
             guard let p = a["path"] as? String else { return ToolOutput(text: "error: missing argument 'path'") }
@@ -287,6 +307,9 @@ public struct AgentTools: Sendable {
                 guard let p = a["path"] as? String else { throw ToolError.missingArgument("path") }
                 let maxChars = GenStats.int(a["max_chars"]) ?? 8000
                 let url = try resolve(p)
+                if url.pathExtension.lowercased() == "pdf" {        // its bytes would be useless as text
+                    return PDFText.read(url, pages: nil, maxChars: maxChars).text
+                }
                 let data = try Data(contentsOf: url)
                 return String(String(decoding: data, as: UTF8.self).prefix(max(1, maxChars)))
             case "search_files":

@@ -280,6 +280,38 @@ final class FileLocatorTests: XCTestCase {
         XCTAssertEqual(FileLocator.keywordRank("chat store", e).first, 1)   // ChatStore -> chat, store
     }
 
+    func testLargeFolderGoesThroughAFolderStep() async throws {
+        // 3 folders x 20 files; only b/ talks about invoices
+        var entries: [FileLocator.Entry] = []
+        for d in ["a", "b", "c"] {
+            for i in 0..<20 {
+                let about = d == "b" ? "invoice totals for march" : "holiday photos"
+                entries.append(FileLocator.Entry(path: "\(d)/f\(i).txt", summary: about, text: about))
+            }
+        }
+        var loc = FileLocator()
+        loc.maxFiles = 25
+        let gs = FileLocator.groups(entries, maxFiles: 25)
+        XCTAssertEqual(gs.map(\.name), ["a/", "b/", "c/"])
+        let r = try await loc.locate("invoice totals", in: entries, decide: Self.fakeDecide(Counter()))
+        XCTAssertEqual(r.folders.first, "b/")
+        XCTAssertTrue(r.hits.allSatisfy { $0.path.hasPrefix("b/") || $0.fromKeywords })
+    }
+
+    func testIndexReusesItsCacheUntilAFileChanges() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("idx-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let cache = dir.appendingPathComponent("cache/index.json")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let f = dir.appendingPathComponent("notes.txt")
+        try "first version".write(to: f, atomically: true, encoding: .utf8)
+        XCTAssertEqual(FileLocator.index(dir, cache: cache).first?.summary, "first version")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cache.path))
+        try "the second, longer version".write(to: f, atomically: true, encoding: .utf8)
+        XCTAssertEqual(FileLocator.index(dir, cache: cache).first { $0.path == "notes.txt" }?.summary,
+                       "the second, longer version")
+    }
+
     func testIndexSkipsHiddenBinaryAndDependencyFoldersAndSortsByPath() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("loc-\(UUID().uuidString)")
         let fm = FileManager.default
@@ -290,7 +322,7 @@ final class FileLocatorTests: XCTestCase {
         try "git".write(to: dir.appendingPathComponent(".git/HEAD"), atomically: true, encoding: .utf8)
         try Data([0, 1, 2, 3]).write(to: dir.appendingPathComponent("blob.bin"))
         defer { try? fm.removeItem(at: dir) }
-        XCTAssertEqual(FileLocator.index(dir).map(\.path), ["a.txt", "src/z.txt"])
+        XCTAssertEqual(FileLocator.index(dir, cache: nil).map(\.path), ["a.txt", "src/z.txt"])
     }
 
     /// A fake decision model that gives each numbered candidate a weight by how many query words its line has.
@@ -340,7 +372,8 @@ final class FileLocatorTests: XCTestCase {
         loc.maxFiles = 10
         let r = try await loc.locate("needle", in: entries, decide: Self.fakeDecide(Counter()))
         XCTAssertEqual(r.searched, 10)
-        XCTAssertTrue(FileLocator.report("needle", r, folder: ".").contains("Only the 10 of 30 files"))
+        XCTAssertTrue(FileLocator.report("needle", r, folder: ".").contains("The folder has 30 files"))
+        XCTAssertTrue(r.hits.contains { $0.path == "f7.txt" })
     }
 }
 
@@ -398,5 +431,56 @@ final class MarkdownTests: XCTestCase {
         XCTAssertEqual(Markdown.parse("a | b\n---"), [.paragraph("a | b"), .rule])
         XCTAssertEqual(Markdown.parse("*not a list*"), [.paragraph("*not a list*")])
         XCTAssertEqual(Markdown.parse("#hashtag"), [.paragraph("#hashtag")])
+    }
+}
+
+final class DecisionRecordTests: XCTestCase {
+    let request = #"{"state":{"conversation":["user: where is the chat saved?"]},"questions":{"need":{"type":"choice","instructions":"What does replying need?","criteria":{"answer":"answer directly","files":"the user's files"}},"ok":{"type":"noul","instructions":"Is it fine?"}},"reasoning":"never"}"#
+    let response = #"{"answers": {"need": {"type": "choice", "choice": "answer", "probabilities": {"answer": 0.7, "files": 0.3}}, "ok": {"type": "noul", "noul": 0.2}}}"#
+
+    func testRowsKeepTheOptionOrderAndProbabilities() {
+        let r = DecisionRecord(kind: "Tool routing", request: request, response: response)
+        XCTAssertEqual(r.rows.map(\.id), ["need", "ok"])
+        XCTAssertEqual(r.rows[0].options.map(\.key), ["answer", "files"])
+        XCTAssertEqual(r.rows[0].options[1].p, 0.3, accuracy: 1e-9)
+        XCTAssertEqual(r.rows[1].options.map(\.key), ["true", "false"])
+        XCTAssertEqual(r.rows[1].options[1].p, 0.8, accuracy: 1e-9)
+    }
+
+    func testKevRecordHasOnlyTheMarkedQuestions() throws {
+        var r = DecisionRecord(kind: "Tool routing", request: request, response: response)
+        XCTAssertNil(r.kevRecord())
+        r.labels = ["need": "files"]
+        let k = try XCTUnwrap(r.kevRecord())
+        let qs = try XCTUnwrap(k["questions"] as? [String: Any])
+        XCTAssertEqual(Array(qs.keys), ["need"])
+        XCTAssertEqual((qs["need"] as? [String: Any])?["label"] as? String, "files")
+        r.labels = ["ok": "false"]
+        XCTAssertEqual(((r.kevRecord()?["questions"] as? [String: Any])?["ok"] as? [String: Any])?["label"] as? Int, 0)
+    }
+}
+
+final class UndoAndPDFTests: XCTestCase {
+    func testUndoRestoresAnOverwrittenFileAndRemovesANewOne() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("undo-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let old = dir.appendingPathComponent("notes.md")
+        try "before".write(to: old, atomically: true, encoding: .utf8)
+        let u1 = try FileUndo.snapshot(old)
+        try "after".write(to: old, atomically: true, encoding: .utf8)
+        try FileUndo.restore(u1)
+        XCTAssertEqual(try String(contentsOf: old, encoding: .utf8), "before")
+        let new = dir.appendingPathComponent("new.md")
+        let u2 = try FileUndo.snapshot(new)
+        try "made by the agent".write(to: new, atomically: true, encoding: .utf8)
+        try FileUndo.restore(u2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: new.path))
+    }
+
+    func testPageRanges() {
+        XCTAssertEqual(PDFText.pageNumbers(nil, count: 12), [1, 2, 3, 4, 5])
+        XCTAssertEqual(PDFText.pageNumbers("2,4-6", count: 12), [2, 4, 5, 6])
+        XCTAssertEqual(PDFText.pageNumbers("10-20", count: 12), [10, 11, 12])
     }
 }

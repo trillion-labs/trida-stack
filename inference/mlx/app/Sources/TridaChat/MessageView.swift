@@ -78,6 +78,7 @@ struct MessageView: View {
         if message.superseded == true {
             DisclosureGroup {
                 MarkdownText(message.content).foregroundStyle(.secondary)
+                if let ds = message.decisions, !ds.isEmpty { DecisionsView(messageID: message.id, records: ds) }
             } label: {
                 Label("Draft replaced after review" + (message.check.map { " — " + $0 } ?? ""), systemImage: "arrow.uturn.backward")
                     .font(.caption).foregroundStyle(.secondary)
@@ -102,7 +103,7 @@ struct MessageView: View {
                 ReasoningView(text: message.reasoning, live: generating && message.content.isEmpty && message.toolRuns.isEmpty)
             }
             ForEach(message.toolRuns) { run in
-                ToolRunView(run: run)
+                ToolRunView(run: run, messageID: message.id)
             }
             if !message.content.isEmpty {
                 MarkdownText(message.content)
@@ -161,6 +162,9 @@ struct MessageView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
+            if let ds = message.decisions, !ds.isEmpty, !(isLast && state.isGenerating) {
+                DecisionsView(messageID: message.id, records: ds)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -190,7 +194,9 @@ struct ReasoningView: View {
 }
 
 struct ToolRunView: View {
+    @EnvironmentObject var state: AppState
     let run: ToolRun
+    let messageID: UUID
 
     var body: some View {
         DisclosureGroup {
@@ -226,6 +232,23 @@ struct ToolRunView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                if run.undo != nil {
+                    Spacer(minLength: 8)
+                    if run.undone == true {
+                        Text("Undone").font(.caption).foregroundStyle(Theme.muted)
+                    } else {
+                        Button {
+                            if let chat = state.selectedChatID {
+                                state.undoWrite(chatID: chat, messageID: messageID, runID: run.id)
+                            }
+                        } label: {
+                            Label("Undo", systemImage: "arrow.uturn.backward").font(.caption)
+                        }
+                        .buttonStyle(.borderless)
+                        .help(run.undo?.backup == nil ? "Remove the file this call created"
+                                                      : "Put the file back as it was before this write")
+                    }
+                }
             }
         }
         .padding(.leading, 10)

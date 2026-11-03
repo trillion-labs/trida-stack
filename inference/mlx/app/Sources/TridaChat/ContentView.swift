@@ -12,8 +12,24 @@ struct ContentView: View {
             // List (rather than a ScrollView of buttons) keeps the sidebar's layout under the toolbar and its
             // hit testing.
             VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
+                    TextField("Search chats", text: $state.chatSearch)
+                        .textFieldStyle(.plain)
+                    if !state.chatSearch.isEmpty {
+                        Button { state.chatSearch = "" } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain).foregroundStyle(Theme.muted)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Theme.surface))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Theme.border))
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+                .padding(.bottom, 4)
                 List {
-                    ForEach(state.chats) { chat in
+                    ForEach(state.visibleChats) { chat in
                         ChatRow(chat: chat, selected: chat.id == state.selectedChatID)
                             .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
                             .listRowBackground(Color.clear)
@@ -52,6 +68,9 @@ struct ContentView: View {
         }
         .sheet(item: $state.editTarget) { _ in
             EditReplySheet()
+        }
+        .sheet(item: $state.renaming) { _ in
+            RenameSheet()
         }
     }
 
@@ -131,6 +150,7 @@ struct ChatRow: View {
         .contentShape(Rectangle())          // the whole row, not just the text, takes the click
         .onTapGesture { state.selectedChatID = chat.id }
         .contextMenu {
+            Button("Rename…") { state.beginRename(chat.id) }
             Button("Delete Chat", role: .destructive) { state.deleteChat(chat.id) }
         }
         .accessibilityAddTraits(selected ? .isSelected : [])

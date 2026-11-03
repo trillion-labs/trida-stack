@@ -37,6 +37,15 @@ def test_mine_chats_and_logs():
         msg("assistant", "Earlier conversation summarized", decide={"prompt": {}}),
     ]}
     chat["messages"][7]["content"] = "I could not save jay.md: the terminal call was refused."
+    # the draft's reply check, with the user's mark: the English draft is NOT in the language asked for
+    req = {"state": {"user message": "translate this into Korean: good morning", "response": "Good morning!"},
+           "questions": {"language": {"type": "noul", "instructions": "Is the response in the language asked for?"},
+                         "request": {"type": "noul", "instructions": "Does it do what was asked?"}},
+           "reasoning": "never"}
+    chat["messages"][1]["decisions"] = [{"id": "d1", "kind": "Reply check", "request": json.dumps(req),
+                                        "response": json.dumps({"answers": {"language": {"type": "noul", "noul": 0.32},
+                                                                            "request": {"type": "noul", "noul": 0.9}}}),
+                                        "labels": {"language": "false"}}]
     (tmp / "chats" / "chat-1.json").write_text(json.dumps({"version": 1, "chat": chat, "cards": {}}))
     log = {"path": "/v1/chat/completions",
            "body": {"messages": [{"role": "user", "content": "hi, I'm jdoe (jdoe@example.com)"}],
@@ -65,6 +74,10 @@ def test_mine_chats_and_logs():
     assert set(gen["why"]) >= {"loop", "duplicate_tool_calls"} and "empty_answer" not in gen["why"]  # it did call tools
     assert any(f["kind"] == "user_corrected" and f["correction"] == "한글로 해달라고" for f in fails)
     assert rows["decisions"][0]["kind"] == "tool_routing" and len(rows["rollouts"]) == 1
+    lab = rows["decision_labels"]          # kev's labelled record: only the marked question, yes/no as 0 / 1
+    assert len(lab) == 1 and list(lab[0]["questions"]) == ["language"]
+    assert lab[0]["questions"]["language"]["label"] == 0 and lab[0]["source"] == "Reply check"
+    assert lab[0]["state"]["response"] == "Good morning!" and lab[0]["model_answers"]["language"]["noul"] == 0.32
     text = "".join(p.read_text() for p in out.glob("*.jsonl"))
     assert "jdoe" not in text and "@example.com" not in text and "/Users/USER/Desktop" in text
     manifest = json.loads((out / "manifest.json").read_text())
