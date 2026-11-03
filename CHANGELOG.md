@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Zoro-1 Chat:
+  - **Look:** a forest-and-sand theme for light and dark mode, sand bubbles for the user, and serif
+    Markdown headings.
+  - **Reply footer:** one line under each reply, with a self-spec draft meter and a check seal.
+  - **Sidebar:** chat rows with a green selection.
+  - **Mascot:** an animated pixel figure in the sidebar, showing the model's state (reading, thinking,
+    deciding, using a tool, answering, checking, done, error, waiting).
 - Zoro-1 Chat renders replies from Markdown natively: headings, nested and task lists, quotes,
   aligned tables, rules, code blocks with a language label and a copy button, and display math shown as
   LaTeX source. The parser is `Markdown.parse` in TridaChatCore.

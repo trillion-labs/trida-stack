@@ -30,6 +30,7 @@ struct TridaChatApp: App {
         WindowGroup("Zoro-1 Chat") {
             ContentView()
                 .environmentObject(delegate.state)
+                .tint(Theme.accent)
                 .frame(minWidth: 760, minHeight: 520)
         }
         .commands {
@@ -47,6 +48,10 @@ struct TridaChatApp: App {
                 Button("Open Request Logs") { delegate.state.openRequestLogs() }
                 Button("Export Training Data…") { delegate.state.exportTrainingData() }
             }
+            CommandGroup(after: .sidebar) {
+                Button("Show or Hide Mascot") { delegate.state.showMascot.toggle() }
+                    .keyboardShortcut("m", modifiers: [.command, .shift])
+            }
             CommandGroup(after: .newItem) {
                 OpenDecideButton()
                     .keyboardShortcut("d", modifiers: [.command, .shift])
@@ -56,11 +61,13 @@ struct TridaChatApp: App {
         Window("Decide", id: "decide") {
             DecideView(panel: delegate.state.decidePanel)
                 .environmentObject(delegate.state)
+                .tint(Theme.accent)
         }
 
         Settings {
             SettingsView()
                 .environmentObject(delegate.state)
+                .tint(Theme.accent)
         }
     }
 }

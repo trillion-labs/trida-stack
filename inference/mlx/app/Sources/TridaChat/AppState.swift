@@ -64,7 +64,11 @@ final class AppState: ObservableObject {
     /// Chats are saved to ~/Library/Application Support/Zoro-1 Chat/chats and reloaded at launch.
     let chatStore: ChatStore
     @Published var selectedChatID: Chat.ID?
-    @Published var isGenerating = false
+    @Published var isGenerating = false {
+        didSet { if oldValue && !isGenerating { lastFinished = Date() } }
+    }
+    /// When the last reply (or decision) finished: the mascot celebrates for a moment.
+    var lastFinished: Date?
     @Published var prefill: (done: Int, total: Int)? = nil
     @Published var approval: ApprovalRequest?
 
@@ -75,6 +79,10 @@ final class AppState: ObservableObject {
     @Published var importingImage = false
     @Published var dropTargeted = false
     @Published var showLog = false
+    /// The mascot panel at the bottom of the sidebar (View → Show Mascot).
+    @Published var showMascot = UserDefaults.standard.object(forKey: "TridaChat.showMascot") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showMascot, forKey: "TridaChat.showMascot") }
+    }
 
     // "Get a Model" sheet (download from Hugging Face + convert to MLX).
     @Published var showModelSetup = false

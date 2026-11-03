@@ -12,6 +12,15 @@ of the prompt came from the cache.
   `Trida-2.0-4B-1006-mlx-q8`). The default is Zoro-1 q8. Switching models restarts the server.
 - **Decoding.** Self-spec / AR toggle per message, with no restart: it sends `trida_mode`.
   Thinking is always on; the reasoning streams above each reply and collapses when it is done.
+- **Look.** Forest green and sand (`Theme.swift`), following the system's light or dark mode: the
+  model's side is forest, your messages are the only warm (sand) surfaces. Markdown headings use the
+  system serif. Under each reply, one quiet line: a draft meter (one cell per token self-spec may commit
+  per step, filled to the reply's average), the speed, a seal when the reply checks pass (only failing or
+  unsure checks are spelled out), and the reply's actions.
+- **Mascot.** A pixel Zoro-1 at the bottom of the sidebar shows what the model is doing: ready, reading
+  your message, thinking (a thought bubble), deciding (weighing two options, a "?"), using a tool
+  (wrench and gear), answering, checking the answer, done, an error, or waiting for the server.
+  View → Show or Hide Mascot (⇧⌘M). Reduce Motion holds one still pose per state.
 - **Rendered replies.** Replies are rendered from Markdown natively (no web view): headings, nested
   and task lists, quotes, tables with column alignment, rules, code blocks with their language and a
   copy button, and display math (`$$ … $$`, `\[ … \]`) shown as monospaced LaTeX. The copy button under a

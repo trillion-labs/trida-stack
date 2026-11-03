@@ -29,10 +29,11 @@ struct MessageView: View {
                 }
                 if !message.content.isEmpty {
                     Text(message.content)
+                        .foregroundStyle(Theme.userText)
                         .textSelection(.enabled)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.accentColor.opacity(0.15)))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.userBubble))
                 }
             }
         }
@@ -69,7 +70,7 @@ struct MessageView: View {
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
+        .card(radius: 10, fill: Theme.surfaceRaised)
     }
 
     @ViewBuilder
@@ -82,7 +83,10 @@ struct MessageView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         } else {
-            assistantBody
+            HStack(alignment: .top, spacing: 12) {
+                Avatar()
+                assistantBody
+            }
         }
     }
 
@@ -112,17 +116,19 @@ struct MessageView: View {
             if let err = message.error {
                 Label(err, systemImage: err == "Stopped." ? "stop.circle" : "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(err == "Stopped." ? Color.secondary : Color.red)
+                    .foregroundStyle(err == "Stopped." ? Theme.muted : Theme.danger)
             }
-            if let c = message.check {
-                Label(c, systemImage: c.contains("✗") ? "exclamationmark.triangle" : "checkmark.seal")
-                    .font(.caption)
-                    .foregroundStyle(c.contains("✗") ? Color.orange : Color.secondary)
-                    .help("Reply review by the decision model (Settings → Agent → Check replies)")
+            if let c = message.check, message.stats == nil {
+                CheckBadge(text: c)
             }
+            // one quiet footer: how it was decoded, whether the checks passed, and the reply's actions
             if let st = message.stats {
                 HStack(spacing: 10) {
-                    Text(st.summary)
+                    DraftMeter(stats: st)
+                    Text(String(format: "%.0f tok/s", st.decodeTokensPerSecond))
+                        .monospacedDigit()
+                        .help(st.summary)
+                    if let c = message.check { CheckBadge(text: c) }
                     if isLast && !state.isGenerating {
                         Button { state.retry() } label: { Image(systemName: "arrow.clockwise") }
                             .buttonStyle(.borderless)
@@ -222,8 +228,9 @@ struct ToolRunView: View {
                     .truncationMode(.tail)
             }
         }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
+        .padding(.leading, 10)
+        .padding(.vertical, 2)
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.accent.opacity(0.45)).frame(width: 2) }
     }
 
     private var argPreview: String {
@@ -238,10 +245,10 @@ struct ToolRunView: View {
     @ViewBuilder private var statusIcon: some View {
         switch run.status {
         case .pending: Image(systemName: "circle.dotted").foregroundStyle(.secondary)
-        case .waitingForApproval: Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
+        case .waitingForApproval: Image(systemName: "hand.raised.fill").foregroundStyle(Theme.warning)
         case .running: ProgressView().controlSize(.mini)
-        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-        case .denied: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.success)
+        case .denied: Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.danger)
         }
     }
 }
@@ -274,7 +281,80 @@ struct DecisionCardView: View {
                 Text("Decision").foregroundStyle(.secondary)
             }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
+        .padding(12)
+        .card(radius: 10)
+    }
+}
+
+/// The reply checks, quiet when they all pass: a seal (details on hover). Otherwise only the checks that did not
+/// pass are spelled out, in amber (unsure, "?") or terracotta (failed, "✗").
+struct CheckBadge: View {
+    let text: String
+
+    private var items: [String] {
+        guard text.hasPrefix("Check: ") else { return [] }
+        return text.dropFirst("Check: ".count).components(separatedBy: " · ")
+    }
+
+    var body: some View {
+        let open = items.filter { !$0.hasPrefix("✓") }
+        Group {
+            if items.isEmpty {
+                Text(text).foregroundStyle(Theme.muted)           // "Checking the reply…", errors
+            } else if open.isEmpty {
+                Image(systemName: "checkmark.seal").foregroundStyle(Theme.accent)
+            } else {
+                HStack(spacing: 6) {
+                    ForEach(open, id: \.self) { item in
+                        Text(item).foregroundStyle(item.hasPrefix("✗") ? Theme.danger : Theme.warning)
+                    }
+                }
+            }
+        }
+        .lineLimit(1)
+        .help("Reply review by the decision model: " + (items.isEmpty ? text : items.joined(separator: ", ")))
+    }
+}
+
+/// Self-speculative decoding at a glance: one cell per token the model may commit per step (the generation
+/// block N from the mode, e.g. "self-spec(N=4)"), filled up to the reply's average tokens per forward. A full
+/// bar means the diffusion drafts were almost always accepted; one cell is plain AR speed.
+struct DraftMeter: View {
+    let stats: GenStats
+
+    private var block: Int? {
+        guard stats.mode.hasPrefix("self-spec"), let r = stats.mode.range(of: "N="),
+              let n = Int(stats.mode[r.upperBound...].prefix { $0.isNumber }), n > 1 else { return nil }
+        return min(n, 16)
+    }
+
+    var body: some View {
+        if let n = block, stats.tokensPerForward > 0 {
+            HStack(spacing: 2) {
+                ForEach(0..<n, id: \.self) { i in
+                    let fill = min(max(stats.tokensPerForward - Double(i), 0), 1)
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 1.5).fill(Theme.accentSoft)
+                        RoundedRectangle(cornerRadius: 1.5).fill(Theme.accent).frame(width: 6 * fill)
+                    }
+                    .frame(width: 6, height: 10)
+                }
+            }
+            .help(String(format: "%.2f of %d tokens per step (self-speculative decoding)", stats.tokensPerForward, n))
+            .accessibilityLabel(String(format: "%.1f of %d tokens per step", stats.tokensPerForward, n))
+        }
+    }
+}
+
+/// The model's mark beside its replies.
+struct Avatar: View {
+    var body: some View {
+        Text("Z")
+            .font(.system(size: 13, weight: .bold, design: .rounded))
+            .foregroundStyle(Theme.onAccent)
+            .frame(width: 26, height: 26)
+            .background(Circle().fill(Theme.accent))
+            .padding(.top, 1)
+            .help("Zoro-1")
     }
 }

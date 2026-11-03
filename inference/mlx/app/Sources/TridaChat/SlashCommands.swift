@@ -99,7 +99,7 @@ struct SlashMenu: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .contentShape(Rectangle())
-                    .background(RoundedRectangle(cornerRadius: 6).fill(selected ? Color.accentColor.opacity(0.18) : Color.clear))
+                    .background(RoundedRectangle(cornerRadius: 6).fill(selected ? Theme.accentSoft : Color.clear))
                 }
                 .buttonStyle(.plain)
             }
@@ -108,7 +108,6 @@ struct SlashMenu: View {
                 .padding(.horizontal, 10).padding(.top, 4)
         }
         .padding(6)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25)))
+        .card(radius: 10)
     }
 }

@@ -346,7 +346,7 @@ struct AnswerView: View {
                     Text(o.label).lineLimit(1).frame(width: 150, alignment: .leading)
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 3).fill(Color.secondary.opacity(0.15)).frame(width: 160, height: 10)
-                        RoundedRectangle(cornerRadius: 3).fill(picked ? Color.accentColor : Color.secondary.opacity(0.6))
+                        RoundedRectangle(cornerRadius: 3).fill(picked ? Theme.accent : Theme.muted.opacity(0.6))
                             .frame(width: max(2, 160 * o.p), height: 10)
                     }
                     Text(String(format: "%.2f", o.p)).monospacedDigit().font(.caption)

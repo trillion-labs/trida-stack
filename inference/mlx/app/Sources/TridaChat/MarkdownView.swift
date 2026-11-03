@@ -25,8 +25,10 @@ struct MarkdownText: View {
         switch b {
         case let .heading(level, text):
             Text(Self.inline(text))
-                .font(level == 1 ? .title2.bold() : level == 2 ? .title3.bold() : .headline)
-                .padding(.top, level <= 2 ? 4 : 2)
+                .font(.system(size: level == 1 ? 22 : level == 2 ? 18 : 15,
+                              weight: level <= 2 ? .semibold : .bold, design: level <= 2 ? .serif : .default))
+                .foregroundStyle(Theme.text)
+                .padding(.top, level <= 2 ? 6 : 2)
                 .textSelection(.enabled)
         case let .paragraph(text):
             Text(Self.inline(text))
@@ -51,7 +53,7 @@ struct MarkdownText: View {
             }
         case let .quote(text):
             HStack(alignment: .top, spacing: 10) {
-                RoundedRectangle(cornerRadius: 1.5).fill(Color.secondary.opacity(0.4)).frame(width: 3)
+                RoundedRectangle(cornerRadius: 1.5).fill(Theme.accent.opacity(0.7)).frame(width: 3)
                 Text(Self.inline(text))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -72,7 +74,7 @@ struct MarkdownText: View {
                     .padding(.horizontal, 12)
             }
             .frame(maxWidth: .infinity)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.06)))
+            .card(radius: 8)
             .help("LaTeX (shown as source)")
         }
     }
@@ -104,7 +106,7 @@ struct CodeBlockView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(Color.secondary.opacity(0.08))
+            .background(Theme.surfaceRaised)
             ScrollView(.horizontal) {
                 Text(code)
                     .font(.system(size: 12, design: .monospaced))
@@ -113,9 +115,9 @@ struct CodeBlockView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.15)))
+        .background(Theme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Theme.border))
     }
 }
 
@@ -138,24 +140,24 @@ struct TableBlockView: View {
                 // (a GridRow takes no modifiers of its own, so the shading goes on each cell)
                 GridRow {
                     ForEach(Array(header.enumerated()), id: \.offset) { c, h in
-                        cell(h, column: c, shade: 0.1, bold: true)
+                        cell(h, column: c, fill: Theme.surfaceRaised, bold: true)
                     }
                 }
                 ForEach(Array(rows.enumerated()), id: \.offset) { r, row in
                     Divider().gridCellUnsizedAxes(.horizontal)
                     GridRow {
                         ForEach(Array(row.enumerated()), id: \.offset) { c, v in
-                            cell(v, column: c, shade: r % 2 == 1 ? 0.04 : 0, bold: false)
+                            cell(v, column: c, fill: r % 2 == 1 ? Theme.canvas : Theme.surface, bold: false)
                         }
                     }
                 }
             }
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Theme.border))
         }
     }
 
-    private func cell(_ s: String, column c: Int, shade: Double, bold: Bool) -> some View {
+    private func cell(_ s: String, column c: Int, fill: Color, bold: Bool) -> some View {
         Text(MarkdownText.inline(s))
             .fontWeight(bold ? .semibold : nil)
             .textSelection(.enabled)
@@ -165,6 +167,6 @@ struct TableBlockView: View {
             .gridColumnAlignment(align(c))
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: align(c), vertical: .center))
-            .background(Color.secondary.opacity(shade))
+            .background(fill)
     }
 }

@@ -17,22 +17,34 @@ struct ChatView: View {
             } else {
                 EmptyChatView()
             }
-            Divider()
             Composer()
+                .frame(maxWidth: ChatLayout.width)
+                .frame(maxWidth: .infinity)
         }
+        .background(Theme.canvas)
     }
+}
+
+/// Messages and the composer share one readable column, centered in wide windows.
+enum ChatLayout {
+    static let width: CGFloat = 860
 }
 
 struct EmptyChatView: View {
     @EnvironmentObject var state: AppState
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "bubble.left.and.text.bubble.right")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
+        VStack(spacing: 12) {
+            ZStack {
+                Circle().fill(Theme.accentSoft).frame(width: 72, height: 72)
+                Image(systemName: "leaf.fill")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+            }
+            .padding(.bottom, 4)
             Text(state.selectedModel?.name ?? "No model selected")
-                .font(.title2)
+                .font(.system(size: 28, weight: .medium, design: .serif))
+                .foregroundStyle(Theme.text)
             Text(state.settings.selfSpec
                  ? "Self-speculative decoding: diffusion drafts, exact AR verification."
                  : "Plain autoregressive decoding.")
@@ -52,10 +64,37 @@ struct EmptyChatView: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 480)
+            } else {
+                // a few ways in: a click puts the prompt in the composer
+                VStack(spacing: 8) {
+                    ForEach(suggestions, id: \.self) { s in
+                        Button { state.draft = s } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.turn.down.right").foregroundStyle(Theme.accent)
+                                Text(s).foregroundStyle(Theme.text)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .frame(width: 420)
+                            .card(radius: 10)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 10)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+    }
+
+    private var suggestions: [String] {
+        state.settings.agentMode
+            ? ["What is this folder about?", "Where is the code that saves chats?", "이 폴더에서 가장 큰 파일 5개 알려줘"]
+            : ["Explain self-speculative decoding in two sentences", "Write a haiku about a forest at dawn",
+               "다음 문장을 영어로 번역해줘: 오늘은 날씨가 정말 좋네요"]
     }
 }
 
@@ -66,15 +105,17 @@ struct MessageList: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     ForEach(chat.messages.filter { $0.role != .tool && $0.role != .system }) { m in
                         MessageView(message: m, isLast: m.id == chat.messages.last?.id)
                             .id(m.id)
                     }
                     Color.clear.frame(height: 1).id("bottom")
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 20)
+                .frame(maxWidth: ChatLayout.width)
+                .frame(maxWidth: .infinity)
             }
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             .onChange(of: chat.messages) { _, _ in
@@ -112,7 +153,7 @@ struct Composer: View {
                     }
                 }
             }
-            HStack(alignment: .bottom, spacing: 8) {
+            HStack(alignment: .bottom, spacing: 10) {
                 Menu {
                     Button("Choose Image…") { state.importingImage = true }
                     Button("Paste Image") { pasteImage() }
@@ -141,31 +182,39 @@ struct Composer: View {
                         return .handled
                     }
                     .onChange(of: state.draft) { _, _ in state.slashSelection = 0 }
-                    .padding(8)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor)))
-                    .overlay(RoundedRectangle(cornerRadius: 8)
-                        .stroke(state.dropTargeted ? Color.accentColor : Color.secondary.opacity(0.3)))
+                    .padding(.vertical, 6)
 
                 if state.isGenerating {
                     Button {
                         state.cancelGeneration()
                     } label: {
-                        Image(systemName: "stop.circle.fill").font(.title2)
+                        roundIcon("stop.fill", fill: Theme.danger)
                     }
                     .buttonStyle(.plain)
                     .keyboardShortcut(".", modifiers: .command)
                     .help("Stop (⌘.)")
                 } else {
                     Button(action: send) {
-                        Image(systemName: "arrow.up.circle.fill").font(.title2)
+                        roundIcon("arrow.up", fill: canSend ? Theme.accent : Theme.border)
                     }
                     .buttonStyle(.plain)
                     .disabled(!canSend)
                     .help("Send (Return; Option-Return for a new line)")
                 }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Theme.surface))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(state.dropTargeted ? Theme.accent : Theme.border, lineWidth: state.dropTargeted ? 2 : 1))
+            Text("Return sends, Option-Return adds a line, / opens commands")
+                .font(.caption2)
+                .foregroundStyle(Theme.muted)
+                .padding(.leading, 6)
         }
-        .padding(12)
+        .padding(.horizontal, 24)
+        .padding(.top, 8)
+        .padding(.bottom, 12)
         .onDrop(of: [.fileURL, .image], isTargeted: $state.dropTargeted) { providers in
             guard state.supportsVision else { return false }
             loadImages(providers)
@@ -178,6 +227,14 @@ struct Composer: View {
                 }
             }
         }
+    }
+
+    private func roundIcon(_ name: String, fill: Color) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(Theme.onAccent)
+            .frame(width: 28, height: 28)
+            .background(Circle().fill(fill))
     }
 
     private var placeholder: String {

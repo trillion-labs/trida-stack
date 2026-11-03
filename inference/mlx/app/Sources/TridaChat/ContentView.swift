@@ -7,16 +7,23 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $state.selectedChatID) {
-                ForEach(state.chats) { chat in
-                    Text(chat.title)
-                        .lineLimit(1)
-                        .tag(chat.id)
-                        .contextMenu {
-                            Button("Delete Chat", role: .destructive) { state.deleteChat(chat.id) }
-                        }
+            // A List without a selection binding, with our own selected look: List(selection:) draws the
+            // selection in the system accent (blue by default), which no SwiftUI modifier changes. Keeping the
+            // List (rather than a ScrollView of buttons) keeps the sidebar's layout under the toolbar and its
+            // hit testing.
+            VStack(spacing: 0) {
+                List {
+                    ForEach(state.chats) { chat in
+                        ChatRow(chat: chat, selected: chat.id == state.selectedChatID)
+                            .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
+                            .listRowBackground(Color.clear)
+                    }
                 }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+                if state.showMascot { MascotPanel() }
             }
+            .background(Theme.sidebar)
             .navigationSplitViewColumnWidth(min: 180, ideal: 220)
             .toolbar {
                 ToolbarItem {
@@ -27,6 +34,9 @@ struct ContentView: View {
         } detail: {
             ChatView()
                 .toolbar { toolbar }
+                // the toolbar takes the canvas color instead of the system grey band
+                .toolbarBackground(Theme.canvas, for: .windowToolbar)
+                .toolbarBackground(.visible, for: .windowToolbar)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             StatusBar()
@@ -68,6 +78,7 @@ struct ContentView: View {
                 Button("Rescan Models") { state.refreshModels() }
             } label: {
                 Label(state.selectedModel?.name ?? "Choose model", systemImage: "cpu")
+                    .labelStyle(.titleAndIcon)
             }
             .help("Model (from \(state.settings.modelsDirPath))")
 
@@ -89,11 +100,40 @@ struct ContentView: View {
             if state.settings.agentMode {
                 Button { state.chooseWorkspace() } label: {
                     Label(AppSettings.url(state.settings.workspacePath).lastPathComponent, systemImage: "folder")
+                        .labelStyle(.titleAndIcon)
                 }
                 .help("Workspace: \(state.settings.workspacePath)")
             }
             OpenDecideButton(label: "Decide")
         }
+    }
+}
+
+struct ChatRow: View {
+    @EnvironmentObject var state: AppState
+    let chat: Chat
+    let selected: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: selected ? "bubble.left.fill" : "bubble.left")
+                .foregroundStyle(Theme.accent)
+            Text(chat.title)
+                .lineLimit(1)
+                .fontWeight(selected ? .semibold : .regular)
+                .foregroundStyle(Theme.text)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(selected ? Theme.accentSoft : Color.clear))
+        .contentShape(Rectangle())          // the whole row, not just the text, takes the click
+        .onTapGesture { state.selectedChatID = chat.id }
+        .contextMenu {
+            Button("Delete Chat", role: .destructive) { state.deleteChat(chat.id) }
+        }
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -116,21 +156,28 @@ struct StatusBar: View {
             Spacer()
             if state.settings.agentMode {
                 Text(toolsLabel)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(toolsLabel)
             }
             Button("Server Log") { state.showLog = true }
-                .buttonStyle(.link)
+                .buttonStyle(.plain).foregroundStyle(Theme.accent)
             switch state.status {
             case .starting, .ready:
-                Button("Stop") { state.stopServer() }.buttonStyle(.link)
+                Button("Stop Server") { state.stopServer() }.buttonStyle(.plain).foregroundStyle(Theme.accent)
+            case .external:
+                // a server the app didn't launch: it can't stop it, and starting one would clash on the port
+                EmptyView()
             default:
-                Button("Start") { state.startServer() }.buttonStyle(.link)
+                Button("Start Server") { state.startServer() }.buttonStyle(.plain).foregroundStyle(Theme.accent)
             }
         }
         .font(.caption)
         .padding(.horizontal, 12)
         .padding(.vertical, 5)
-        .background(.bar)
+        .background(Theme.sidebar)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
 
     private var toolsLabel: String {
@@ -145,10 +192,10 @@ struct StatusBar: View {
 
     private var color: Color {
         switch state.status {
-        case .ready, .external: return .green
-        case .starting: return .orange
-        case .failed: return .red
-        case .stopped: return .gray
+        case .ready, .external: return Theme.success
+        case .starting: return Theme.warning
+        case .failed: return Theme.danger
+        case .stopped: return Theme.muted
         }
     }
 }
@@ -169,7 +216,7 @@ struct ApprovalSheet: View {
             }
             .frame(minHeight: 60, maxHeight: 240)
             .padding(8)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .textBackgroundColor)))
+            .card(radius: 8)
             Text(request.caption ?? "Workspace: \(state.settings.workspacePath)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
