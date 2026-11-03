@@ -342,7 +342,9 @@ final class AppState: ObservableObject {
     }
 
     private func attach(_ card: [String: Any], external: Bool) {
-        let id = card["id"] as? String ?? "model"
+        // a server we did not start: name it by the folder it loaded (its id is whatever it was started with)
+        let root = (card["root"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent }
+        let id = external ? (root ?? card["id"] as? String ?? "model") : (card["id"] as? String ?? "model")
         supportsVision = card["supports_vision"] as? Bool ?? false
         supportsDecision = card["decision"] as? Bool ?? false
         status = external ? .external(id) : .ready(id)

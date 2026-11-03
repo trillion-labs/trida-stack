@@ -164,7 +164,7 @@ Hermes talks to any OpenAI-compatible endpoint; the server advertises `context_l
 
 ```bash
 # terminal 1
-uv run trida-mlx-server --model ~/models/Trida2.0-4B-mlx-q8 --port 8080
+uv run trida-mlx-server --model ~/models/Trida2.0-4B-mlx-q8 --port 8080 --served-model-name trida2.0-4b
 # terminal 2 (one-time config)
 hermes config set model.provider custom
 hermes config set model.base_url http://127.0.0.1:8080/v1

@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `trida-mlx-server`: without `--served-model-name`, the model id is the model folder or repo name,
+  lowercased (e.g. `zoro-1-mlx-q8`), instead of always `trida2.0-4b`. Zoro-1 Chat names a server it
+  did not start by the folder that server loaded.
 - Zoro-1 Chat reply review is one direct decision, with no reasoning pass. P(yes) below 0.2 fails and
   triggers the rewrite; 0.2–0.5 is shown as unsure and changes nothing. "Claims match results" runs only
   after an action tool or a failed or refused call, and is split into two questions: does the reply

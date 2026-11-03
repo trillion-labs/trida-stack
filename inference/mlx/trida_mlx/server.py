@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import queue
 import sys
 import threading
@@ -655,7 +656,8 @@ def main(argv=None):
     ap.add_argument("--max-tokens", type=int, default=8192, help="default output budget (capped by context)")
     ap.add_argument("--context-length", type=int, default=131072,
                     help="advertised + enforced context window (Hermes needs >= 64000)")
-    ap.add_argument("--served-model-name", default="trida2.0-4b")
+    ap.add_argument("--served-model-name", default=None,
+                    help="model id in /v1/models and responses (default: the model folder or repo name, lowercased)")
     ap.add_argument("--tool-call-gate", type=float, default=0.0, metavar="P",
                     help="allow <tool_call> only where its raw (temperature-1) probability is >= P; off by default "
                          "(Zoro-1 Chat starts the server with 0.7); per request: tool_call_min_prob")
@@ -682,6 +684,8 @@ def main(argv=None):
                     help="cap on freed GPU buffers MLX keeps for reuse (its default is close to the memory limit, "
                          "so the process can hold far more than it uses); 0 = MLX's default")
     a = ap.parse_args(argv)
+    if not a.served_model_name:
+        a.served_model_name = pathlib.Path(a.model.rstrip("/")).name.lower() or "trida-mlx"
     from . import decode as _decode
     _decode._Emitter.loop_guard = a.loop_guard
     DEFAULTS.update(temperature=a.temperature, top_k=a.top_k, top_p=a.top_p, max_tokens=a.max_tokens,
