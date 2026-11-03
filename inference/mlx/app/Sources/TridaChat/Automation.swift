@@ -155,7 +155,7 @@ extension AppState {
     }
 
     func automationNewChat(agentMode: Bool?) -> Chat.ID {
-        if let agentMode { settings.agentMode = agentMode }
+        _ = agentMode                       // agent mode is always on; the parameter is kept for older clients
         let c = Chat()
         chats.insert(c, at: 0)
         selectedChatID = c.id

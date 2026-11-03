@@ -19,7 +19,12 @@ struct AppSettings: Codable, Equatable {
     var topP: Double = 0.95
     var maxTokens: Int = 65536
 
-    var agentMode: Bool = false
+    /// Agent mode is always on: the model always has its tools (the decision model's routing keeps them out of
+    /// replies that don't need them). Computed, so it is not saved; an old saved value is ignored.
+    var agentMode: Bool {
+        get { true }
+        set {}
+    }
     var workspacePath: String = "~/Desktop"
     var allowShell: Bool = true
     var allowWrite: Bool = false

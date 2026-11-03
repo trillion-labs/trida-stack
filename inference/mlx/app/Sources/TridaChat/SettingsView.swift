@@ -107,7 +107,6 @@ struct SettingsView: View {
 
     private var agentTab: some View {
         Form {
-            Toggle("Agent mode (tools)", isOn: $state.settings.agentMode)
             LabeledContent("Workspace") {
                 HStack {
                     Text(state.settings.workspacePath).lineLimit(1).truncationMode(.middle)

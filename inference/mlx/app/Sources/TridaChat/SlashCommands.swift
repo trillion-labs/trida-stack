@@ -16,7 +16,6 @@ extension AppState {
                      summary: "Decide about this conversation: question → options → answers with probabilities"),
         SlashCommand(name: "/new", hint: "", summary: "Start a new chat"),
         SlashCommand(name: "/compact", hint: "", summary: "Summarize the conversation so far to free up context"),
-        SlashCommand(name: "/agent", hint: "", summary: "Turn agent mode (tools) on or off"),
         SlashCommand(name: "/mode", hint: "", summary: "Switch between self-spec and AR decoding"),
     ]
 
@@ -55,9 +54,6 @@ extension AppState {
                 return true
             }
             compactNow()
-        case "/agent":
-            settings.agentMode.toggle()
-            appendNotice("Agent mode is \(settings.agentMode ? "on" : "off").")
         case "/mode":
             settings.selfSpec.toggle()
             appendNotice("Decoding: \(settings.selfSpec ? "self-spec" : "AR").")

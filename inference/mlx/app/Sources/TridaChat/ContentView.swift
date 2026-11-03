@@ -110,19 +110,11 @@ struct ContentView: View {
             .help("Self-speculative decoding (diffusion draft + exact AR verify) or plain autoregressive")
         }
         ToolbarItemGroup(placement: .primaryAction) {
-
-            Toggle(isOn: $state.settings.agentMode) {
-                Label("Agent", systemImage: "wrench.and.screwdriver")
+            Button { state.chooseWorkspace() } label: {
+                Label(AppSettings.url(state.settings.workspacePath).lastPathComponent, systemImage: "folder")
+                    .labelStyle(.titleAndIcon)
             }
-            .help("Give the model tools over the workspace folder")
-
-            if state.settings.agentMode {
-                Button { state.chooseWorkspace() } label: {
-                    Label(AppSettings.url(state.settings.workspacePath).lastPathComponent, systemImage: "folder")
-                        .labelStyle(.titleAndIcon)
-                }
-                .help("Workspace: \(state.settings.workspacePath)")
-            }
+            .help("Workspace: \(state.settings.workspacePath) (the folder the model's tools work in)")
             OpenDecideButton(label: "Decide")
         }
     }
