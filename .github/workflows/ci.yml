@@ -27,8 +27,16 @@ jobs:
       # `ruff format --check` is not enforced yet (existing files predate the formatter).
 
   test:
-    name: CPU tests (pytest)
+    name: CPU tests (pytest, transformers ${{ matrix.transformers }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # pinned: the version range in requirements.txt (kept below 5.x for the released
+        #   checkpoints' remote code).
+        # 5.x: what the Qwen3.5 training path needs; it keeps tests that skip on 4.x (such as
+        #   the Qwen3.5 mRoPE parity test in train/test_vlm.py) running in CI.
+        transformers: [pinned, 5.x]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
@@ -46,8 +54,15 @@ jobs:
           # train/test_stream_pack.py reaches train.data.text_sft_data, whose module-level
           # import chain ends at `transformers` (via train.hf_block_diffusion). It is CPU-only
           # and pulls no model, but it is not in the default install because requirements.txt
-          # targets a GPU cluster and is skipped by --no-deps below.
-          pip install transformers
+          # targets a GPU cluster and is skipped by --no-deps below. The pinned leg reads its
+          # version range from requirements.txt.
+          if [ "${{ matrix.transformers }}" = pinned ]; then
+            spec="$(grep -E '^transformers[<>=]' requirements.txt)"
+            [ -n "$spec" ] || { echo "::error::transformers pin not found in requirements.txt"; exit 1; }
+            pip install "$spec"
+          else
+            pip install "transformers>=5,<6"
+          fi
           # inference/test_decide_cpu.py: image requests need Pillow, the /v1/decide handler test
           # needs FastAPI's TestClient (httpx); both skip without them.
           pip install pillow fastapi httpx
@@ -56,4 +71,7 @@ jobs:
         # No paths here on purpose: pytest ignores `testpaths` whenever paths are passed on
         # the command line, so a test added to pyproject.toml but not to this list would be
         # registered and never run. `pyproject.toml` is the single list.
+        env:
+          # 5.x job: the Qwen3.5 parity test in train/test_vlm.py must run, not skip.
+          TRIDA_REQUIRE_QWEN35: ${{ matrix.transformers == '5.x' && '1' || '' }}
         run: pytest -q

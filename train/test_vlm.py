@@ -34,6 +34,10 @@ def random_layout(rng, n_images):
 
 
 def test_mrope_matches_hf_get_rope_index():
+    # Qwen3.5 ships in transformers 5.x, but requirements.txt pins an older range for the released
+    # checkpoints. CI's 5.x job sets TRIDA_REQUIRE_QWEN35 so this test fails there instead of skipping.
+    if not os.environ.get("TRIDA_REQUIRE_QWEN35"):
+        pytest.importorskip("transformers.models.qwen3_5", reason="needs transformers 5.x (Qwen3.5)")
     from transformers.models.qwen3_5.configuration_qwen3_5 import Qwen3_5Config
     from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5Model
 

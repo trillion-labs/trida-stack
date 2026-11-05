@@ -62,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- CI runs the CPU tests twice: on the transformers range `requirements.txt` pins (`<5`),
+  which it previously ignored by installing the latest release, and on transformers 5.x,
+  which the Qwen3.5 training path needs. The Qwen3.5 RoPE parity test in
+  `train/test_vlm.py` skips on 4.x, which has no Qwen3.5, and runs in the 5.x job.
 - The metrics population split is read from `docs/metrics/first-party.txt` instead
   of an API lookup. Organisation membership here is private, so neither
   `/collaborators` nor `author_association` can answer it from a workflow: both
