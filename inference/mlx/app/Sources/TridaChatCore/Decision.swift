@@ -112,18 +112,22 @@ public struct DecisionSettings: Sendable {
 public enum Decision {
     public static func body(state: OrderedJSON, questions: [DecisionQuestion], image: Data? = nil,
                             settings: DecisionSettings, stream: Bool = false) -> OrderedJSON {
-        var b: [(String, OrderedJSON)] = [
+        var request: [(String, OrderedJSON)] = [
             ("state", state),
             ("questions", .object(questions.map { ($0.key, $0.json) })),
-            ("reasoning", .string(settings.reasoning)),
+        ]
+        if let image {
+            request.append(("image", .string("data:image/png;base64," + image.base64EncodedString())))
+            request.append(("max_image_pixels", .number(Double(settings.maxImagePixels))))
+        }
+        let reasoning: OrderedJSON = settings.reasoning == "auto" ? .string("auto") : .bool(settings.reasoning == "always")
+        var b: [(String, OrderedJSON)] = [
+            ("request", .object(request)),
+            ("reasoning", reasoning),
             ("threshold", .number(settings.threshold)),
             ("max_reasoning_tokens", .number(Double(settings.maxReasoningTokens))),
             ("trida_mode", .string(settings.selfSpec ? "self-spec" : "causal")),
         ]
-        if let image {
-            b.append(("image", .string("data:image/png;base64," + image.base64EncodedString())))
-            b.append(("max_image_pixels", .number(Double(settings.maxImagePixels))))
-        }
         if stream { b.append(("stream", .bool(true))) }
         return .object(b)
     }

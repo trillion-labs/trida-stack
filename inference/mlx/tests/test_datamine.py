@@ -69,3 +69,14 @@ def test_mine_chats_and_logs():
     assert "jdoe" not in text and "@example.com" not in text and "/Users/USER/Desktop" in text
     manifest = json.loads((out / "manifest.json").read_text())
     assert manifest["files"]["preference_pairs"] == 2 and manifest["scrubbed"] is True
+
+
+def test_shared_decision_envelope_logs(tmp_path):
+    request = {"state": "printer jam", "questions": {"need": {"type": "noul"}}, "image": "data:..."}
+    record = {"path": "/v1/decide", "body": {"request": request, "reasoning": False},
+              "response": {"answers": {"need": {"type": "noul", "noul": 0.9}}}}
+    (tmp_path / "decision.json").write_text(json.dumps(record))
+    decisions, _, _ = datamine.mine_logs(tmp_path)
+    assert decisions[0]["kind"] == "tool_routing"
+    assert decisions[0]["state"] == request["state"] and decisions[0]["questions"] == request["questions"]
+    assert decisions[0]["image"]

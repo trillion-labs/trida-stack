@@ -1,189 +1,291 @@
-"""Typed decisions (decision.py) on a tiny random multimodal checkpoint with a random pointer head.
+"""Offline serving-contract, hidden-state, head, image and HTTP checks on random tiny weights."""
 
-Pinned: the vendored jev.py equals inference/jev.py; the shared-state branching gives the same
-logits as running every question's full row from scratch (text and image states); answers are
-well-formed probabilities and the temperature divides the logits; escalation runs the reasoning
-only when the direct answer is unsure, never decides on cut-off reasoning, and decides again with
-the reasoning in the state; jev_head.pt reads without torch; the server's /v1/decide round trip,
-plain and streamed.
-"""
 import base64
+import importlib.util
 import json
-import os
 import socket
+import subprocess
 import sys
-import tempfile
-import threading
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import mlx.core as mx  # noqa: E402
-import numpy as np  # noqa: E402
+import mlx.core as mx
+import numpy as np
+import pytest
 
-import tiny_vl  # noqa: E402
-from trida_mlx import decision, jev  # noqa: E402
-from trida_mlx.engine import Engine  # noqa: E402
+import tiny_vl
+from trida_mlx import convert, decision, decide_request
+from trida_mlx.engine import Engine
 
-HERE = Path(__file__).resolve().parent
-TMP = Path(tempfile.mkdtemp(prefix="trida_decide_"))
-# the tiny tokenizer needs jev's delimiter tokens too (they fit in its 300-token vocab)
-tiny_vl.SPECIALS = tiny_vl.SPECIALS + [t for t in jev.SPECIAL if t not in tiny_vl.SPECIALS]
-CKPT, IDS = tiny_vl.build(TMP / "raw")
-D = tiny_vl.TINY["hidden_size"]
-rng = np.random.default_rng(0)
-HEAD = {"q.weight": rng.normal(0, 0.5, (16, D)), "q.bias": rng.normal(0, 0.1, 16),
-        "k.weight": rng.normal(0, 0.5, (16, D)), "k.bias": rng.normal(0, 0.1, 16)}
-mx.save_safetensors(str(CKPT / "jev_head.safetensors"), {k: mx.array(v.astype(np.float32)) for k, v in HEAD.items()})
-
-REQ = {"state": {"ticket": "the printer on floor 3 is jammed again", "customer": "acme"},
-       "questions": {"team": {"type": "choice", "instructions": "Which team handles it?",
-                              "criteria": {"it": "IT support", "billing": "Billing", "facilities": "Facilities"}},
-                     "urgent": {"type": "noul", "instructions": "Is it urgent?"},
-                     "severity": {"type": "score", "instructions": "How severe?", "criteria": ["low", "medium", "high"]}}}
-
-ENGINE = Engine(str(CKPT), prompt_cache=False)
-ENGINE.model.set_dtype(mx.float32)   # exact comparisons (bf16 matmuls differ with the call split)
-ENGINE.vision.set_dtype(mx.float32)
-DEC = decision.Decider.load(ENGINE)
+REQ = {
+    "state": {"ticket": "printer jam"},
+    "questions": {
+        "team": {"type": "choice", "criteria": {"it": "support", "billing": "billing"}},
+        "urgent": {"type": "noul"},
+        "severity": {"type": "score", "criteria": ["low", "medium", "high"]},
+    },
+}
 
 
-def full_row_logits(dec, rows):
-    """Reference: each question's whole row from an empty cache, no shared-state snapshot."""
-    out = []
-    for r in rows:
-        cache = dec.engine.rt.make_cache()
-        h = dec.engine.rt.prefill(cache, r["ids"], hidden_positions=r["opts"] + [r["decide"]])
-        out.append(np.array(dec.head(h[-1], h[:-1])))
-    return out
-
-
-def test_vendored_jev_matches_inference():
-    ref = HERE.parent.parent / "jev.py"
-    if not ref.is_file():
-        return  # installed without the rest of trida-stack
-    ours = (HERE.parent / "trida_mlx" / "jev.py").read_text()
-    body = ours.split("unchanged ----\n", 1)[1]
-    assert body == ref.read_text(), "trida_mlx/jev.py drifted from inference/jev.py; re-vendor it"
-
-
-def test_branching_equals_full_rows_text_and_image():
-    for image in (None, tiny_vl.png(3)):
-        qs, rows, state_len = DEC.encode(REQ, image)
-        assert len(rows) == 3 and all(r["ids"][:state_len] == rows[0]["ids"][:state_len] for r in rows)
-        got, want = DEC.logits(rows, state_len), full_row_logits(DEC, rows)
-        for g, w in zip(got, want):
-            assert np.allclose(g, w, atol=1e-4), (g, w)
-        if image is not None:
-            assert any(t < 0 for t in rows[0]["ids"][:state_len])  # image tokens in the state
-
-
-def test_answers_and_temperature():
-    out = DEC.decide(REQ)
-    a = out["answers"]
-    assert set(a) == {"team", "urgent", "severity"}
-    assert a["team"]["choice"] in ("it", "billing", "facilities")
-    assert abs(sum(a["team"]["probabilities"].values()) - 1) < 1e-3
-    assert 0 <= a["urgent"]["noul"] <= 1 and 0 <= a["severity"]["score"] <= 2
-    assert out["temperature"] == decision.DEFAULT_TEXT_TEMPERATURE
-    hot, cold = DEC.decide(REQ, temperature=50.0), DEC.decide(REQ, temperature=0.05)
-    spread = lambda o: max(o["answers"]["team"]["probabilities"].values())  # noqa: E731
-    assert spread(hot) < spread(out) < spread(cold)
-
-
-def test_escalation_paths():
-    never = DEC.decide_or_reason(REQ, reasoning="never")
-    assert not never["escalated"] and never["answers"] == never["direct"]["answers"]
-    sure = DEC.decide_or_reason(REQ, threshold=0.0)          # nothing is below 0: no reasoning
-    assert not sure["escalated"]
-    events = []
-    cut = DEC.decide_or_reason(REQ, threshold=1.01, max_reasoning_tokens=6, on_event=lambda k, p: events.append(k))
-    assert cut["escalated"] and events[0] == "direct" and events[-1] == "result"
-    if "cut" in cut:   # the usual case: 6 tokens of a random model never close </think>
-        assert "reasoned" not in cut and cut["answers"] == cut["direct"]["answers"]
-    else:              # it happened to stop: then it decided again
-        assert cut["answers"] == cut["reasoned"]["answers"]
-    # a finished reasoning: decide again with it in the state
-    real = DEC.think
-    DEC.think = lambda *a, **k: {"text": "the jam is a facilities matter", "ended": "complete", "stats": {}}
+@pytest.fixture(scope="module")
+def checkpoint(tmp_path_factory):
+    path = tmp_path_factory.mktemp("decision")
+    old = tiny_vl.SPECIALS
+    tiny_vl.SPECIALS = old + decide_request.SPECIAL
     try:
-        done = DEC.decide_or_reason(REQ, threshold=1.01)
+        ckpt, _ = tiny_vl.build(path / "raw")
     finally:
-        DEC.think = real
-    assert done["escalated"] and done["answers"] == done["reasoned"]["answers"]
-    rq = decision.with_reasoning(REQ, "x")
-    assert rq["state"]["reasoning"] == "x" and rq["state"]["ticket"] == REQ["state"]["ticket"]
+        tiny_vl.SPECIALS = old
+    rng = np.random.default_rng(5)
+    head = {
+        f"{k}.{part}": mx.array(rng.normal(0, 0.1, shape).astype(np.float32))
+        for k in ("q", "k")
+        for part, shape in (("weight", (16, 64)), ("bias", (16,)))
+    }
+    mx.save_safetensors(str(ckpt / "jev_head.safetensors"), head)
+    (ckpt / "temperature.json").write_text(json.dumps({"text": 1.5, "image": 2.0}))
+    return ckpt
 
 
-def test_bad_requests():
-    for bad in ({"questions": {}}, {"state": "s", "questions": {}},
-                {"state": "s", "questions": {"q": {"type": "pick", "criteria": {}}}},
-                {"state": "s", "questions": {"q": {"type": "choice", "criteria": {}}}}):
-        try:
-            DEC.decide(bad)
-        except decision.DecisionError:
-            continue
-        raise AssertionError(f"accepted {bad}")
+@pytest.fixture
+def decider(checkpoint):
+    eng = Engine(str(checkpoint), prompt_cache=False, prefill_chunk=7)
+    eng.model.set_dtype(mx.float32)
+    eng.vision.set_dtype(mx.float32)
+    return decision.Decider(eng)
 
 
-def test_torch_file_reader():
-    pt = HERE / "fixtures" / "jev_head_tiny.pt"
-    expect = HERE / "fixtures" / "jev_head_tiny.json"
-    if not pt.is_file():
-        return
-    saved = decision.load_torch_file(pt)
-    want = json.loads(expect.read_text())
-    assert saved["head_dim"] == want["head_dim"]
-    for k, v in want["head"].items():
-        assert np.allclose(saved["head"][k], np.array(v, np.float32), atol=1e-6), k
-    # bf16 tensors are widened to float32 exactly
-    assert np.allclose(saved["bf16"], np.array(want["bf16"], np.float32))
+def test_shared_contract_is_pinned():
+    canonical = Path(__file__).resolve().parents[2] / "decide_request.py"
+    assert Path(decide_request.__file__).read_bytes() == canonical.read_bytes()
 
 
-def test_server_decide_round_trip():
-    from trida_mlx import server
-    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
-    threading.Thread(target=server.main, args=(["--model", str(CKPT), "--port", str(port)],), daemon=True).start()
+def test_torch_head_parity_and_pt_import(tmp_path, decider):
+    torch = pytest.importorskip("torch")
+    spec = importlib.util.spec_from_file_location(
+        "reference_head", Path(__file__).resolve().parents[2] / "jev_head.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    head = module.PointerHead(64, 16)
+    head.load_state_dict({k: torch.from_numpy(np.array(v)) for k, v in decider.head.w.items()})
+    torch.save({"head": head.state_dict(), "head_dim": 16}, tmp_path / "jev_head.pt")
+    loaded = decision.load_head(tmp_path, 64)
+    rng = np.random.default_rng(6)
+    hd, ho = (
+        rng.normal(size=(1, 64)).astype(np.float32),
+        rng.normal(size=(3, 64)).astype(np.float32),
+    )
+    z = (
+        head(torch.from_numpy(hd), torch.from_numpy(ho), torch.zeros(3, dtype=torch.long))
+        .detach()
+        .numpy()
+    )
+    np.testing.assert_allclose(loaded(mx.array(hd[0]), mx.array(ho)), z, atol=1e-6)
+    for t in (0.7, 2.0):
+        np.testing.assert_allclose(
+            mx.softmax(loaded(mx.array(hd[0]), mx.array(ho)) / t),
+            torch.softmax(torch.from_numpy(z) / t, -1),
+            atol=1e-6,
+        )
+
+
+@pytest.mark.parametrize("image", [False, True])
+def test_hidden_states_match_prefix_forwards(decider, image):
+    req = decide_request.parse(
+        {
+            **REQ,
+            **(
+                {"image": "data:image/png;base64," + base64.b64encode(tiny_vl.png(1)).decode()}
+                if image
+                else {}
+            ),
+        }
+    )
+    img = decider._image(req)
+    rows = decider.encode(req, img)
+    rt = decider.engine.rt
+    for row in rows:
+        positions = row["opts"] + [row["decide"]]
+        h = rt.prefill(rt.make_cache(), row["ids"], hidden_positions=positions)
+        # Mirrors SGLang's one causal-prefix query at each delimiter.
+        expected = mx.concatenate(
+            [
+                rt.prefill(rt.make_cache(), row["ids"][: i + 1], hidden_positions=[i])
+                for i in positions
+            ]
+        )
+        np.testing.assert_allclose(h, expected, atol=2e-5, rtol=1e-5)
+        logits = rt.prefill(rt.make_cache(), row["ids"])
+        np.testing.assert_allclose(rt._lm_head(h[-1:])[0], logits, atol=2e-5, rtol=1e-5)
+    out = decider.decide(req.raw)
+    assert set(out["answers"]) == {"team", "urgent", "severity"}
+    assert out["answers"]["urgent"]["type"] == "noul"
+    assert 0 <= out["answers"]["urgent"]["noul"] <= 1
+    assert abs(sum(out["answers"]["team"]["probabilities"].values()) - 1) < 0.001
+    assert 0 <= out["answers"]["severity"]["score"] <= 2
+
+
+def test_reasoning_and_temperature(decider, monkeypatch):
+    seen = []
+
+    def think(request, image, max_tokens, **kwargs):
+        seen.append(max_tokens)
+        return {"text": "IT handles printers", "ended": "complete", "stats": {}}
+
+    monkeypatch.setattr(decider, "think", think)
+    result = decider.decide(REQ, reasoning=True, max_reasoning_tokens=32)
+    assert (
+        seen == [32] and result["reasoning"] == "IT handles printers" and "reasoning_ms" in result
+    )
+    expected = decider.decide(decide_request.with_reasoning(REQ, result["reasoning"]))
+    assert result["answers"] == expected["answers"]
+    req = decide_request.parse(REQ)
+    logits = decider.logits(decider.encode(req, None))
+    expected = {
+        q.qid: decide_request.to_answer(q, mx.softmax(z / 1.5).tolist())
+        for q, z in zip(req.questions, logits)
+    }
+    assert decider.decide(REQ)["answers"] == expected
+    assert decider.decide(REQ, temperature=50)["answers"] != expected
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"temperature": 0},
+        {"temperature": float("nan")},
+        {"reasoning": "always"},
+        {"max_reasoning_tokens": -1},
+    ],
+)
+def test_bad_options(decider, kwargs):
+    with pytest.raises(decide_request.RequestError):
+        decider.decide(REQ, **kwargs)
+
+
+def test_convert_head_and_q8_drift(checkpoint, tmp_path):
+    convert.main(
+        ["--model", str(checkpoint), "--out", str(tmp_path), "--bits", "8", "--group-size", "32"]
+    )
+    raw, q8 = decision.Decider(Engine(str(checkpoint))), decision.Decider(Engine(str(tmp_path)))
+    assert q8.temperatures == raw.temperatures
+    for k in raw.head.w:
+        np.testing.assert_array_equal(raw.head.w[k], q8.head.w[k])
+    req = decide_request.parse(REQ)
+    a, b = raw.logits(raw.encode(req, None)), q8.logits(q8.encode(req, None))
+    # A tiny random checkpoint regression bound, not a full-checkpoint quality claim.
+    for x, y in zip(a, b):
+        assert float(mx.max(mx.abs(mx.softmax(x / 1.5) - mx.softmax(y / 1.5)))) < 0.02
+
+
+def test_http_decisions(checkpoint):
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "trida_mlx.server",
+            "--model",
+            str(checkpoint),
+            "--port",
+            str(port),
+            "--prefill-chunk",
+            "7",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
     base = f"http://127.0.0.1:{port}/v1"
-    for _ in range(300):
-        try:
-            card = json.loads(urllib.request.urlopen(f"{base}/models", timeout=1).read())["data"][0]
-            break
-        except Exception:
-            time.sleep(0.1)
-    assert card["decision"] is True
 
     def post(body):
-        return urllib.request.urlopen(urllib.request.Request(f"{base}/decide", data=json.dumps(body).encode(),
-                                                             headers={"Content-Type": "application/json"}))
-    img = "data:image/png;base64," + base64.b64encode(tiny_vl.png(5)).decode()
-    r = json.loads(post({**REQ, "image": img, "reasoning": "never"}).read())
-    assert set(r["answers"]) == {"team", "urgent", "severity"} and r["direct"]["temperature"] == 1.0
-    lines = [ln.decode().strip() for ln in post({**REQ, "threshold": 1.01, "max_reasoning_tokens": 5, "stream": True})]
-    events = [json.loads(ln[6:]) for ln in lines if ln.startswith("data: {")]
-    kinds = [e["type"] for e in events]
-    assert kinds[0] == "direct" and kinds[-1] == "result" and events[-1]["escalated"], kinds
-    assert lines[-2] == "data: [DONE]" or "data: [DONE]" in lines
-    try:
-        post({"state": "s", "questions": {"q": {"type": "nope"}}})
-        raise AssertionError("bad request accepted")
-    except urllib.error.HTTPError as e:
-        assert e.code == 400
+        return urllib.request.urlopen(
+            urllib.request.Request(
+                f"{base}/decide",
+                data=json.dumps(body).encode(),
+                headers={"Content-Type": "application/json"},
+            ),
+            timeout=30,
+        )
 
-
-def test_long_reasoning_is_trimmed_to_fit_the_state():
-    long = " ".join(f"step{i} checks the jam" for i in range(3000)) + " so: facilities"
-    fitted = DEC.fit_reasoning(REQ, long)
-    assert fitted != long and fitted.startswith("…") and fitted.endswith("so: facilities")
-    used, room = DEC._state_room(decision.with_reasoning(REQ, fitted), None)
-    assert used <= room
-    assert DEC.fit_reasoning(REQ, "short reasoning") == "short reasoning"
-    real = DEC.think
-    DEC.think = lambda *a, **k: {"text": long, "ended": "complete", "stats": {}}
     try:
-        out = DEC.decide_or_reason(REQ, threshold=1.01)
+        for _ in range(200):
+            if proc.poll() is not None:
+                pytest.fail(proc.stderr.read().decode())
+            try:
+                with urllib.request.urlopen(f"{base}/models", timeout=1) as response:
+                    assert json.load(response)["data"][0]["decision"] is True
+                break
+            except (OSError, urllib.error.URLError):
+                time.sleep(0.1)
+        else:
+            pytest.fail("MLX server did not start")
+        expected = decision.Decider(Engine(str(checkpoint), prefill_chunk=7)).decide(REQ)["answers"]
+        assert json.load(post({"request": REQ}))["answers"] == expected
+        image = "data:image/png;base64," + base64.b64encode(tiny_vl.png(2)).decode()
+        assert "answers" in json.load(post({"request": {**REQ, "image": image}}))
+        assert "reasoning" in json.load(
+            post({"request": REQ, "reasoning": True, "max_reasoning_tokens": 3})
+        )
+        with post({"request": REQ, "reasoning": "auto", "threshold": 0, "stream": True}) as response:
+            lines = [line.decode().strip() for line in response]
+        events = [json.loads(line[6:]) for line in lines if line.startswith("data: {")]
+        assert [event["type"] for event in events] == ["direct", "result"]
+        assert not events[-1]["escalated"] and "data: [DONE]" in lines
+        with post({"request": REQ, "reasoning": True, "max_reasoning_tokens": 3,
+                   "stream": True, "trida_mode": "self-spec"}) as response:
+            lines = [line.decode().strip() for line in response]
+        events = [json.loads(line[6:]) for line in lines if line.startswith("data: {")]
+        kinds = [event["type"] for event in events]
+        assert kinds[0] == "direct" and kinds[-1] == "result"
+        assert "reasoning" in kinds and "data: [DONE]" in lines
+        if "cut" in events[-1]:
+            assert events[-1]["answers"] == events[0]["answers"]
+        for body in (
+            {},
+            [],
+            {"request": {}},
+            {"request": REQ, "reasoning": "always"},
+            {"request": {**REQ, "image": "/etc/hosts"}},
+            {"request": {**REQ, "image": "https://example.com/a.png"}},
+        ):
+            with pytest.raises(urllib.error.HTTPError) as err:
+                post(body)
+            assert err.value.code == 400
     finally:
-        DEC.think = real
-    assert out["escalated"] and "reasoning_trimmed" in out and out["answers"] == out["reasoned"]["answers"]
+        proc.terminate()
+        proc.communicate(timeout=10)
+
+
+def test_missing_head_and_context(decider, monkeypatch):
+    monkeypatch.setattr(decider, "context_length", 2)
+    with pytest.raises(decide_request.RequestError, match="context length"):
+        decider.decide(REQ)
+    monkeypatch.setattr(decider, "head", None)
+    with pytest.raises(decide_request.RequestError, match="no decision head"):
+        decider.decide(REQ)
+
+
+def test_reasoning_preserves_chat_cache(decider):
+    eng = decider.engine
+    eng.use_prompt_cache = True
+    ids = eng.tokenizer.encode("existing chat", add_special_tokens=False)
+    eng.rt.prefill(eng.cache, ids)
+    current, slots = eng.cur, eng.slots
+    decider.decide(REQ, reasoning=True, max_reasoning_tokens=3)
+    assert eng.cur is current and eng.slots is slots and eng.use_prompt_cache
+    assert eng.cache.tokens == ids
+
+
+def test_comparison_detects_contract_and_probability_drift():
+    from compare_decisions import differences
+
+    assert not differences({"p": 0.5}, {"p": 0.501}, 0.002)
+    assert differences({"p": 0.5}, {"p": 0.51}, 0.002)
+    assert differences({"p": 0.5}, {"p": float("nan")}, 0.002)
+    assert differences({"choice": "a"}, {"choice": "b"}, 1.0)
+    assert differences({"p": 0.5}, {"other": 0.5}, 1.0)

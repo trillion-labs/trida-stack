@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Shared SGLang/MLX decision requests and answer formatting, torch-free pointer-head
+  conversion to safetensors, bounded state reuse, and parity/HTTP regression tests (#61).
+
 - Typed decisions in the MLX server (`POST /v1/decide`): Zoro-1's pointer head answers choice / yes-no /
   score questions over a state (one shared state prefill, a branch per question), and below a confidence
   threshold the model reasons once (self-spec) and decides again. The server also gained a `<tool_call>`

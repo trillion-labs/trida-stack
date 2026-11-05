@@ -314,6 +314,14 @@ final class AppState: ObservableObject {
                 try? FileManager.default.createDirectory(at: Self.requestLogDir, withIntermediateDirectories: true)
                 extra += ["--log-requests", Self.requestLogDir.path]
             }
+            // Keep Zoro-1's fitted text calibration in the app; generic server requests keep SGLang defaults.
+            let calibrationURL = model.url.appendingPathComponent("temperature.json")
+            let calibration = (try? Data(contentsOf: calibrationURL)).flatMap {
+                (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any]
+            }
+            if model.name.lowercased().contains("zoro-1"), calibration?["text"] == nil {
+                extra += ["--decision-text-temperature", "1.52"]
+            }
             // The server's generation guards are off by default (evals, speedrun); the app runs with them.
             extra += ["--loop-guard", "--tool-call-gate", "0.7"]
             if cfg.genBlock > 0 { extra += ["--gen-block", String(cfg.genBlock)] }

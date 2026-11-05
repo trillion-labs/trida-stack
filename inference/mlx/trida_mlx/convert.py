@@ -22,12 +22,12 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_flatten
 
+from .decision import load_head
 from .model import _text_config, load_model
 
 CARRY = ["tokenizer.json", "tokenizer_config.json", "chat_template.jinja", "generation_config.json",
          "block_diffusion.json", "special_tokens_map.json", "vocab.json", "merges.txt", "added_tokens.json",
-         "preprocessor_config.json", "processor_config.json", "video_preprocessor_config.json",
-         "jev_head.pt", "jev_head.safetensors", "temperature.json"]  # typed-decision head (decision.py)
+         "preprocessor_config.json", "processor_config.json", "video_preprocessor_config.json", "temperature.json"]
 # multimodal config keys carried next to the (flattened) text config
 VISION_KEYS = ["vision_config", "image_token_id", "video_token_id", "vision_start_token_id",
                "vision_end_token_id"]
@@ -90,6 +90,9 @@ def main(argv=None):
     for name in CARRY:
         if (src / name).exists():
             shutil.copy2(src / name, out / name)
+    head = load_head(src, model.language_model.args.hidden_size)
+    if head is not None:
+        mx.save_safetensors(str(out / "jev_head.safetensors"), head.w)
     gb = index["metadata"]["total_size"] / 1e9
     print(f"wrote {out}  ({gb:.2f} GB, {len(shards)} shard(s), "
           f"{'bf16' if not a.bits else f'q{a.bits} g{a.group_size}'}"
