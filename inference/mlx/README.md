@@ -122,18 +122,19 @@ curl -s localhost:8000/v1/decide -H 'Content-Type: application/json' -d '{
 - Images go inside `request` as data URLs or bare base64. HTTP requests cannot read local
   paths or fetch remote URLs. `min_image_pixels` / `max_image_pixels` control resolution
   (448×448 maximum by default); direct Python calls may also use PIL images or local paths.
-- Temperatures come from `temperature.json`, falling back to 1.0 for both text and images
-  to match SGLang. Server flags `--decision-text-temperature` / `--decision-image-temperature`
-  and a per-request `temperature` override them. For Zoro-1's fitted model-card text
-  calibration, explicitly use `--decision-text-temperature 1.52` if it isn't in the checkpoint.
-- `reasoning` defaults to `false`; `true` generates causal reasoning before deciding, with
+- Temperatures come from `temperature.json`, falling back to Zoro-1's fitted model-card
+  text temperature (1.52) and 1.0 for images. Server flags `--decision-text-temperature` /
+  `--decision-image-temperature` and a per-request `temperature` override them. For CUDA
+  parity comparisons, explicitly select the same temperature on both servers.
+- `reasoning` defaults to `false`; `true` generates self-spec reasoning before deciding, with
   `max_reasoning_tokens` defaulting to 768. `"auto"` first decides directly, then reasons if
   any question's top probability is below `threshold` (default 0.7). Auto reasoning uses
   self-spec and up to 8192 tokens by default. `trida_mode` can select `causal` or `self-spec`.
   Completed reasoning is fitted to the state budget, keeping its conclusion. Incomplete
   or looping reasoning keeps the direct answer and reports `cut`.
 - `stream: true` sends SSE data objects with `type: direct`, `type: reasoning` (text pieces),
-  and `type: result`, followed by `[DONE]`. Auto results include `direct`, `escalated`, and,
+  and `type: result`, followed by `[DONE]`. The `direct` event includes `reason` when
+  reasoning will run, for progress displays. Auto results include `direct`, `escalated`, and,
   when applicable, `reasoning` and `reasoned`. Boolean requests retain the shared answer fields.
 - `/v1/models` reports decision support, temperatures, and the cache budget. Without a head,
   decision requests return 400. All model work runs on the MLX worker thread; direct Python

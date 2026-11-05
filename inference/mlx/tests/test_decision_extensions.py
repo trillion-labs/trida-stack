@@ -137,3 +137,45 @@ def test_cancelled_reasoning_restores_chat_cache(decider):
     assert eng.cur is current and eng.slots is slots and eng.cache.tokens == ids
     # Cancellation does not leave the next request on a question's branch.
     assert "answers" in decider.decide(REQ)
+
+
+@pytest.mark.parametrize("calibration,override,expected", [
+    (None, None, {"text": 1.52, "image": 1.0}),
+    ({"image": 2.0}, None, {"text": 1.52, "image": 2.0}),
+    ({"text": 1.25, "image": 2.0}, None, {"text": 1.25, "image": 2.0}),
+    ({"text": 1.25, "image": 2.0}, 0.9, {"text": 0.9, "image": 2.0}),
+])
+def test_server_temperature_fallback_and_overrides(checkpoint, tmp_path, calibration, override, expected):
+    import shutil
+    from trida_mlx.engine import Engine
+    path = tmp_path / "Zoro-1"
+    shutil.copytree(checkpoint, path)
+    (path / "temperature.json").unlink()
+    if calibration is not None:
+        (path / "temperature.json").write_text(json.dumps(calibration))
+    loaded = decision.Decider.load(Engine(str(path)), text_temperature=override)
+    assert loaded.temperatures == expected
+    # The per-request override still takes precedence over checkpoint/server settings.
+    assert loaded.decide(REQ, temperature=50)["answers"] != loaded.decide(REQ)["answers"]
+
+
+@pytest.mark.parametrize("reasoning", [True, "auto"])
+@pytest.mark.parametrize("mode", [None, "causal", "self-spec"])
+def test_reasoning_mode_and_progress_reason(decider, monkeypatch, reasoning, mode):
+    calls, events = [], []
+
+    def think(*args, **kwargs):
+        calls.append(kwargs["mode"])
+        assert events[0][0] == "direct" and events[0][1]["reason"]
+        return {"text": "IT handles printers", "ended": "complete", "stats": {}}
+
+    monkeypatch.setattr(decider, "think", think)
+    result = decider.decide(REQ, reasoning=reasoning, mode=mode, threshold=1,
+                            on_event=lambda kind, payload: events.append((kind, payload)))
+    assert calls == [mode or "self-spec"]
+    assert events[0][1]["reason"] == result["reason"]
+    assert events[-1][0] == "result" and result["escalated"]
+    if reasoning == "auto":
+        assert "below 1" in result["reason"] and result["lowest"]["question"] in result["reason"]
+    else:
+        assert result["reason"] == "reasoning requested"

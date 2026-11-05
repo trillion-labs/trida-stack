@@ -47,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- MLX `POST /v1/decide` now defaults to `reasoning: false` instead of `"auto"`.
+  Send `reasoning: "auto"` explicitly to retain confidence-based escalation. Both
+  `true` and `"auto"` default to self-spec reasoning; `trida_mode: "causal"` overrides it.
+
 - Vulnerability reports have a second private channel: GitHub private vulnerability
   reporting is enabled, so the Security tab's **Report a vulnerability** button now
   works, and `SECURITY.md` names it beside the role-alias email. `community-check`

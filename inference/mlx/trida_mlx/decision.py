@@ -121,7 +121,7 @@ class Decider:
                  cache_mb=1024):
         self.engine, self.context_length = engine, context_length
         self.head = load_head(engine.path, engine.rt.args.hidden_size)
-        self.temperatures = {"text": 1.0, "image": 1.0}
+        self.temperatures = {"text": 1.52, "image": 1.0}
         path = engine.path / "temperature.json"
         if path.exists():
             saved = json.loads(path.read_text())
@@ -346,14 +346,19 @@ class Decider:
                                key=lambda item: item[1])
                 result["lowest"] = {"question": qid, "top_probability": top}
                 result["escalated"] = top < threshold
-            emit("direct", direct)
+            if result["escalated"]:
+                result["reason"] = (
+                    f"reasoned because top probability was {top:.4g} (question {qid}), below {threshold}"
+                    if reasoning == "auto" else "reasoning requested"
+                )
+            emit("direct", {**direct, **({"reason": result["reason"]} if result["escalated"] else {})})
             if not result["escalated"]:
                 emit("result", result)
                 return result
             thinking_start = time.perf_counter()
             thought = self.think(request, image, max_reasoning_tokens,
                                  on_piece=lambda piece: emit("piece", piece),
-                                 mode=mode or ("self-spec" if reasoning == "auto" else "causal"))
+                                 mode=mode or "self-spec")
             result.update(reasoning=thought["text"], reasoning_stats=thought["stats"],
                           reasoning_ms=round((time.perf_counter() - thinking_start) * 1000, 1))
             if thought["ended"] != "complete":

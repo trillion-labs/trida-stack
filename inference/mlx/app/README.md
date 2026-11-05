@@ -205,6 +205,6 @@ back to `uv run trida-mlx-server` through a login shell.
 
 Decision requests use the shared `{"request": {"state": …, "questions": …}}`
 envelope. The app maps its Always/Never controls to boolean reasoning and keeps
-Auto as `"auto"`; streamed progress events keep the same format. When launching a Zoro-1 model, the app explicitly selects the model-card text
-calibration (1.52) if `temperature.json` has no text calibration. A separately
-launched server can select it with `--decision-text-temperature 1.52`.
+Auto as `"auto"`; streamed progress events keep the same format. The server uses
+Zoro-1's model-card text calibration (1.52) when `temperature.json` has no text entry,
+including when launched outside the app.

@@ -237,12 +237,14 @@ def test_http_decisions(checkpoint):
         assert [event["type"] for event in events] == ["direct", "result"]
         assert not events[-1]["escalated"] and "data: [DONE]" in lines
         with post({"request": REQ, "reasoning": True, "max_reasoning_tokens": 3,
-                   "stream": True, "trida_mode": "self-spec"}) as response:
+                   "stream": True}) as response:
             lines = [line.decode().strip() for line in response]
         events = [json.loads(line[6:]) for line in lines if line.startswith("data: {")]
         kinds = [event["type"] for event in events]
         assert kinds[0] == "direct" and kinds[-1] == "result"
         assert "reasoning" in kinds and "data: [DONE]" in lines
+        assert events[0]["reason"] == "reasoning requested"
+        assert events[-1]["reasoning_stats"]["mode"].startswith("self-spec(")
         if "cut" in events[-1]:
             assert events[-1]["answers"] == events[0]["answers"]
         for body in (

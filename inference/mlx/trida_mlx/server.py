@@ -672,7 +672,7 @@ def main(argv=None):
                     help="decision state cache budget in MiB; 0 disables cross-request reuse")
     ap.add_argument("--decision-text-temperature", type=float, default=None,
                     help="divide the pointer head's logits by this for text decisions (default: the checkpoint's "
-                         "temperature.json, else 1.0; use 1.52 for the Zoro-1 card calibration)")
+                         "temperature.json, else 1.52 from the Zoro-1 card)")
     ap.add_argument("--decision-image-temperature", type=float, default=None,
                     help="the same for requests with an image (default: temperature.json, else 1.0 = uncalibrated)")
     a = ap.parse_args(argv)
