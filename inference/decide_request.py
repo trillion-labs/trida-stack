@@ -113,13 +113,19 @@ class Request:
         """-> Encoded. The state is cut to fit MAX_STATE (the image counts as its token count + 2); a question that
         does not fit its row raises RequestError."""
         pixel_values = grid = None
-        image = []
+        n = 0
         if self.image is not None:
             if image_processor is None:
                 raise RequestError("the request has an image but this checkpoint has no image processor (not a VL model)")
             pixel_values, grid, n = image_input(self.image, image_processor, self.max_image_pixels, self.min_image_pixels)
+        return Encoded(self.encode_rows(tokenizer, n), pixel_values, grid)
+
+    def encode_rows(self, tokenizer, image_tokens=0):
+        """Torch-free serving rows, also used by MLX with its own image preprocessing."""
+        image = []
+        if image_tokens:
             vs, pad, ve = (tokenizer.convert_tokens_to_ids(t) for t in VISION)
-            image = [vs] + [pad] * n + [ve]
+            image = [vs] + [pad] * image_tokens + [ve]
         s_id, q_id, o_id, c_id, d_id = (tokenizer.convert_tokens_to_ids(t) for t in SPECIAL)
         state = [s_id] + image + _user(tokenizer, self.state)[: max(0, MAX_STATE - 1 - len(image))]
         rows = []
@@ -135,7 +141,7 @@ class Request:
                 cursor += len(sp)
                 ends.append(cursor - 1)
             rows.append({"ids": state + branch, "decide": len(state) + len(branch) - 1, "opts": ends})
-        return Encoded(rows, pixel_values, grid)
+        return rows
 
 
 def _user(tok, text):
@@ -268,3 +274,28 @@ def with_reasoning(request, text):
     state = request["state"]
     state = {**state, "reasoning": text} if isinstance(state, dict) else {"situation": state, "reasoning": text}
     return {**request, "state": state}
+
+
+# ---- response formatting (shared by SGLang and MLX) ------------------------------------------------
+
+def _confidence(qtype, p):
+    k = len(p)
+    if k == 1:
+        return 1.0
+    if qtype == "score":
+        mode = max(range(k), key=p.__getitem__)
+        d = sum(abs(i - (k - 1) / 2) for i in range(k)) / k
+        return max(0.0, 1.0 - sum(pi * abs(i - mode) for i, pi in enumerate(p)) / d)
+    return (max(p) - 1 / k) / (1 - 1 / k)
+
+
+def to_answer(q, p):
+    """A question and its option probabilities -> the answer reported to the caller."""
+    r = lambda x: round(float(x), 4)   # noqa: E731
+    if q.qtype == "noul":
+        return {"type": "noul", "noul": r(p[1])}
+    if q.qtype == "choice":
+        return {"type": "choice", "choice": q.keys[max(range(len(p)), key=p.__getitem__)],
+                "confidence": r(_confidence("choice", p)), "probabilities": {k: r(v) for k, v in zip(q.keys, p)}}
+    return {"type": "score", "score": r(sum(i * x for i, x in enumerate(p))), "legend": q.options,
+            "confidence": r(_confidence("score", p)), "probabilities": {str(i): r(v) for i, v in enumerate(p)}}

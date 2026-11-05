@@ -24,7 +24,8 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .decision import Decider, DecisionError
+from .decision import Decider
+from .decide_request import RequestError as DecisionError, parse as parse_decision
 from .decode import DecodeStats, SamplingParams
 from .engine import Engine, IncrementalDetokenizer
 from .parsing import StreamSplitter, parse_tool_calls, split_reasoning, to_openai_tool_calls
@@ -307,7 +308,9 @@ class _Worker(threading.Thread):
             ENGINE = Engine(**self.engine_kwargs)
             ENGINE.warmup()
             DECIDER = Decider.load(ENGINE, DEFAULTS.get("decision_text_temperature"),
-                                   DEFAULTS.get("decision_image_temperature"))
+                                   DEFAULTS.get("decision_image_temperature"),
+                                   context_length=DEFAULTS["context_length"],
+                                   cache_mb=DEFAULTS.get("decision_cache_mb", 1024))
         except BaseException as e:  # noqa: BLE001
             self.error = e
             self.ready.set()
@@ -316,7 +319,7 @@ class _Worker(threading.Thread):
         while True:
             job = self.jobs.get()
             if job.cancelled:
-                job.out.put(("done", DecodeStats(finish_reason="cancelled")))
+                job.out.put(("done", None if isinstance(job, _FnJob) else DecodeStats(finish_reason="cancelled")))
                 continue
             try:
                 job.run()
@@ -376,6 +379,7 @@ class Handler(BaseHTTPRequestHandler):
                 "decision": DECIDER is not None,
                 # generation guards this server runs with (record them with eval / speedrun results)
                 "loop_guard": bool(DEFAULTS.get("loop_guard")), "tool_call_gate": DEFAULTS.get("tool_call_gate", 0.0),
+                "decision_cache": {"max_bytes": DECIDER.cache_bytes} if DECIDER else None,
                 "decision_temperatures": ({k: DECIDER.temps[k] for k in ("text", "image")} if DECIDER else None)}
 
     def do_GET(self):
@@ -561,19 +565,21 @@ class Handler(BaseHTTPRequestHandler):
         self._sse("[DONE]")
 
     def _decide(self, body: dict):
-        """POST /v1/decide: {"state", "questions", "image"? (data URL / http(s) URL / path),
-        "max_image_pixels"?, "reasoning": "auto" | "always" | "never" (default "auto"),
-        "threshold"? (0.7), "max_reasoning_tokens"? (8192), "temperature"? (decision temperature),
-        "trida_mode"? (reasoning decode mode), "stream"? (SSE events "direct", "reasoning", "result")}."""
+        """The SGLang envelope plus optional auto reasoning and SSE progress."""
         if DECIDER is None:
-            raise BadRequest("this checkpoint has no decision head (jev_head.pt next to the weights); "
-                             "download it from the model's Hugging Face repo into the model folder")
-        request = {k: body[k] for k in ("state", "questions", "max_image_pixels") if k in body}
-        image = body.get("image")
-        kw = dict(reasoning=body.get("reasoning", "auto"), threshold=float(body.get("threshold", 0.7)),
-                  max_reasoning_tokens=int(body.get("max_reasoning_tokens", 8192)),
-                  temperature=body.get("temperature"), mode=body.get("trida_mode"))
-        job = _FnJob(lambda emit: DECIDER.decide_or_reason(request, image, on_event=emit, **kw))
+            raise BadRequest("this checkpoint has no decision head (jev_head.pt or jev_head.safetensors)")
+        if not isinstance(body, dict) or "request" not in body:
+            raise BadRequest('body must be {"request": {...}, "reasoning"?: bool | "auto"}')
+        if not isinstance(body.get("stream", False), bool):
+            raise BadRequest("stream must be a boolean")
+        try:
+            parse_decision(body["request"], allow_paths=False)
+        except DecisionError as error:
+            raise BadRequest(str(error)) from error
+        kw = dict(reasoning=body.get("reasoning", False), threshold=body.get("threshold", 0.7),
+                  max_reasoning_tokens=body.get("max_reasoning_tokens"),
+                  temperature=body.get("temperature"), mode=body.get("trida_mode"), allow_paths=False)
+        job = _FnJob(lambda emit: DECIDER.decide(body["request"], on_event=emit, **kw))
         WORKER.submit(job)
         if not body.get("stream"):
             while True:
@@ -662,6 +668,8 @@ def main(argv=None):
                     help="conversations whose prompt cache is kept (main loop + side requests)")
     ap.add_argument("--no-think", action="store_true", help="default enable_thinking=false")
     ap.add_argument("--no-fused-gdn", action="store_true")
+    ap.add_argument("--decision-cache-mb", type=float, default=1024,
+                    help="decision state cache budget in MiB; 0 disables cross-request reuse")
     ap.add_argument("--decision-text-temperature", type=float, default=None,
                     help="divide the pointer head's logits by this for text decisions (default: the checkpoint's "
                          "temperature.json, else 1.52 from the Zoro-1 card)")
@@ -673,6 +681,7 @@ def main(argv=None):
     DEFAULTS.update(temperature=a.temperature, top_k=a.top_k, top_p=a.top_p, max_tokens=a.max_tokens,
                     enable_thinking=not a.no_think, context_length=a.context_length,
                     served_name=a.served_model_name, log_requests=a.log_requests,
+                    decision_cache_mb=a.decision_cache_mb,
                     decision_text_temperature=a.decision_text_temperature,
                     decision_image_temperature=a.decision_image_temperature,
                     tool_call_gate=a.tool_call_gate, loop_guard=a.loop_guard)

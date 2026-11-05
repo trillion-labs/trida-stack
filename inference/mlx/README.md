@@ -10,7 +10,7 @@ stream, no CUDA:
 | decoder | `trida_mlx/model.py`, `trida_mlx/decode.py` | `causal` (AR baseline) and **`self-spec`** (diffusion draft + exact AR verify, lossless) |
 | server | `trida_mlx/server.py` | OpenAI-compatible `/v1/chat/completions` (+ `/v1/completions`), SSE streaming, **tool calls**, reasoning split, prompt cache |
 | agent | `trida_mlx/agent.py` | a tiny tool-using agent loop against the server (files, search, calculator; opt-in shell/write) |
-| decisions | `trida_mlx/decision.py`, `trida_mlx/jev.py` | `/v1/decide`: typed decisions (choice / yes-no / score) through Zoro-1's pointer head, escalating to self-spec reasoning when unsure |
+| decisions | `trida_mlx/decision.py`, `trida_mlx/decide_request.py` | `/v1/decide`: typed decisions (choice / yes-no / score) through Zoro-1's pointer head, escalating to self-spec reasoning when unsure |
 | vision | `trida_mlx/vision.py` | Qwen3.5 vision encoder + projector, image preprocessing, multimodal RoPE (checkpoints with a `vision_config`) |
 | data | `trida_mlx/datamine.py` | `trida-mlx-datamine`: the app's chats + request logs → candidate training data (preference pairs, feedback, tool use, decisions, failures, trajectories), scrubbed |
 | tools | `convert.py`, `verify.py`, `bench.py`, `profile.py` | quantize to MLX, first-contact correctness check, causal-vs-self-spec benchmark, step profile |
@@ -95,36 +95,50 @@ model and keeps the vision tower in bf16. Images go through the server as OpenAI
 
 ## Decisions (Zoro-1 pointer head)
 
-[`trillionlabs/Zoro-1`](https://huggingface.co/trillionlabs/Zoro-1) ships `jev_head.pt`, a small pointer
-head that answers typed questions about a state without generating text. The server loads it when the
-file sits next to the weights (`convert.py` carries it; for a folder converted earlier,
-`hf download trillionlabs/Zoro-1 jev_head.pt --local-dir ~/models/Zoro-1-mlx-q8`) and then serves
-generation and decisions from the same model:
+A checkpoint with `jev_head.pt` or `jev_head.safetensors` also serves `POST /v1/decide`.
+It uses the same request envelope, row encoder, and answer fields as
+[`serve_decide.py`](../serve_decide.py). The canonical `../decide_request.py` is packaged
+unchanged and pinned by a test. Both head formats load without PyTorch. Conversion
+writes an unquantized float32 `jev_head.safetensors` and preserves `temperature.json`.
 
 ```bash
-curl -s localhost:8000/v1/decide -d '{
-  "state": {"ticket": "the printer on floor 3 is jammed again"},
-  "questions": {"team": {"type": "choice", "instructions": "Which team handles it?",
-                         "criteria": {"it": "IT support", "facilities": "Facilities"}}}}'
+curl -s localhost:8000/v1/decide -H 'Content-Type: application/json' -d '{
+  "request": {
+    "state": {"ticket": "the printer on floor 3 is jammed again"},
+    "questions": {"team": {"type": "choice", "instructions": "Which team handles it?",
+                           "criteria": {"it": "IT support", "facilities": "Facilities"}}}
+  },
+  "reasoning": false
+}'
 ```
 
-- Request and prompt layout are `inference/jev.py`'s (vendored unchanged as `trida_mlx/jev.py`; a test
-  pins it): one causal row per question, `state` first, the pointer head scores each option's `</opt>`
-  hidden state against the `<decide>` one. The state is prefilled once and every question branches
-  from a snapshot of it, so N questions cost one state prefill plus N short branches.
-- `image` (data URL, URL or path) puts the picture in the state; `max_image_pixels` defaults to the
-  head's training size (448×448).
-- Temperatures: text 1.52 (the Zoro-1 card), image 1.0 (not calibrated yet); override with
-  `--decision-text-temperature` / `--decision-image-temperature` or a per-request `temperature`.
-- **Escalation** (`"reasoning": "auto"`, the default): if any question's top probability is below
-  `threshold` (0.7), the model reasons once with thinking on, in the request's `trida_mode`
-  (self-spec by default), up to `max_reasoning_tokens` (8192), stopping at `</think>`; the reasoning is
-  added to the state and it decides again. Reasoning cut off by the budget is never used: the
-  direct answer stands and `cut` says why. `"always"` / `"never"` force either path.
-- Response: `answers` (the ones to use), `direct`, `escalated`, `reason`, and when it reasoned
-  `reasoning` plus `reasoned`. `"stream": true` sends SSE events `direct`, `reasoning` (text pieces)
-  and `result`.
-- The model card (`/v1/models`) reports `decision: true|false`; without a head, `/v1/decide` returns 400.
+- Questions support `noul` (yes/no), `choice`, and `score`, with the same probabilities,
+  confidence, and score fields as SGLang. The shared encoder retains its 7552-token
+  state / 8192-token row budgets and state truncation.
+- The state is prefilled once; each question branches from a snapshot. Across requests,
+  the longest complete cached state that prefixes the new state is reused.
+  `--decision-cache-mb` bounds retained state memory (1024 MiB by default; 0 disables reuse).
+  This cache is independent of the chat cache and uses image-content keys.
+- Images go inside `request` as data URLs or bare base64. HTTP requests cannot read local
+  paths or fetch remote URLs. `min_image_pixels` / `max_image_pixels` control resolution
+  (448×448 maximum by default); direct Python calls may also use PIL images or local paths.
+- Temperatures come from `temperature.json`, falling back to Zoro-1's fitted model-card
+  text temperature (1.52) and 1.0 for images. Server flags `--decision-text-temperature` /
+  `--decision-image-temperature` and a per-request `temperature` override them. For CUDA
+  parity comparisons, explicitly select the same temperature on both servers.
+- `reasoning` defaults to `false`; `true` generates self-spec reasoning before deciding, with
+  `max_reasoning_tokens` defaulting to 768. `"auto"` first decides directly, then reasons if
+  any question's top probability is below `threshold` (default 0.7). Auto reasoning uses
+  self-spec and up to 8192 tokens by default. `trida_mode` can select `causal` or `self-spec`.
+  Completed reasoning is fitted to the state budget, keeping its conclusion. Incomplete
+  or looping reasoning keeps the direct answer and reports `cut`.
+- `stream: true` sends SSE data objects with `type: direct`, `type: reasoning` (text pieces),
+  and `type: result`, followed by `[DONE]`. The `direct` event includes `reason` when
+  reasoning will run, for progress displays. Auto results include `direct`, `escalated`, and,
+  when applicable, `reasoning` and `reasoned`. Boolean requests retain the shared answer fields.
+- `/v1/models` reports decision support, temperatures, and the cache budget. Without a head,
+  decision requests return 400. All model work runs on the MLX worker thread; direct Python
+  callers must hold `engine.lock` on the engine's owning thread.
 
 ## How self-spec maps onto MLX
 
@@ -205,10 +219,37 @@ top-k/top-p matches the reference sampler; sampled self-spec reproduces the AR s
 distribution; snapshot/restore = fresh prefill; server non-stream / SSE / completions round trip;
 with an image: greedy self-spec = greedy AR, chunked prefill = one-shot, MRoPE positions, no prompt-cache
 reuse across different images, convert keeps the vision tower bit-identical, server `image_url` round trip.
-Decisions: the vendored jev.py equals inference/jev.py; branching from the shared state snapshot gives the
+Decisions: the packaged decide_request.py equals inference/decide_request.py; branching from the shared state snapshot gives the
 same option logits as each question's full row (text and image states); escalation only when unsure,
 never on cut-off reasoning; server `/v1/decide` plain and streamed.
 On a Mac the same tests run on the GPU and therefore also cover the Metal kernel path.
+
+`uv run --with torch pytest tests/test_decision.py tests/test_decision_extensions.py`
+also runs the PyTorch pointer-head parity check. Conversion and q8 drift checks use tiny
+random weights; they do not establish trained-checkpoint accuracy.
+
+For a trained checkpoint, run the full local HTTP workflow (text, image, reasoning,
+chat, conversion, q8 comparison):
+
+```bash
+uv run python tests/run_decision_checkpoint.py \
+  --model /path/to/decision-checkpoint --output /tmp/zoro-decision-e2e
+```
+
+Add `--reference http://cuda-host:30001` for a SGLang comparison. The runner saves
+responses and logs under `--output`; `report.json` records whether CUDA parity ran.
+Its default absolute answer tolerance is 0.01. To compare two running servers with
+your own direct requests, use:
+
+```bash
+uv run python tests/compare_decisions.py \
+  --reference http://cuda-host:30001 --candidate http://localhost:8000 \
+  --requests decisions.jsonl --atol 0.005
+```
+
+The JSONL contains shared request envelopes with reasoning disabled. The client
+compares answer keys, types, and numeric fields, and exits nonzero on mismatches.
+
 
 ## Notes and limits
 

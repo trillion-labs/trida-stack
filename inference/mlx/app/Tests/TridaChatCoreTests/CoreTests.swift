@@ -227,7 +227,7 @@ final class DecisionRequestTests: XCTestCase {
         XCTAssertEqual(qs[0].options.map(\.0), ["it", "facilities"])
         let text = String(decoding: Decision.body(state: .string("s"), questions: qs, settings: DecisionSettings(),
                                                   stream: true).data, as: UTF8.self)
-        XCTAssertTrue(text.hasPrefix(#"{"state":"s","questions":{"team":{"type":"choice","instructions":"Which team?","criteria":{"it":"IT support","facilities":""}},"urgent":{"type":"noul","instructions":"Urgent?"},"sev":{"type":"score","instructions":"How severe?","criteria":["low","medium","high"]}}"#), text)
+        XCTAssertTrue(text.hasPrefix(#"{"request":{"state":"s","questions":{"team":{"type":"choice","instructions":"Which team?","criteria":{"it":"IT support","facilities":""}},"urgent":{"type":"noul","instructions":"Urgent?"},"sev":{"type":"score","instructions":"How severe?","criteria":["low","medium","high"]}}"#), text)
         XCTAssertTrue(text.hasSuffix(#""trida_mode":"self-spec","stream":true}"#), text)
         let r: [String: Any] = [
             "answers": ["team": ["type": "choice", "choice": "facilities", "probabilities": ["it": 0.2, "facilities": 0.8]],
