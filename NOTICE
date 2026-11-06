@@ -27,11 +27,12 @@ Kev — typed-decision (Jev / TypeSafe System One) encoding and training
            (kev/model.py); scripts/export_kev_checkpoint.py writes kev's checkpoint
            format (kev/checkpoint.py); inference/decide_request.py and
            inference/decide_engine.py (the decision server) follow the same encoding
-           and pointer head. On the training side, train/jev.py vendors the
-           same mapping and encoding plus training-time augmentation (kev/data.py) and
-           the pointer head and loss (kev/train.py), adapted to this trainer's packed
-           rows, and train/tools/export_kev_checkpoint.py writes the same checkpoint
-           format. Modified to fit this stack.
+           and pointer head. On the training side, train/data/jev.py vendors the
+           same mapping and encoding (kev/api.py, kev/model.py) plus training-time
+           augmentation (kev/data.py), and train/models/jev.py vendors the pointer
+           head (kev/model.py) and loss (kev/train.py), both adapted to this
+           trainer's packed rows, and train/tools/export_kev_checkpoint.py writes
+           the same checkpoint format. Modified to fit this stack.
 
 Two-stream Gated-DeltaNet / ShortConv Triton kernels
   From HybridDiffusion (yuchen-zhu-zyc/HybridDiffusion @ 6ca547a), itself a fork of
