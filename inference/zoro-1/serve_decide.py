@@ -168,8 +168,12 @@ def create_app(engine):
         if "request" not in body:
             raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float}")
         try:
-            # the image, if any, is in the request (base64 or a data URL): requests never name server files
-            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")))
+            budget = _num(body, "max_reasoning_tokens", 768, int)
+            if budget <= 0:
+                raise HTTPException(400, "max_reasoning_tokens must be positive")
+            # Images use the shared request contract; server file paths are not accepted.
+            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
+                                        max_reasoning_tokens=budget)
         except RequestError as e:
             raise HTTPException(400, str(e)) from e
 

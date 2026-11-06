@@ -1,0 +1,18 @@
+{
+  "invoice_processing": {
+    "repo": "typesafe/evalsafe-invoice-processing",
+    "revision": "6beeb2d2acd65c086c835022f5f4d7434114cafc"
+  },
+  "customer_service": {
+    "repo": "typesafe/evalsafe-customer-service",
+    "revision": "b1342f5a704587dbc465867c38c2694348ff86e4"
+  },
+  "security_incidents": {
+    "repo": "typesafe/evalsafe-security-incidents",
+    "revision": "fbe1ea5c69cf494157fd23f2002a0d9d9a418443"
+  },
+  "agent_trace_observability": {
+    "repo": "typesafe/evalsafe-agent-trace-observability",
+    "revision": "8635540973910a92465fe2bc53e195375aa6e1a8"
+  }
+}

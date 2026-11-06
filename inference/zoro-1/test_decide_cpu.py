@@ -197,7 +197,8 @@ def test_decide_endpoint_parses_without_paths():
     class Engine:
         ckpt = "/ckpt/m"
 
-        async def adecide(self, request, image=None, temperature=None, reasoning=False):
+        async def adecide(self, request, image=None, temperature=None, reasoning=False,
+                          max_reasoning_tokens=768):
             parse(request, image)
             return {"answers": {}}
 
@@ -334,3 +335,24 @@ def test_mlx_copy_of_the_request_contract_is_identical():
     here = Path(__file__).resolve().parent
     assert (here / "mlx/trida_mlx/decide_request.py").read_bytes() == (here / "decide_request.py").read_bytes(), \
         "copy inference/zoro-1/decide_request.py to inference/zoro-1/mlx/trida_mlx/decide_request.py"
+
+def test_decide_forwards_reasoning_budget():
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+
+    class Engine:
+        ckpt = "zoro-1"
+
+        async def adecide(self, request, image, temperature, reasoning, **kwargs):
+            self.received = (request, reasoning, kwargs)
+            return {"answers": {}}
+
+    engine = Engine()
+    client = TestClient(create_app(engine))
+    response = client.post("/v1/decide", json={"request": REQ, "reasoning": True,
+                                             "max_reasoning_tokens": 2048})
+    assert response.status_code == 200
+    assert engine.received == (REQ, True, {"max_reasoning_tokens": 2048})
+    for budget in [0, -1, 1.5, True]:
+        assert client.post("/v1/decide", json={"request": REQ,
+                           "max_reasoning_tokens": budget}).status_code == 400
