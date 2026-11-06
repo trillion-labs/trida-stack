@@ -38,6 +38,9 @@ enum ToolRouter {
                       "pick_file", "locate_files"]),
         Group(key: "screen", description: "look at what is on the user's screen now (screenshot)", tools: ["screenshot"]),
         Group(key: "time", description: "the current date or time", tools: ["now"]),
+        Group(key: "web", description: "facts from the internet: current events, who holds an office or a job now, "
+              + "news, prices, the latest version of something, or a web page / URL",
+              tools: ["fetch_url", "find_in_page", "read_section", "open_link"]),
         Group(key: "math", description: "an exact arithmetic calculation", tools: ["calculator"]),
         Group(key: "shell", description: "run a shell command on the Mac", tools: ["run_shell"]),
         Group(key: "decide", description: "a calibrated pick among options or a yes/no judgement the user asked for",

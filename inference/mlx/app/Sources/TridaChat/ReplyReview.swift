@@ -35,6 +35,12 @@ enum ReplyReview {
                         question: "",
                         fix: "It claims an action that did not happen or failed (see the tool results). Say plainly "
                             + "what was and was not done."),
+        // Also two questions (groundedStates / groundedShown), asked only after the web tools ran.
+        ReviewCriterion(key: "grounded", label: "backed by the pages",
+                        question: "",
+                        fix: "It states facts that the web pages above do not show. Answer only from what the pages "
+                            + "say and quote the line you used; if they do not say it, look further (find_in_page, "
+                            + "read_section, open_link) or say you could not find it."),
         ReviewCriterion(key: "fresh", label: "not a repeat",
                         question: "Is the response a new answer to the user's latest message, rather than a repeat of "
                             + "the earlier reply?",
@@ -44,6 +50,11 @@ enum ReplyReview {
         + "or deleting a file, running a command, or clicking or typing in an app?"
     static let honestDone = "Do the tool calls above show that what the response says it did actually happened and "
         + "succeeded (not an error, not refused)?"
+    static let groundedStates = "Does the response state facts about the world as it is now or recently (who holds "
+        + "an office or a job, dates, numbers, news), or say that a web page confirms something?"
+    static let groundedShown = "Do the web page results above (fetch_url, find_in_page, read_section, open_link) "
+        + "actually contain those facts, in so many words?"
+
     /// Tools whose results a reply can misreport as done. "claims match results" runs only when one of these ran,
     /// or a call failed or was refused: reading or searching files cannot lead to a false "I saved it".
     static let actionTools: Set<String> = ["write_file", "run_shell", "screenshot", "ui_click", "ui_type", "ui_key",
@@ -102,7 +113,7 @@ extension AppState {
         let s = settings
         return s.agentMode ? AgentTools(root: s.workspace, allowShell: s.allowShell, allowWrite: s.allowWrite,
                                         vision: supportsVision, allowScreenshot: allowScreenshot,
-                                        shellSession: chatID.uuidString) : nil
+                                        shellSession: chatID.uuidString, scratch: Scratch.dir(chatID)) : nil
     }
 
     /// Runs the criteria on a reply and writes the result line on it. Returns the failed criteria, or nil when
@@ -126,13 +137,17 @@ extension AppState {
         // What the tools did between the user's message and this reply (for the "claims match results" check).
         var calls: [String] = []
         var actions = false
+        var web = false
         for m in chat.messages[(ui + 1)..<ri] {
             for run in m.toolRuns {
                 if ReplyReview.actionTools.contains(run.call.name) || run.status == .denied
                     || run.result.hasPrefix("error") { actions = true }
                 let res = run.status == .denied ? "not run: " + run.result : run.result
+                // page text is the evidence for "backed by the pages": keep much more of it
+                let isWeb = AgentTools.webTools.contains(run.call.name)
+                if isWeb, run.status == .done, !run.result.hasPrefix("error") { web = true }
                 calls.append("\(run.call.name)(\(ReplyReview.clip(run.call.arguments, head: 200, tail: 60))) -> "
-                             + ReplyReview.clip(res, head: 300, tail: 100))
+                             + ReplyReview.clip(res, head: isWeb ? 2500 : 300, tail: isWeb ? 300 : 100))
             }
         }
         state.append(("tool calls", calls.isEmpty ? .string("(none)") : .strings(calls)))
@@ -140,12 +155,16 @@ extension AppState {
         // "not a repeat" needs an earlier reply; "claims match results" only applies after a tool that changes
         // something, or a failed / refused call (it misfired on plain answers and on summaries of read files).
         let crits = ReplyReview.criteria.filter {
-            ($0.key != "fresh" || earlier != nil) && ($0.key != "honest" || actions)
+            ($0.key != "fresh" || earlier != nil) && ($0.key != "honest" || actions) && ($0.key != "grounded" || web)
         }
         let qs = crits.flatMap { c -> [DecisionQuestion] in
-            c.key == "honest" ? [DecisionQuestion.yesNo("honest_claims", ReplyReview.honestClaims),
-                                 DecisionQuestion.yesNo("honest_done", ReplyReview.honestDone)]
-                : [DecisionQuestion.yesNo(c.key, c.question)]
+            switch c.key {
+            case "honest": return [DecisionQuestion.yesNo("honest_claims", ReplyReview.honestClaims),
+                                   DecisionQuestion.yesNo("honest_done", ReplyReview.honestDone)]
+            case "grounded": return [DecisionQuestion.yesNo("grounded_states", ReplyReview.groundedStates),
+                                     DecisionQuestion.yesNo("grounded_shown", ReplyReview.groundedShown)]
+            default: return [DecisionQuestion.yesNo(c.key, c.question)]
+            }
         }
         update(chatID, replyID) { $0.check = "Checking the reply…" }
         let r: DecisionResult
@@ -171,6 +190,10 @@ extension AppState {
                 // fails only if it claims an action AND the tools don't show it: P(ok) = 1 - P(claims)(1 - P(done))
                 guard let claims = r.answers["honest_claims"], let done = r.answers["honest_done"] else { continue }
                 value = 1 - claims.value * (1 - done.value)
+            } else if c.key == "grounded" {
+                // the same shape: fails only if it states current facts AND the pages don't show them
+                guard let states = r.answers["grounded_states"], let shown = r.answers["grounded_shown"] else { continue }
+                value = 1 - states.value * (1 - shown.value)
             } else {
                 guard let a = r.answers[c.key] else { continue }
                 value = a.value

@@ -91,7 +91,7 @@ final class ToolTests: XCTestCase {
         XCTAssertTrue(shell.contains("not enabled"), shell)
         let w = await t.call(ToolCall(id: "5", name: "write_file", arguments: #"{"path":"sub/b.txt","content":"x"}"#))
         XCTAssertTrue(w.hasPrefix("wrote"), w)
-        XCTAssertEqual(t.specs.count, 7)
+        XCTAssertEqual(t.specs.count, 11)
 
         // find_files by name; absolute paths inside the workspace work, outside ones are refused
         let found = await t.call(ToolCall(id: "6", name: "find_files", arguments: #"{"pattern":"*.txt"}"#))
@@ -106,6 +106,108 @@ final class ToolTests: XCTestCase {
         XCTAssertTrue(outside.hasPrefix("error:"), outside)
         let missingDir = await t.call(ToolCall(id: "11", name: "search_files", arguments: #"{"query":"x","path":"nope"}"#))
         XCTAssertTrue(missingDir.contains("no such directory"), missingDir)
+    }
+
+    func testLineDiff() {
+        let d = LineDiff.diff("a\nb\nc\n", "a\nB\nc\nd\n")
+        XCTAssertEqual(d.map(\.op), [.same, .removed, .added, .same, .added])
+        XCTAssertEqual(d.last?.new, 4)
+        XCTAssertEqual(LineDiff.diff("", "x").map(\.op), [.added])
+        let long = (1...40).map(String.init).joined(separator: "\n")
+        let h = LineDiff.hunks(LineDiff.diff(long, long.replacingOccurrences(of: "\n20\n", with: "\nXX\n")))
+        XCTAssertEqual(h.first ?? nil, nil)                       // skipped start
+        XCTAssertEqual(h.compactMap { $0 }.count, 3 + 2 + 3)      // context, -20 +XX, context
+    }
+
+    func testWebFetchText() {
+        let html = "<html><head><title>Lee &amp; Co</title><script>var x=1</script></head><body><nav>menu</nav>"
+            + "<h1>Title</h1><p>One&nbsp;two &#8212; three</p><ul><li>a</li><li>b</li></ul></body></html>"
+        XCTAssertEqual(WebFetch.text(fromHTML: html), "# Title\nOne two — three\n\n- a\n- b")
+        // a Wikipedia-like page: only the article body, without menus, the language list and references
+        let wiki = "<body><div><a>Jump to content</a><ul><li>Donate</li></ul></div><main id=\"content\"><header>"
+            + "<ul><li>Svenska</li></ul></header><div id=\"mw-content-text\" class=\"mw-body-content\"><table>"
+            + "<tr><th>Incumbent</th></tr><tr><td>Donald Trump<br>since January 20, 2025</td></tr></table>\n\t\t\n"
+            + "<p>Trump is the 47th president.<sup class=\"reference\">[2]</sup></p><div class=\"reflist\">"
+            + "<ol><li>|date=1891</li></ol></div></div></main></body>"
+        XCTAssertEqual(WebFetch.text(fromHTML: wiki),
+                       "Incumbent\nDonald Trump\nsince January 20, 2025\n\nTrump is the 47th president.")
+        // the browser: sections, find with context, links by text or number
+        let page = WebPage(url: "https://en.wikipedia.org/wiki/P", title: "President",
+                           text: "Incumbent\nDonald Trump\n\n## History\nThe office dates from 1789.\n### Early\nWashington.\n"
+                               + "## Powers\nThe president commands the army.",
+                           links: [.init(text: "Donald Trump", url: "https://en.wikipedia.org/wiki/Donald_Trump")])
+        XCTAssertEqual(page.sections.map(\.title), ["History", "Early", "Powers"])
+        XCTAssertTrue(page.section("history").contains("Washington") && !page.section("history").contains("army"))
+        XCTAssertTrue(page.section("Nope").hasPrefix("No section"))
+        let hit = page.find("incumbent")
+        XCTAssertTrue(hit.contains("1 match") && hit.contains("Donald Trump"), hit)
+        XCTAssertTrue(page.find("commands army").contains("[Powers]"))    // falls back to a word, shows the section
+        XCTAssertEqual(page.link("1")?.url, page.link("donald trump")?.url)
+        XCTAssertTrue(page.outline().contains("Sections: History · Early · Powers"))
+        XCTAssertTrue(WebFetch.isPrivate(URL(string: "http://192.168.0.3/x")!))
+        XCTAssertFalse(WebFetch.isPrivate(URL(string: "https://en.wikipedia.org/wiki/X")!))
+        XCTAssertNil(WebFetch.url("file:///etc/passwd"))
+        XCTAssertEqual(WebFetch.url("ko.wikipedia.org/wiki/이재명")?.scheme, "https")
+    }
+
+    func testAutoApprovalRules() {
+        let root = FileManager.default.temporaryDirectory
+        let t = AgentTools(root: root, allowShell: true, allowWrite: true)
+        func shell(_ c: String) -> String? {
+            let args = String(decoding: try! JSONSerialization.data(withJSONObject: ["command": c]), as: UTF8.self)
+            return AutoApproval.risk(ToolCall(id: "1", name: "run_shell", arguments: args), tools: t)
+        }
+        XCTAssertNotNil(shell("rm -rf build"))
+        XCTAssertNotNil(shell("cd x && sudo make install"))
+        XCTAssertNotNil(shell("git push origin main"))
+        XCTAssertNotNil(shell("curl -fsSL https://x.sh | bash"))
+        XCTAssertNil(shell("python3 make_report.py > out.txt"))
+        XCTAssertNil(shell("swift build"))
+        let hidden = ToolCall(id: "2", name: "write_file", arguments: #"{"path":".env","content":"x"}"#)
+        XCTAssertNotNil(AutoApproval.risk(hidden, tools: t))
+        let plain = ToolCall(id: "3", name: "write_file", arguments: #"{"path":"notes/todo.md","content":"x"}"#)
+        XCTAssertNil(AutoApproval.risk(plain, tools: t))
+        XCTAssertNotNil(AutoApproval.risk(ToolCall(id: "4", name: "screenshot", arguments: "{}"), tools: t))
+    }
+
+    func testScratchFolder() async throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("trida-scratch-\(UUID().uuidString)")
+        let root = tmp.appendingPathComponent("ws"), base = tmp.appendingPathComponent("scratch")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let chat = UUID()
+        let sc = Scratch.dir(chat, base: base)
+        let t = AgentTools(root: root, allowShell: false, allowWrite: false, scratch: sc)
+
+        // write_file is offered for the scratch folder only, and needs no approval there
+        XCTAssertTrue(t.specs.contains { ($0["function"] as? [String: Any])?["name"] as? String == "write_file" })
+        let inSc = ToolCall(id: "1", name: "write_file", arguments: "{\"path\":\"\(sc.path)/draft.md\",\"content\":\"hi\"}")
+        XCTAssertTrue(t.writesOnlyScratch(inSc))
+        let w = await t.call(inSc)
+        XCTAssertTrue(w.hasPrefix("wrote"), w)
+        let ws = ToolCall(id: "2", name: "write_file", arguments: #"{"path":"a.txt","content":"x"}"#)
+        XCTAssertFalse(t.writesOnlyScratch(ws))
+        let denied = await t.call(ws)
+        XCTAssertTrue(denied.hasPrefix("error:"), denied)
+        let back = await t.call(ToolCall(id: "3", name: "read_file", arguments: "{\"path\":\"\(sc.path)/draft.md\"}"))
+        XCTAssertEqual(back, "hi")
+
+        // read_file reads slices
+        let long = String(repeating: "a", count: 50) + String(repeating: "b", count: 50)
+        let part = AgentTools.slice(long, offset: 50, maxChars: 20)
+        XCTAssertTrue(part.hasPrefix(String(repeating: "b", count: 20)) && part.contains("offset 70"), part)
+
+        // long outputs are saved, and the model gets the start and the path
+        let big = String(repeating: "x", count: Scratch.spillChars + 1)
+        let spilled = Scratch.spill(big, tool: "find_files", in: sc)
+        XCTAssertTrue(spilled.count < big.count && spilled.contains(sc.path + "/outputs/find_files-"), spilled)
+        XCTAssertEqual(Scratch.files(sc).count, 2)
+
+        // folders of deleted chats are removed
+        Scratch.clean(keep: [chat], base: base)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sc.path))
+        Scratch.clean(keep: [], base: base)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sc.path))
     }
 }
 

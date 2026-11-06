@@ -66,6 +66,12 @@ struct TridaChatApp: App {
             CommandGroup(after: .sidebar) {
                 Button("Show or Hide Mascot") { delegate.state.showMascot.toggle() }
                     .keyboardShortcut("m", modifiers: [.command, .shift])
+                Button("Show or Hide Code Viewer") { delegate.state.showViewer.toggle() }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                Button("Switch Auto / Manual Approvals") {
+                    delegate.state.autoMode.toggle()
+                }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
             }
             CommandGroup(after: .newItem) {
                 OpenDecideButton()

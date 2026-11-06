@@ -6,6 +6,8 @@ struct MessageView: View {
     @EnvironmentObject var state: AppState
     let message: ChatMessage
     let isLast: Bool
+    /// The mascot stands beside this reply, in place of its avatar (see MascotPanel).
+    var hostsMascot = false
 
     var body: some View {
         switch (message.role, message.decide) {
@@ -85,8 +87,16 @@ struct MessageView: View {
             }
         } else {
             HStack(alignment: .top, spacing: 12) {
-                Avatar()
+                if hostsMascot { Color.clear.frame(width: 26, height: 26) } else { Avatar() }
                 assistantBody
+            }
+            // bottom-aligned, so it stays next to the newest text while the reply streams in
+            .overlay(alignment: .bottomLeading) {
+                if hostsMascot {
+                    MascotPanel(placement: .message)
+                        .offset(x: 26 - ChatLayout.besideWidth)
+                        .transition(.opacity)
+                }
             }
         }
     }
@@ -232,6 +242,20 @@ struct ToolRunView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                if run.call.name == "write_file", run.status == .done, !run.result.hasPrefix("error") {
+                    Spacer(minLength: 8)
+                    Button {
+                        state.viewerTarget = ViewerTarget(messageID: messageID, runID: run.id)
+                        state.showViewer = true
+                    } label: {
+                        Label("View", systemImage: "sidebar.right").font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Show this write in the code viewer")
+                }
+                if let note = run.approval {
+                    Text(note).font(.caption2).foregroundStyle(Theme.muted).lineLimit(1)
+                }
                 if run.undo != nil {
                     Spacer(minLength: 8)
                     if run.undone == true {
@@ -261,6 +285,9 @@ struct ToolRunView: View {
         if let c = a["command"] as? String { return c }
         if let p = a["path"] as? String { return p }
         if let q = a["query"] as? String { return q }
+        if let u = a["url"] as? String { return u }
+        if let h = a["heading"] as? String { return h }
+        if let l = a["link"] as? String { return l }
         if let e = a["expression"] as? String { return e }
         return run.call.arguments == "{}" ? "" : run.call.arguments
     }

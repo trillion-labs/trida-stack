@@ -36,7 +36,7 @@ enum MascotState: Equatable {
 
 /// What the mascot holds while a tool runs.
 enum MascotProp {
-    case magnifier, page, folder, terminal, pen, camera, wrench
+    case magnifier, page, folder, terminal, pen, camera, globe, wrench
 
     static func of(_ tool: String) -> MascotProp {
         switch tool {
@@ -46,6 +46,7 @@ enum MascotProp {
         case "run_shell": return .terminal
         case "write_file": return .pen
         case "screenshot": return .camera
+        case "fetch_url", "find_in_page", "read_section", "open_link": return .globe
         default: return .wrench
         }
     }
@@ -58,6 +59,7 @@ enum MascotProp {
         case .terminal: return "Running a command"
         case .pen: return "Writing a file"
         case .camera: return "Taking a screenshot"
+        case .globe: return "Reading a web page"
         case .wrench: return "Using a tool"
         }
     }
@@ -131,7 +133,8 @@ extension AppState {
             guard let run = last?.toolRuns.last(where: { $0.status == .running || $0.status == .waitingForApproval })
             else { return nil }
             let a = run.call.argumentDict
-            let arg = (a["query"] ?? a["path"] ?? a["command"] ?? a["pattern"]) as? String ?? ""
+            let arg = (a["query"] ?? a["path"] ?? a["command"] ?? a["pattern"] ?? a["url"] ?? a["heading"] ?? a["link"])
+                as? String ?? ""
             return arg.isEmpty ? nil : String(arg.prefix(32)) + (arg.count > 32 ? "…" : "")
         case .done:
             guard let st = last?.stats else { return nil }
@@ -519,6 +522,14 @@ struct MascotFrame: View {
                 out += px([(0, 0), (0, 1), (1, 0), (1, 1)], 7, 28, MascotFrame.face)          // the lens
                 if s % 4 == 0 { out += px([(-2, 0), (-1, -1), (-1, 1), (-3, 0)], 5, 33, MascotFrame.gold) }   // flash
                 return (-2, out)
+            case .globe:                                            // a globe in the raised hand, turning
+                let ring = [(0, 1), (0, 2), (0, 3), (1, 0), (1, 4), (2, 0), (2, 4), (3, 0), (3, 4), (4, 1), (4, 2), (4, 3)]
+                var out = px(ring, 5, 27, MascotFrame.highlight)
+                let fill = [(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 3), (3, 1), (3, 2), (3, 3)]
+                out += px(fill, 5, 27, Theme.accent.opacity(0.55))
+                let m = 1 + s / 2 % 3                               // the meridian moves across
+                out += px([(1, m), (2, m), (3, m)], 5, 27, MascotFrame.face)
+                return (-2, out)
             case .wrench:                                           // hammering, with a gear turning
                 var out = px([(0, 0), (0, 2), (1, 0), (1, 1), (1, 2), (2, 1), (3, 1), (4, 1)], a ? 6 : 9, 27,
                              MascotFrame.highlight)
@@ -630,16 +641,52 @@ struct MascotFrame: View {
     }
 }
 
-/// The mascot's corner of the sidebar: the figure (click it), what it is doing, the numbers behind it, and the
-/// trainer level (click for badges).
+/// The mascot: the figure (click it), what it is doing, the numbers behind it, and the trainer level (click for
+/// badges). It stands right beside the latest reply when the window leaves room for it (`.message`, smaller,
+/// in place of the reply's avatar), in the middle of an empty chat (`.margin`), and otherwise at the bottom of
+/// the sidebar (`.sidebar`).
 struct MascotPanel: View {
+    enum Placement { case sidebar, margin, message }
+
     @EnvironmentObject var state: AppState
+    var placement: Placement = .sidebar
+
+    /// Resting states move at half speed, so the figure does not pull the eye while you read.
+    static func calm(_ s: MascotState) -> Bool { [.idle, .watching, .sleepy, .done].contains(s) }
 
     var body: some View {
+        if placement == .message { beside } else { panel }
+    }
+
+    /// Beside a reply: the figure at 4 pt a cell and the caption under it (the numbers in the tooltip, the
+    /// badges in the context menu).
+    private var beside: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+            let look = state.mascotLook
+            VStack(spacing: 2) {
+                MascotView(look: look, fps: Self.calm(look.state) ? 3 : 6)
+                    .frame(width: 168, height: 168)        // 36 x 41 cells at 4 pt each
+                    .contentShape(Rectangle())
+                    .onTapGesture { state.petMascot() }
+                Text(look.state.caption)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(look.state == .error ? Theme.danger : Theme.muted)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }
+            .frame(width: ChatLayout.besideWidth)
+            .help([look.state.caption, state.mascotDetail, "Level \(look.level): click me"]
+                .compactMap { $0 }.joined(separator: "\n"))
+            .contextMenu { Button("Level \(look.level) and Badges…") { state.showBadges = true } }
+            .popover(isPresented: $state.showBadges, arrowEdge: .leading) { BadgesView() }
+        }
+    }
+
+    private var panel: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { _ in      // re-derive the state (reactions and "done" expire)
             let look = state.mascotLook
             VStack(spacing: 4) {
-                MascotView(look: look)
+                MascotView(look: look, fps: Self.calm(look.state) ? 3 : 6)
                     .frame(width: 168, height: 168)       // 36 x 41 cells at 4 pt each (pixels stay whole points)
                     .contentShape(Rectangle())
                     .onTapGesture { state.petMascot() }
@@ -662,8 +709,10 @@ struct MascotPanel: View {
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 12)
             .padding(.vertical, 14)
-            .background(Theme.sidebar)
-            .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
+            .background(placement == .sidebar ? Theme.sidebar : Color.clear)
+            .overlay(alignment: .top) {
+                if placement == .sidebar { Rectangle().fill(Theme.border).frame(height: 1) }
+            }
         }
     }
 }

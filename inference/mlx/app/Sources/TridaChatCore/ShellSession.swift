@@ -8,12 +8,12 @@ public final class ShellSession: @unchecked Sendable {
     private static let lock = NSLock()
     private static var sessions: [String: ShellSession] = [:]
 
-    /// The session for `id` (a chat), created in `root` the first time.
-    public static func session(_ id: String, root: URL) -> ShellSession {
+    /// The session for `id` (a chat), created in `root` the first time. `scratch` is exported as $SCRATCH.
+    public static func session(_ id: String, root: URL, scratch: URL? = nil) -> ShellSession {
         lock.lock()
         defer { lock.unlock() }
         if let s = sessions[id] { return s }
-        let s = ShellSession(root: root)
+        let s = ShellSession(root: root, scratch: scratch)
         sessions[id] = s
         return s
     }
@@ -26,8 +26,10 @@ public final class ShellSession: @unchecked Sendable {
     private let dir: URL
     private let cwdFile: URL
     private let envFile: URL
+    private let scratch: URL?
 
-    init(root: URL) {
+    init(root: URL, scratch: URL? = nil) {
+        self.scratch = scratch
         dir = FileManager.default.temporaryDirectory.appendingPathComponent("zoro-shell-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         cwdFile = dir.appendingPathComponent("cwd")
@@ -49,9 +51,11 @@ public final class ShellSession: @unchecked Sendable {
         FileManager.default.createFile(atPath: out.path, contents: nil)
         defer { try? FileManager.default.removeItem(at: out) }
         let cwd = Self.quote(self.cwd), cf = Self.quote(cwdFile.path), ef = Self.quote(envFile.path)
+        let sc = scratch.map { "mkdir -p \(Self.quote($0.path)) && export SCRATCH=\(Self.quote($0.path))" } ?? ":"
         // Restore, run, save (the trap also saves after `exit`).
         let script = """
             [ -f \(ef) ] && source \(ef) 2>/dev/null
+            \(sc)
             cd \(cwd) 2>/dev/null || cd ~
             trap 'pwd > \(cf); export -p > \(ef)' EXIT
             \(command)

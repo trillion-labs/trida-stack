@@ -78,6 +78,22 @@ final class AppState: ObservableObject {
     var lastActivity = Date()
     var isCompacting = false
     @Published var showBadges = false
+    /// The window leaves room for the mascot beside the latest reply (set by ChatView).
+    @Published var mascotInMargin = false
+    /// The scratch-files popover (toolbar) and the last thing it did ("Saved … to the workspace").
+    @Published var showScratch = false
+    /// Auto mode: action tools run without asking unless risky (see AutoApproval); manual mode asks every time.
+    @Published var autoMode = UserDefaults.standard.bool(forKey: "TridaChat.autoMode") {
+        didSet { UserDefaults.standard.set(autoMode, forKey: "TridaChat.autoMode") }
+    }
+    /// The code viewer (right-hand inspector): which write it shows, and whether as a diff or the whole file.
+    @Published var showViewer = false
+    @Published var viewerTarget: ViewerTarget?
+    @Published var viewerShowsDiff = true
+    @Published var openViewerOnWrite = UserDefaults.standard.object(forKey: "TridaChat.openViewerOnWrite") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(openViewerOnWrite, forKey: "TridaChat.openViewerOnWrite") }
+    }
+    @Published var scratchNote: String?
     var lastAcceptance: Double?
     @Published var prefill: (done: Int, total: Int)? = nil
     @Published var approval: ApprovalRequest?
@@ -208,6 +224,8 @@ final class AppState: ObservableObject {
         chats = [Chat()] + saved.chats   // a fresh chat on top; earlier ones in the sidebar
         decisionCards = saved.cards
         selectedChatID = chats.first?.id
+        let keep = Set(chats.map(\.id))
+        DispatchQueue.global(qos: .utility).async { Scratch.clean(keep: keep) }
         // One-time move to the tool-use sampling defaults (temperature 0.6, top-k 20) for
         // settings saved by earlier builds with temperature 1.0.
         // One-time move to a 64K reply budget (thinking + answer) for settings saved with the old 4,096.
@@ -519,6 +537,7 @@ final class AppState: ObservableObject {
         if decideFlow?.chatID == id { decideFlow = nil }
         chats.removeAll { $0.id == id }
         chatStore.delete(id)
+        Scratch.remove(id)
         if chats.isEmpty { chats = [Chat()] }
         if selectedChatID == id || currentChatIndex == nil { selectedChatID = chats.first?.id }
     }
@@ -617,7 +636,7 @@ final class AppState: ObservableObject {
         let tools: AgentTools? = s.agentMode
             ? AgentTools(root: s.workspace, allowShell: s.allowShell, allowWrite: s.allowWrite,
                          vision: supportsVision, allowScreenshot: allowScreenshot,
-                         shellSession: chatID.uuidString) : nil
+                         shellSession: chatID.uuidString, scratch: Scratch.dir(chatID)) : nil
         let client = self.client
         let ui = uiToolsActive
         uiSession = UISession()
@@ -755,9 +774,22 @@ final class AppState: ObservableObject {
                 }
                 let readOnlyShell = call.name == "run_shell" && autoApproveReadOnlyShell
                     && ShellSession.isReadOnly(call.argumentDict["command"] as? String ?? "")
-                if AgentTools.needsApproval.contains(call.name), !readOnlyShell {
-                    setRun(chatID, reply.id, call.id) { $0.status = .waitingForApproval }
-                    let ok = await requestApproval(call)
+                if AgentTools.needsApproval.contains(call.name), !readOnlyShell, !tools.writesOnlyScratch(call) {
+                    // auto mode: risky patterns ask; otherwise the decision model judges the action
+                    var reason: String? = nil
+                    if autoMode {
+                        setRun(chatID, reply.id, call.id) { $0.status = .running; $0.result = "Checking whether this is safe to run…" }
+                        let v = await autoVerdict(call, tools: tools, chatID: chatID, messageID: reply.id)
+                        setRun(chatID, reply.id, call.id) { $0.approval = v.note; $0.result = "" }
+                        reason = v.ask ? v.note : nil
+                    }
+                    let ok: Bool
+                    if autoMode && reason == nil {
+                        ok = true
+                    } else {
+                        setRun(chatID, reply.id, call.id) { $0.status = .waitingForApproval }
+                        ok = await requestApproval(call, reason: reason)
+                    }
                     if !ok {
                         result = "user denied"
                         setRun(chatID, reply.id, call.id) { $0.status = .denied; $0.result = result }
@@ -779,6 +811,7 @@ final class AppState: ObservableObject {
                     run.images = output.images
                     if !output.text.hasPrefix("error") { run.undo = undo }
                 }
+                if call.name == "write_file", !output.text.hasPrefix("error") { showWrite(messageID: reply.id, runID: call.id) }
                 append(chatID, toolMessage(call, result, images: output.images))
             }
         }
@@ -802,8 +835,10 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func requestApproval(_ call: ToolCall) async -> Bool {
-        await requestApproval(ApprovalRequest(toolName: call.name, detail: AgentTools.describe(call)))
+    private func requestApproval(_ call: ToolCall, reason: String? = nil) async -> Bool {
+        var req = ApprovalRequest(toolName: call.name, detail: AgentTools.describe(call))
+        if let reason { req.caption = "Auto mode is asking: \(reason)" }
+        return await requestApproval(req)
     }
 
     func requestApproval(_ req: ApprovalRequest) async -> Bool {

@@ -22,12 +22,31 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity)
         }
         .background(Theme.canvas)
+        .background(GeometryReader { g in
+            Color.clear
+                .onAppear { placeMascot(g.size.width) }
+                .onChange(of: g.size.width) { _, w in placeMascot(w) }
+        })
+    }
+
+    /// The mascot stands beside the latest reply when the centered column leaves room for it on the left (with a
+    /// little hysteresis so it does not flip back and forth while the window is resized), and in the sidebar
+    /// otherwise.
+    private func placeMascot(_ width: CGFloat) {
+        // it hangs left of the reply's 26 pt avatar column, into the list's 24 pt padding and the margin
+        let margin = (width - ChatLayout.width) / 2 + 24 - (ChatLayout.besideWidth - 26)
+        let fits = state.mascotInMargin ? margin >= 4 : margin >= 16
+        if fits != state.mascotInMargin {
+            withAnimation(.easeInOut(duration: 0.2)) { state.mascotInMargin = fits }
+        }
     }
 }
 
 /// Messages and the composer share one readable column, centered in wide windows.
 enum ChatLayout {
     static let width: CGFloat = 860
+    /// The mascot's width beside a reply (the 168 pt figure and its caption).
+    static let besideWidth: CGFloat = 176
 }
 
 struct EmptyChatView: View {
@@ -35,13 +54,17 @@ struct EmptyChatView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            ZStack {
-                Circle().fill(Theme.accentSoft).frame(width: 72, height: 72)
-                Image(systemName: "leaf.fill")
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
+            if state.showMascot && state.mascotInMargin {
+                MascotPanel(placement: .margin).frame(width: 240)
+            } else {
+                ZStack {
+                    Circle().fill(Theme.accentSoft).frame(width: 72, height: 72)
+                    Image(systemName: "leaf.fill")
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                }
+                .padding(.bottom, 4)
             }
-            .padding(.bottom, 4)
             Text(state.selectedModel?.name ?? "No model selected")
                 .font(.system(size: 28, weight: .medium, design: .serif))
                 .foregroundStyle(Theme.text)
@@ -102,12 +125,18 @@ struct MessageList: View {
     @EnvironmentObject var state: AppState
     let chat: Chat
 
+    /// The latest reply (not an app notice or a replaced draft): the mascot stands beside it.
+    private var mascotHost: UUID? {
+        chat.messages.last { $0.role == .assistant && $0.decide == nil && $0.superseded != true }?.id
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
+                    let host = state.showMascot && state.mascotInMargin ? mascotHost : nil
                     ForEach(chat.messages.filter { $0.role != .tool && $0.role != .system }) { m in
-                        MessageView(message: m, isLast: m.id == chat.messages.last?.id)
+                        MessageView(message: m, isLast: m.id == chat.messages.last?.id, hostsMascot: m.id == host)
                             .id(m.id)
                     }
                     Color.clear.frame(height: 1).id("bottom")
@@ -212,6 +241,7 @@ struct Composer: View {
                     .font(.caption2)
                     .foregroundStyle(Theme.muted)
                 Spacer()
+                ModePill()
                 ContextMeter()
             }
             .padding(.horizontal, 6)
@@ -343,5 +373,28 @@ enum ImageUtil {
     static func pngData(contentsOf url: URL) -> Data? {
         guard let img = NSImage(contentsOf: url) else { return nil }
         return pngData(from: img)
+    }
+}
+
+/// Manual or auto approvals, next to the context meter; click to switch (⇧⌘A).
+struct ModePill: View {
+    @EnvironmentObject var state: AppState
+
+    var body: some View {
+        Button { state.autoMode.toggle() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: state.autoMode ? "bolt.fill" : "hand.raised")
+                Text(state.autoMode ? "Auto" : "Manual")
+            }
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .foregroundStyle(state.autoMode ? Theme.onAccent : Theme.muted)
+            .background(Capsule().fill(state.autoMode ? Theme.accent : Theme.surfaceRaised))
+        }
+        .buttonStyle(.plain)
+        .help(state.autoMode
+              ? "Auto: writes and commands run without asking unless risky (Zoro-1 judges the rest). Click for manual."
+              : "Manual: every write, command and screenshot asks first. Click for auto.")
     }
 }

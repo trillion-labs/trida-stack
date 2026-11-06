@@ -17,6 +17,7 @@ extension AppState {
         SlashCommand(name: "/new", hint: "", summary: "Start a new chat"),
         SlashCommand(name: "/compact", hint: "", summary: "Summarize the conversation so far to free up context"),
         SlashCommand(name: "/mode", hint: "", summary: "Switch between self-spec and AR decoding"),
+        SlashCommand(name: "/auto", hint: "", summary: "Switch between auto and manual approvals (⇧⌘A)"),
     ]
 
     /// Commands matching the draft while it is a bare "/word" (no arguments yet); empty otherwise.
@@ -57,6 +58,10 @@ extension AppState {
         case "/mode":
             settings.selfSpec.toggle()
             appendNotice("Decoding: \(settings.selfSpec ? "self-spec" : "AR").")
+        case "/auto":
+            autoMode.toggle()
+            appendNotice(autoMode ? "Auto mode: actions run without asking unless they look risky."
+                                  : "Manual mode: every write, command and screenshot asks first.")
         default:
             return false
         }

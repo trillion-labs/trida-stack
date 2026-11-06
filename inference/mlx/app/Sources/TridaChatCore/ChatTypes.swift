@@ -97,6 +97,8 @@ public struct ToolRun: Identifiable, Equatable, Sendable, Codable {
     public var undo: FileUndo.Info? = nil
     /// The write was undone.
     public var undone: Bool? = nil
+    /// Auto mode: how the call was let through or why it asked ("Zoro-1: safe 0.93", "Asked: deletes files").
+    public var approval: String? = nil
     public var id: String { call.id }
 
     public init(call: ToolCall) {

@@ -37,7 +37,7 @@ struct ContentView: View {
                 }
                 .listStyle(.sidebar)
                 .scrollContentBackground(.hidden)
-                if state.showMascot { MascotPanel() }
+                if state.showMascot && !state.mascotInMargin { MascotPanel() }
             }
             .background(Theme.sidebar)
             .navigationSplitViewColumnWidth(min: 180, ideal: 220)
@@ -49,6 +49,10 @@ struct ContentView: View {
             }
         } detail: {
             ChatView()
+                .inspector(isPresented: $state.showViewer) {
+                    CodeViewer()
+                        .inspectorColumnWidth(min: 320, ideal: 480, max: 1000)
+                }
                 .toolbar { toolbar }
                 // the toolbar takes the canvas color instead of the system grey band
                 .toolbarBackground(Theme.canvas, for: .windowToolbar)
@@ -115,7 +119,16 @@ struct ContentView: View {
                     .labelStyle(.titleAndIcon)
             }
             .help("Workspace: \(state.settings.workspacePath) (the folder the model's tools work in)")
+            Button { state.scratchNote = nil; state.showScratch = true } label: {
+                Label("Scratch", systemImage: "tray.full")
+            }
+            .help("This chat's scratch files: the model's drafts and saved tool outputs")
+            .popover(isPresented: $state.showScratch, arrowEdge: .bottom) { ScratchView() }
             OpenDecideButton(label: "Decide")
+            Button { state.showViewer.toggle() } label: {
+                Label("Code", systemImage: "sidebar.right")
+            }
+            .help("Show or hide the code viewer (⇧⌘E): the files the model wrote in this chat")
         }
     }
 }

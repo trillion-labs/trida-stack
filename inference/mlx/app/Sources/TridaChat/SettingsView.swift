@@ -116,13 +116,20 @@ struct SettingsView: View {
             }
             Text("Always available: list_dir, read_file, find_files (by name), search_files (inside files), calculator, now — confined to the workspace.")
                 .font(.caption).foregroundStyle(.secondary)
-            Toggle("Allow write_file (asks every time)", isOn: $state.settings.allowWrite)
+            Toggle("Allow write_file (asks every time in manual mode)", isOn: $state.settings.allowWrite)
             Toggle("Allow run_shell (a terminal for the model)", isOn: $state.settings.allowShell)
             Toggle("Run read-only commands without asking (ls, cat, grep, git status/log/diff, …)",
                    isOn: $state.autoApproveReadOnlyShell)
                 .disabled(!state.settings.allowShell)
             Text("Each chat has its own terminal: the working directory and exported variables carry over between commands (it starts in the workspace). Commands run with your user's permissions; anything that is not clearly read-only asks first. Timeout 300 s by default, up to 30 min; long output keeps its start and end.")
                 .font(.caption).foregroundStyle(.secondary)
+            Picker("Approvals", selection: $state.autoMode) {
+                Text("Manual: ask before every write, command and screenshot").tag(false)
+                Text("Auto: ask only for risky actions").tag(true)
+            }
+            Text("Auto mode runs writes and commands without asking. Risky ones always ask: deleting or moving files, sudo, git push or reset, network uploads, system settings, hidden files, screenshots. Zoro-1 judges everything else, and anything it is not sure about asks. ⇧⌘A switches modes.")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("Open the code viewer when the model writes a file", isOn: $state.openViewerOnWrite)
             Divider()
             Text("Image tools (only offered when the model has a vision encoder: \(state.supportsVision ? "yes" : "no") for the current model)")
                 .font(.callout)
