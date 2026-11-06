@@ -80,3 +80,6 @@ benchmark/**/predictions*.jsonl
 **/vllm_native_diffusion/block_causal_readout.py
 build/
 dist/
+
+# Pinned WorkflowEvals checkout, environment, data and run outputs
+/benchmark/workflow_evals/.upstream/
