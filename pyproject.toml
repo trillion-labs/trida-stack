@@ -51,6 +51,7 @@ testpaths = [
   "inference/gravityocr/test_gravityocr_patch.py",
   "inference/gravityocr/test_gravityocr_launcher.py",
   "inference/gravityocr/test_gravityocr_request.py",
+  "inference/gravityocr/test_gravityocr_mac.py",
   "tools/test_chat.py",
   "train/test_stream_pack.py",
   "train/test_vlm.py",

@@ -181,6 +181,7 @@ pytest -q inference/gravityocr/      # CPU only, no downloads; also runs under `
 | `test_gravityocr_patch.py` | `sglang/BASE_COMMIT.txt` is a full commit SHA, and the pins quoted in this README, `sglang/setup.sh` and `NOTICE` match it; the patch covers 25 files (24 upstream sources plus `python/pyproject.toml`); the four new files parse as Python 3.10 and carry the licence header; `sglang/setup.sh` is valid bash and installs with `--no-deps --no-config` from explicit indexes; the lock names the base tag, holds exactly the four `+cu129` builds, and pins the versions `setup.sh` checks |
 | `test_gravityocr_launcher.py` | runs `serve.sh` against a stub `VBIN` and a local checkpoint directory: mode flags, the `SELFSPEC_*` environment, `DP`, value checks, the `SERVE_HOST` / `API_KEY` rule, one tokenizer worker with a key, the admin key and the private key file, the `EXTRA_ARGS` allowlist, and the preflight checks with stub `nvcc` / `nvidia-smi` |
 | `test_gravityocr_request.py` | `ocr_request.py` with `urlopen` replaced: the payload (`[image_url, text]` order, temperature 0, a `data:` URL that decodes back to the input bytes), CLI defaults and argument checks, an `Authorization` header only when a key is given, HTTP errors, refused and dropped connections, timeouts and malformed replies (exit 1), and `--synthetic` rendering a PNG |
+| `test_gravityocr_mac.py` | `serve_mac.py` with a stub engine: the three task prompts, the payload `ocr_request.py` sends, refusal of non-`data:` image URLs and other bad requests (400), an engine error answered with 500 while the server keeps running, and refusal of a non-loopback `--host` or a missing Gravity app |
 
 On a GPU, serve both modes and send each the same crops:
 
@@ -191,6 +192,26 @@ MODE=causal GPU=1 PORT=30001 bash inference/gravityocr/serve.sh &   # causal on 
 "$VBIN/python" inference/gravityocr/ocr_request.py crop.png --url http://127.0.0.1:30001
 ```
 
+## On a Mac
+
+`serve_mac.py` answers the same requests as `serve.sh` on an Apple Silicon Mac, for trying the model
+and running [`getting_started.ipynb`](getting_started.ipynb) without an NVIDIA GPU. It is not a
+second serving recipe. It runs the MLX engine of the [Gravity](https://gravityocr.trillionlabs.co) app,
+which must be installed, with Gravity's bundled Python, and downloads `trillionlabs/GravityOCR` once
+into `~/.cache/gravityocr-mac/` (pinned to a commit, SHA-256 checked):
+
+```bash
+/Applications/Gravity.app/Contents/Resources/runtime/bin/python -I inference/gravityocr/serve_mac.py
+python3 inference/gravityocr/ocr_request.py --synthetic 'Hello GravityOCR'
+```
+
+Its numbers are not this recipe's: MLX instead of SGLang, text layers quantized to 6 bits, a 16-token
+draft block instead of 32, crops downscaled to a 1344 px long side, and Gravity's own per-task token
+limits (`max_tokens` is ignored). `--mode causal` swaps in the autoregressive decoder that ships with
+Gravity. It binds loopback only, accepts `data:` image URLs only, and imports Gravity's internal
+`ocr.engine` package, which is not a public API: it was written against Gravity 0.3.4 and warns on
+other versions.
+
 ## Files
 
 ```
@@ -198,6 +219,8 @@ inference/gravityocr/
   README.md, MODEL_CONTRACT.md, NOTICE
   serve.sh                   launcher: MODE=self-spec | causal, env-driven
   ocr_request.py             one-crop OpenAI-compatible client (stdlib; Pillow for --synthetic)
+  serve_mac.py               Mac option: the same API on the Gravity app's MLX engine (see below)
+  getting_started.ipynb      5-10 minute tutorial; runs on an L40 / H100 or on a Mac
   test_gravityocr_*.py       CPU tests
   sglang/
     BASE_COMMIT.txt            upstream sgl-project/sglang pin (tag v0.5.10)
