@@ -22,8 +22,8 @@ from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from train.data.text_sft_data import load_image_processor  # noqa: E402
-from train.hf_block_diffusion_hybrid import HFBlockDiffusionHybrid  # noqa: E402
-from train.jev import encode_rows, materialize, pack_jev, training_context  # noqa: E402
+from train.models.hybrid import HFBlockDiffusionHybrid  # noqa: E402
+from train.data.jev import encode_rows, materialize, pack_jev, training_context  # noqa: E402
 from train.tools.vlm_smoke import BD, TEXT_CONVS, batches, image_convs, run  # noqa: E402
 
 REQ = {"state": "Customer writes: I was charged twice for my October invoice and want the duplicate refunded.",

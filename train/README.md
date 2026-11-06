@@ -154,3 +154,22 @@ the fetched code is noncommercial and not covered by this repo's license.
 Once fetched, the kernels are relative-import-only and self-contained (torch + triton + fla). Note
 for anyone debugging them: test through the real model path — synthetic random `g` (the log-decay
 gate must be ≤ 0) produces garbage that looks like kernel bugs.
+
+## Code layout
+
+The root `train.py` launches `train/train.py`, whose `main()` connects these stages:
+
+| Stage | File |
+|---|---|
+| GPU/process-group setup and FSDP sharding | `train/distributed.py` |
+| Model construction and pretrained component loading | `train/models/build.py` |
+| Dense and hybrid model implementations | `train/models/block_diffusion.py`, `train/models/hybrid.py` |
+| Text and Jev data-loader construction | `train/data/loaders.py` |
+| Jev records, augmentation, encoding and packing | `train/data/jev.py` |
+| Jev pointer head and loss | `train/models/jev.py` |
+| AdamW setup, learning-rate schedule and optimizer updates | `train/optimizer.py` |
+| Text/mixed and Jev-only loops, metrics | `train/train.py` (functions above `main()`) |
+| Model/optimizer checkpoint saving and resume | `train/checkpoint.py` |
+
+The old `train.hf_block_diffusion` and `train.hf_block_diffusion_hybrid` imports
+remain available for existing tools. Training flags and launch commands are unchanged.
