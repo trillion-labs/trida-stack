@@ -188,7 +188,8 @@ def test_decide_endpoint_parses_without_paths():
     class Engine:
         ckpt = "/ckpt/m"
 
-        async def adecide(self, request, image=None, temperature=None, reasoning=False, allow_paths=True):
+        async def adecide(self, request, image=None, temperature=None, reasoning=False,
+                          max_reasoning_tokens=768, allow_paths=True):
             parse(request, image, allow_paths)
             return {"answers": {}}
 
@@ -316,3 +317,25 @@ def test_chat_sampling_values():
         r = client.post("/v1/chat/completions", json={**MSG, **bad})
         assert r.status_code == 400 and next(iter(bad)) in r.text
     assert client.post("/v1/chat/completions", json={"messages": []}).status_code == 400
+
+
+def test_decide_forwards_reasoning_budget():
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+
+    class Engine:
+        ckpt = "zoro-1"
+
+        async def adecide(self, request, image, temperature, reasoning, **kwargs):
+            self.received = (request, reasoning, kwargs)
+            return {"answers": {}}
+
+    engine = Engine()
+    client = TestClient(create_app(engine))
+    response = client.post("/v1/decide", json={"request": REQ, "reasoning": True,
+                                             "max_reasoning_tokens": 2048})
+    assert response.status_code == 200
+    assert engine.received == (REQ, True, {"max_reasoning_tokens": 2048, "allow_paths": False})
+    for budget in [0, -1, 1.5, True]:
+        assert client.post("/v1/decide", json={"request": REQ,
+                           "max_reasoning_tokens": budget}).status_code == 400

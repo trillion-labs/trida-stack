@@ -1,0 +1,192 @@
+diff --git a/core/providers.py b/core/providers.py
+index 8ac4b8f..0042889 100644
+--- a/core/providers.py
++++ b/core/providers.py
+@@ -8,8 +8,8 @@ from typesafe_sdk.constants import DEFAULT_BASE_URL
+ 
+ from .contract import ModelIdentity, Record
+ 
+-Provider = Literal["openai", "anthropic", "fireworks", "groq", "cerebras", "typesafe"]
+-PROVIDERS: tuple[Provider, ...] = ("openai", "anthropic", "fireworks", "groq", "cerebras", "typesafe")
++Provider = Literal["openai", "anthropic", "fireworks", "groq", "cerebras", "typesafe", "trida"]
++PROVIDERS: tuple[Provider, ...] = ("openai", "anthropic", "fireworks", "groq", "cerebras", "typesafe", "trida")
+ # Hosts serving models from multiple labs.
+ OPEN_MODEL_HOSTS: frozenset[Provider] = frozenset({"fireworks", "groq", "cerebras"})
+ # Reject unsupported effort levels rather than letting PydanticAI remap them.
+@@ -27,15 +27,23 @@ class ModelConfig(Record):
+     timeout_s: float = Field(default=600, gt=0)
+     max_output_tokens: int = Field(default=64000, gt=0)
+     malformed_retries: int = Field(default=1, ge=0)
++    trida_reasoning: bool = False
+ 
+     @model_validator(mode="after")
+     def applicable_settings(self):
++        if self.trida_reasoning and self.provider != "trida":
++            raise ValueError("--reasoning applies to Trida only")
+         if self.provider == "typesafe" and self.model != "jev-1.13.0":
+             raise ValueError("TypeSafe supports only jev-1.13.0")
+         if self.provider == "typesafe" and self.thinking not in ("default", "off"):
+             raise ValueError("TypeSafe has no thinking setting; use --thinking off")
+-        if self.base_url and self.provider != "typesafe":
+-            raise ValueError("--base-url currently applies to TypeSafe only")
++        if self.provider == "trida":
++            if not self.base_url:
++                raise ValueError("Trida requires --base-url (server root URL)")
++            if self.thinking not in ("default", "off"):
++                raise ValueError("Use --reasoning for Trida; --thinking effort levels are unsupported")
++        if self.base_url and self.provider not in ("typesafe", "trida"):
++            raise ValueError("--base-url applies to TypeSafe or Trida only")
+         if self.provider in ("groq", "cerebras") and self.thinking not in GRADED_EFFORTS:
+             raise ValueError(
+                 f"{self.provider} grades reasoning effort as low, medium, or high; "
+@@ -47,8 +55,9 @@ class ModelConfig(Record):
+     def identity(self) -> ModelIdentity:
+         return ModelIdentity(
+             name=f"{self.provider}:{self.model}",
+-            lab="other" if self.provider in OPEN_MODEL_HOSTS else self.provider,
+-            effort=None if self.provider == "typesafe" else self.thinking,
++            lab="other" if self.provider in OPEN_MODEL_HOSTS or self.provider == "trida" else self.provider,
++            effort=("reasoning" if self.trida_reasoning else "off") if self.provider == "trida"
++            else None if self.provider == "typesafe" else self.thinking,
+         )
+ 
+ 
+@@ -65,18 +74,18 @@ def configuration(model: str, thinking: str | None = None, **kwargs) -> ModelCon
+             or DEFAULT_BASE_URL
+         )
+     # Default to joint questions for TypeSafe and independent questions for LLMs.
+-    question_mode = kwargs.pop("question_mode", None) or ("all" if provider == "typesafe" else "one")
++    question_mode = kwargs.pop("question_mode", None) or ("all" if provider in ("typesafe", "trida") else "one")
+     return ModelConfig(
+         model=model,
+         provider=provider,
+-        thinking=thinking or ("off" if provider == "typesafe" else "default"),
++        thinking=thinking or ("off" if provider in ("typesafe", "trida") else "default"),
+         question_mode=question_mode,
+         **kwargs,
+     )
+ 
+ 
+ def resolve_model(config: ModelConfig):
+-    if config.provider == "typesafe":
++    if config.provider in ("typesafe", "trida"):
+         return config.model
+     settings = {"timeout": config.timeout_s, "max_tokens": config.max_output_tokens}
+     explicit = config.thinking != "default"
+@@ -124,6 +133,10 @@ def _chat_model(config: ModelConfig, provider, settings: dict):
+ 
+ 
+ def make_client(config: ModelConfig):
++    if config.provider == "trida":
++        from .trida_client import TridaClient
++
++        return TridaClient(config)
+     from .clients import QuestionClient
+ 
+     return QuestionClient(config)
+diff --git a/core/trida_client.py b/core/trida_client.py
+new file mode 100644
+index 0000000..4959168
+--- /dev/null
++++ b/core/trida_client.py
+@@ -0,0 +1,80 @@
++"""Transport adapter only; workflow questions, policies and scoring stay upstream."""
++import math
++import os
++
++import httpx
++from pydantic import Field
++
++from .question_types import SystemOneResponse, question_record
++
++
++class TridaResponse(SystemOneResponse):
++    decision_details: dict = Field(default_factory=dict)
++
++
++class TridaClient:
++    def __init__(self, config):
++        self.model = config.model
++        self.reasoning = config.trida_reasoning
++        self.max_reasoning_tokens = config.max_output_tokens
++        headers = {}
++        if key := os.getenv("TRIDA_API_KEY"):
++            headers["Authorization"] = f"Bearer {key}"
++        self.client = httpx.Client(
++            base_url=config.base_url.rstrip("/") + "/",
++            timeout=config.timeout_s,
++            headers=headers,
++        )
++
++    def system_one(self, *, model, state, questions) -> SystemOneResponse:
++        wire = {key: question_record(q) for key, q in questions.items()}
++        body = {"request": {"state": state, "questions": wire}, "reasoning": self.reasoning}
++        if self.reasoning:
++            body["max_reasoning_tokens"] = self.max_reasoning_tokens
++        response = self.client.post("v1/decide", json=body)
++        try:
++            response.raise_for_status()
++        except httpx.HTTPStatusError as exc:
++            raise httpx.HTTPStatusError(
++                f"{exc}: {response.text[:2000]}", request=exc.request, response=exc.response
++            ) from exc
++        raw = response.json()
++        if self.reasoning and (not raw.get("reasoning") or raw.get("cut")):
++            raise ValueError(f"Reasoning did not complete: {raw.get('cut') or 'missing reasoning'}")
++        answers = raw["answers"]
++        if set(answers) != set(wire):
++            raise ValueError("Response question IDs differ from the requested question IDs")
++        for key, question in wire.items():
++            answer = answers[key]
++            if answer["type"] != question["type"]:
++                raise ValueError(f"Answer type differs for {key}")
++            if question["type"] == "noul":
++                self._probabilities([answer["noul"]], distribution=False)
++                continue
++            criteria = question["criteria"]
++            keys = set(criteria) if question["type"] == "choice" else {str(i) for i in range(len(criteria))}
++            if set(answer["probabilities"]) != keys:
++                raise ValueError(f"Probability keys differ for {key}")
++            self._probabilities(list(answer["probabilities"].values()), distribution=True)
++            if question["type"] == "choice" and answer["choice"] not in keys:
++                raise ValueError(f"Unknown choice for {key}")
++            if question["type"] == "score":
++                # Trida supplies a list; the TypeSafe SDK expects an index-to-level mapping.
++                answer["legend"] = dict(enumerate(criteria))
++                answer["probabilities"] = {int(k): p for k, p in answer["probabilities"].items()}
++        return TridaResponse.model_validate(
++            {"model": self.model, "answers": answers, "usage": raw.get("usage") or {},
++             "decision_details": {k: v for k, v in raw.items() if k not in ("answers", "usage")}}
++        )
++
++    @staticmethod
++    def _probabilities(values, *, distribution):
++        if any(isinstance(p, bool) or not isinstance(p, (int, float))
++               or not math.isfinite(p) or not 0 <= p <= 1 for p in values):
++            raise ValueError("Invalid probability")
++        # The server rounds probabilities to four decimal places. Preserve them unchanged.
++        if distribution and abs(sum(values) - 1) > len(values) * 0.00005 + 1e-8:
++            raise ValueError("Probabilities do not sum to one")
++
++    def close(self):
++        self.client.close()
+diff --git a/run.py b/run.py
+index b33e218..a72fe33 100644
+--- a/run.py
++++ b/run.py
+@@ -23,6 +23,7 @@ def main(argv: list[str] | None = None) -> int:
+     parser.add_argument(
+         "--thinking", choices=("default", "off", "minimal", "low", "medium", "high", "xhigh", "max")
+     )
++    parser.add_argument("--reasoning", action="store_true", help="Trida: reason before deciding; --max-output-tokens caps reasoning")
+     parser.add_argument("--limit", type=int, help="Run the first N cases in case-ID order")
+     parser.add_argument("--workers", type=int, default=4, help="Concurrent cases (default: 4)")
+     parser.add_argument(
+@@ -55,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
+             timeout_s=args.timeout,
+             max_output_tokens=args.max_output_tokens,
+             question_mode=args.questions,
++            trida_reasoning=args.reasoning,
+         )
+         name = args.name if args.name is not None else config.model.rsplit("/", 1)[-1]
+         if not name.strip() or name in (".", "..") or Path(name).name != name or "\\" in name:
