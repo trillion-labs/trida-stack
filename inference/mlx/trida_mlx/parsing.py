@@ -9,6 +9,9 @@ import uuid
 
 THINK_OPEN, THINK_CLOSE = "<think>", "</think>"
 TC_OPEN, TC_CLOSE = "<tool_call>", "</tool_call>"
+# qwen3-coder calls the model sometimes writes without the <tool_call> wrapper (after a first wrapped call)
+FN_OPEN, FN_CLOSE = "<function=", "</function>"
+_BARE_FN = re.compile(r"<function=([^>\s]+)\s*>(.*?)(?:</function>|$)", re.DOTALL)
 
 
 def _loads_balanced(s: str):
@@ -66,11 +69,26 @@ def _coerce(value: str, typ):
         return value
 
 
+def _xml_args(body: str, ptypes: dict) -> dict:
+    a = {}
+    for k, v in re.findall(r"<parameter=([^>]+?)\s*>\n?(.*?)\n?</parameter>", body, re.DOTALL):
+        k = k.strip()
+        typ = ptypes.get(k)
+        a[k] = _coerce(v if typ == "string" else v.strip(), typ)
+    return a
+
+
 def parse_tool_calls(text: str, tools=None) -> tuple[str, list]:
-    """Returns (content_without_tool_calls, [{"name", "arguments"(dict)}])."""
+    """Returns (content_without_tool_calls, [{"name", "arguments"(dict)}]).
+
+    Besides ``<tool_call>`` blocks, bare qwen3-coder ``<function=NAME>...</function>`` blocks count as calls
+    when NAME is one of ``tools`` (the model sometimes drops the wrapper after its first call); a stray
+    ``</tool_call>`` is dropped from the content."""
     types = _param_types(tools)
     calls = []
-    for block in re.findall(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", text, re.DOTALL):
+    order = []                                   # (position, call), so wrapped and bare calls keep their order
+    for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", text, re.DOTALL):
+        block = m.group(1)
         obj = _loads_balanced(block)
         if isinstance(obj, dict) and "name" in obj:
             args = obj.get("arguments", obj.get("parameters", {}))
@@ -79,18 +97,25 @@ def parse_tool_calls(text: str, tools=None) -> tuple[str, list]:
                     args = json.loads(args)
                 except Exception:
                     args = {"_raw": args}
-            calls.append({"name": obj["name"], "arguments": args if isinstance(args, dict) else {}})
+            order.append((m.start(), {"name": obj["name"], "arguments": args if isinstance(args, dict) else {}}))
             continue
-        for fm in re.finditer(r"<function=([^>\s]+)\s*>(.*?)(?:</function>|$)", block, re.DOTALL):
-            name, a = fm.group(1).strip(), {}
-            ptypes = types.get(name, {})
-            for k, v in re.findall(r"<parameter=([^>]+?)\s*>\n?(.*?)\n?</parameter>", fm.group(2), re.DOTALL):
-                k = k.strip()
-                typ = ptypes.get(k)
-                a[k] = _coerce(v if typ == "string" else v.strip(), typ)
-            calls.append({"name": name, "arguments": a})
-    content = re.sub(r"<tool_call>.*?(?:</tool_call>|$)", "", text, flags=re.DOTALL).strip()
-    return content, calls
+        for fm in _BARE_FN.finditer(block):
+            name = fm.group(1).strip()
+            order.append((m.start() + fm.start(), {"name": name, "arguments": _xml_args(fm.group(2), types.get(name, {}))}))
+    content = re.sub(r"<tool_call>.*?(?:</tool_call>|$)", "", text, flags=re.DOTALL)
+    if tools:
+        # bare blocks outside any <tool_call>: positions in `content` differ from `text`, so order by a second
+        # scan of the text with the wrapped blocks blanked out (same length)
+        blank = re.sub(r"<tool_call>.*?(?:</tool_call>|$)", lambda x: " " * len(x.group(0)), text, flags=re.DOTALL)
+        for fm in _BARE_FN.finditer(blank):
+            name = fm.group(1).strip()
+            if name in types:
+                order.append((fm.start(), {"name": name, "arguments": _xml_args(fm.group(2), types.get(name, {}))}))
+        content = re.sub(r"<function=([^>\s]+)\s*>.*?(?:</function>|$)",
+                         lambda x: "" if x.group(1).strip() in types else x.group(0), content, flags=re.DOTALL)
+    content = content.replace(TC_CLOSE, "")
+    calls = [c for _, c in sorted(order, key=lambda t: t[0])]
+    return content.strip(), calls
 
 
 def split_reasoning(text: str, started_in_think: bool) -> tuple[str, str]:
@@ -136,6 +161,7 @@ class StreamSplitter:
         self.buf = ""
         self.tool_text = ""
         self.in_tool = False
+        self.bare = False
         self.closed_tools = ""
         self.content_started = False
 
@@ -182,26 +208,36 @@ class StreamSplitter:
             if self.in_tool:
                 self.tool_text += self.buf
                 self.buf = ""
-                j = self.tool_text.find(TC_CLOSE)
+                close = FN_CLOSE if self.bare else TC_CLOSE
+                j = self.tool_text.find(close)
                 if j >= 0:
-                    rest = self.tool_text[j + len(TC_CLOSE):]
-                    self.tool_text = self.tool_text[: j + len(TC_CLOSE)] + "\n"
+                    rest = self.tool_text[j + len(close):]
+                    self.tool_text = self.tool_text[: j + len(close)] + "\n"
                     self.in_tool = False
                     self.buf = rest
-                    self.closed_tools += self.tool_text
+                    self.closed_tools += (TC_OPEN + self.tool_text + TC_CLOSE + "\n") if self.bare else self.tool_text
                     self.tool_text = ""
                     continue
                 return out
             if self.parse_tools:
-                i = self.buf.find(TC_OPEN)
-                if i >= 0:
+                self.buf = self.buf.replace(TC_CLOSE, "")          # a stray close after a bare call
+                i, f = self.buf.find(TC_OPEN), self.buf.find(FN_OPEN)
+                if i >= 0 and (f < 0 or i < f):
                     if self.buf[:i]:
                         self._content(out, self.buf[:i])
-                    self.in_tool = True
+                    self.in_tool, self.bare = True, False
                     self.tool_text = TC_OPEN
                     self.buf = self.buf[i + len(TC_OPEN):]
                     continue
-                keep = _partial_suffix(self.buf, TC_OPEN)
+                if f >= 0:                                          # a call without its <tool_call> wrapper
+                    if self.buf[:f]:
+                        self._content(out, self.buf[:f])
+                    self.in_tool, self.bare = True, True
+                    self.tool_text = FN_OPEN
+                    self.buf = self.buf[f + len(FN_OPEN):]
+                    continue
+                keep = max(_partial_suffix(self.buf, TC_OPEN), _partial_suffix(self.buf, FN_OPEN),
+                           _partial_suffix(self.buf, TC_CLOSE))
             else:
                 keep = 0
             emit = self.buf[: len(self.buf) - keep]
@@ -217,6 +253,7 @@ class StreamSplitter:
         elif self.buf and not self.in_tool:
             self._content(out, self.buf)
         self.buf = ""
-        tool_src = self.closed_tools + (self.tool_text if self.in_tool else "")
+        open_text = (TC_OPEN + self.tool_text if self.bare else self.tool_text) if self.in_tool else ""
+        tool_src = self.closed_tools + open_text
         calls = parse_tool_calls(tool_src, tools)[1] if tool_src else []
         return out, calls
