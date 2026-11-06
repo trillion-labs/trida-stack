@@ -86,7 +86,11 @@ public struct AgentTools: Sendable {
                     + "read_section and open_link on it. For facts that change (who holds an office now, news, prices, "
                     + "releases) open a source such as https://en.wikipedia.org/wiki/<Title>, "
                     + "https://ko.wikipedia.org/wiki/<제목>, or a Wikipedia search: "
-                    + "https://en.wikipedia.org/w/index.php?search=<words>.", ["url": str], ["url"]),
+                    + "https://en.wikipedia.org/w/index.php?search=<words>. For something Korean (a school, a "
+                    + "company, a place), search with the words exactly as the user wrote them: "
+                    + "https://search.naver.com/search.naver?query=<words>, or https://namu.wiki/w/<제목>. Write "
+                    + "Korean and other non-English words in the URL as they are; don't percent-encode them "
+                    + "yourself and don't romanize names.", ["url": str], ["url"]),
             Self.fn("find_in_page", "Find text on the page you opened last (case-insensitive): every place it occurs, "
                     + "with the text around it and its section, and the links whose text matches. Use it to find the "
                     + "exact line that answers the question, e.g. 'Incumbent' or 'current president'.",

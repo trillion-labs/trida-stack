@@ -33,6 +33,8 @@ public struct GenStats: Equatable, Sendable, Codable {
     public var decodeSeconds: Double = 0
     public var decodeTokensPerSecond: Double = 0
     public var finishReason: String = ""
+    /// Tool calls the server's gate held back (the probability the model gave each), if any.
+    public var gateBlocked: [Double]? = nil
 
     public init() {}
 
@@ -48,6 +50,8 @@ public struct GenStats: Equatable, Sendable, Codable {
         decodeSeconds = Self.double(t["decode_s"]) ?? 0
         decodeTokensPerSecond = Self.double(t["decode_tok_s"]) ?? 0
         finishReason = t["finish_reason"] as? String ?? ""
+        let blocked = (t["gate_blocked"] as? [Any] ?? []).compactMap { Self.double($0) }
+        gateBlocked = blocked.isEmpty ? nil : blocked
     }
 
     /// e.g. "self-spec(N=4) · 52.4 tok/s · 2.40 tok/fwd · 300 tok · prefill 0.14 s (4,812 cached)"
@@ -138,6 +142,9 @@ public struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
     public var check: String? = nil
     /// A draft replaced after review: shown collapsed, never sent to the model again.
     public var superseded: Bool? = nil
+    /// User messages: the remembered facts sent with this message (the knowledge graph). Kept, so later turns send
+    /// the conversation exactly as before and the server's prompt cache reuses it.
+    public var knowledge: String? = nil
     /// The user's rating of this reply: "up" or "down" (training-data export).
     public var feedback: String? = nil
     /// The reply as the model wrote it, when the user edited it (training-data export: rejected vs chosen).

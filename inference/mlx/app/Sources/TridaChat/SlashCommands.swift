@@ -18,6 +18,8 @@ extension AppState {
         SlashCommand(name: "/compact", hint: "", summary: "Summarize the conversation so far to free up context"),
         SlashCommand(name: "/mode", hint: "", summary: "Switch between self-spec and AR decoding"),
         SlashCommand(name: "/auto", hint: "", summary: "Switch between auto and manual approvals (⇧⌘A)"),
+        SlashCommand(name: "/update-kg", hint: "[what to focus on]",
+                     summary: "Add the facts from this whole chat to the knowledge graph"),
     ]
 
     /// Commands matching the draft while it is a bare "/word" (no arguments yet); empty otherwise.
@@ -58,6 +60,13 @@ extension AppState {
         case "/mode":
             settings.selfSpec.toggle()
             appendNotice("Decoding: \(settings.selfSpec ? "self-spec" : "AR").")
+        case "/update-kg":
+            guard !isGenerating, let ci = currentChatIndex else { return true }
+            guard status.isUsable, supportsDecision else {
+                appendNotice("The server is not ready yet; try /update-kg again in a moment.")
+                return true
+            }
+            updateKnowledge(chatID: chats[ci].id, focus: args)
         case "/auto":
             autoMode.toggle()
             appendNotice(autoMode ? "Auto mode: actions run without asking unless they look risky."

@@ -38,6 +38,10 @@ enum ToolRouter {
                       "pick_file", "locate_files"]),
         Group(key: "screen", description: "look at what is on the user's screen now (screenshot)", tools: ["screenshot"]),
         Group(key: "time", description: "the current date or time", tools: ["now"]),
+        Group(key: "memory", description: "what the user told you in earlier chats (facts about them, their work, "
+              + "people and things), or remembering, saving or forgetting something they ask you to (adding facts "
+              + "to the knowledge graph or memory, or removing them)",
+              tools: ["recall", "remember", "forget"]),
         Group(key: "web", description: "facts from the internet: current events, who holds an office or a job now, "
               + "news, prices, the latest version of something, or a web page / URL",
               tools: ["fetch_url", "find_in_page", "read_section", "open_link"]),

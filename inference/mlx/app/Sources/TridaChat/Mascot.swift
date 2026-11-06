@@ -19,7 +19,13 @@ enum MascotState: Equatable {
         case .reading: return "Reading your message"
         case .thinking: return "Thinking"
         case .deciding: return "Deciding"
-        case let .tool(name): return MascotProp.of(name).caption
+        case let .tool(name):
+            switch name {
+            case "recall": return "Remembering"
+            case "remember": return "Noting that down"
+            case "forget": return "Forgetting that"
+            default: return MascotProp.of(name).caption
+            }
         case .answering: return "Answering"
         case .checking: return "Checking the answer"
         case .tidying: return "Tidying up the chat"
@@ -47,6 +53,8 @@ enum MascotProp {
         case "write_file": return .pen
         case "screenshot": return .camera
         case "fetch_url", "find_in_page", "read_section", "open_link": return .globe
+        case "recall": return .magnifier
+        case "remember", "forget": return .pen
         default: return .wrench
         }
     }

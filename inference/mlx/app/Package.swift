@@ -8,11 +8,17 @@ let package = Package(
     products: [
         .executable(name: "TridaChat", targets: ["TridaChat"]),
     ],
+    // The personal knowledge graph (Knowledge/INTEGRATION.md).
+    dependencies: [.package(path: "Knowledge")],
     targets: [
         // Foundation only: OpenAI streaming client, server process, model catalog, agent tools.
         .target(name: "TridaChatCore", path: "Sources/TridaChatCore"),
         // SwiftUI app.
-        .executableTarget(name: "TridaChat", dependencies: ["TridaChatCore"], path: "Sources/TridaChat"),
+        .executableTarget(name: "TridaChat",
+                          dependencies: ["TridaChatCore",
+                                         .product(name: "TridaKnowledge", package: "Knowledge"),
+                                         .product(name: "TridaKnowledgeUI", package: "Knowledge")],
+                          path: "Sources/TridaChat"),
         .testTarget(name: "TridaChatCoreTests", dependencies: ["TridaChatCore"], path: "Tests/TridaChatCoreTests"),
     ]
 )

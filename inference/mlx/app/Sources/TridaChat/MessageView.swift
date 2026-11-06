@@ -1,9 +1,11 @@
 import AppKit
 import SwiftUI
 import TridaChatCore
+import TridaKnowledgeUI
 
 struct MessageView: View {
     @EnvironmentObject var state: AppState
+    @Environment(\.openWindow) private var openWindow
     let message: ChatMessage
     let isLast: Bool
     /// The mascot stands beside this reply, in place of its avatar (see MascotPanel).
@@ -131,6 +133,11 @@ struct MessageView: View {
             }
             if let c = message.check, message.stats == nil {
                 CheckBadge(text: c)
+            }
+            // what the knowledge graph learned from this reply, with Undo (KnowledgeGlue.swift)
+            LearnedChip(model: state.knowledge, messageID: message.id.uuidString) { edge in
+                state.knowledge.show(edge: edge)
+                openWindow(id: "knowledge")
             }
             // one quiet footer: how it was decoded, whether the checks passed, and the reply's actions
             if let st = message.stats {

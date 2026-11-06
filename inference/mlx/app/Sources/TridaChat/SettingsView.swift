@@ -130,6 +130,8 @@ struct SettingsView: View {
             Text("Auto mode runs writes and commands without asking. Risky ones always ask: deleting or moving files, sudo, git push or reset, network uploads, system settings, hidden files, screenshots. Zoro-1 judges everything else, and anything it is not sure about asks. ⇧⌘A switches modes.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Open the code viewer when the model writes a file", isOn: $state.openViewerOnWrite)
+            Toggle("Learn from chats automatically (View → Knowledge, ⇧⌘K)",
+                   isOn: Binding(get: { state.knowledge.enabled }, set: { state.knowledge.enabled = $0 }))
             Divider()
             Text("Image tools (only offered when the model has a vision encoder: \(state.supportsVision ? "yes" : "no") for the current model)")
                 .font(.callout)

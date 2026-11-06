@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
 import TridaChatCore
+import TridaKnowledge
+import TridaKnowledgeUI
 
 struct Chat: Identifiable, Equatable, Codable {
     var id = UUID()
@@ -63,6 +65,9 @@ final class AppState: ObservableObject {
     }
     /// Chats are saved to ~/Library/Application Support/Zoro-1 Chat/chats and reloaded at launch.
     let chatStore: ChatStore
+    /// The personal knowledge graph learned from chats (KnowledgeGlue.swift).
+    let knowledge: KnowledgeModel
+    lazy var knowledgeBackend = AppKnowledgeBackend(app: self)
     @Published var selectedChatID: Chat.ID?
     @Published var isGenerating = false {
         didSet {
@@ -220,10 +225,17 @@ final class AppState: ObservableObject {
     init() {
         decidePanel = DecidePanel()
         chatStore = ChatStore()
+        knowledge = KnowledgeModel()
         let saved = chatStore.load()
         chats = [Chat()] + saved.chats   // a fresh chat on top; earlier ones in the sidebar
         decisionCards = saved.cards
         selectedChatID = chats.first?.id
+        // the Knowledge window's "Open the message it came from"
+        knowledge.openSource = { [weak self] chat, _ in
+            if let id = UUID(uuidString: chat), self?.chats.contains(where: { $0.id == id }) == true {
+                self?.selectedChatID = id
+            }
+        }
         let keep = Set(chats.map(\.id))
         DispatchQueue.global(qos: .utility).async { Scratch.clean(keep: keep) }
         // One-time move to the tool-use sampling defaults (temperature 0.6, top-k 20) for
@@ -607,6 +619,7 @@ final class AppState: ObservableObject {
         var system = settings.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if var p = tools?.systemPrompt {
             if decisionToolsActive { p += " " + DecisionTools.systemPrompt }
+            if knowledge.enabled { p += " " + KnowledgeTools.systemPrompt }
             if uiToolsActive { p += " " + UITools.systemPrompt(target: UIAgent.shared.targetName) }
             system = system.isEmpty ? p : p + "\n\n" + system
         }
@@ -621,12 +634,16 @@ final class AppState: ObservableObject {
         for m in chat.messages[(start.map { $0 + 1 } ?? 0)...] where (m.error == nil || !m.content.isEmpty) && m.decide != .prompt {
             if case .card(_)? = m.decide, m.content.isEmpty { continue }   // a decision that did not finish
             if m.superseded == true { continue }                            // a draft rewritten after review
-            out.append(m.openAIMessage())
+            // the reply being started (the tool router's placeholder): sending it as an empty assistant turn
+            // changed the prompt's prefix once it was filled in, so every new message re-read the whole chat
+            if m.role == .assistant && m.content.isEmpty && m.toolRuns.isEmpty { continue }
+            out.append(Self.withKnowledge(m.openAIMessage(), m.knowledge))   // facts sent with it (KnowledgeGlue)
         }
         return out
     }
 
     private func runTurn(_ chatID: Chat.ID) async {
+        stampKnowledge(chatID)          // the remembered facts for this message, fixed for good (KnowledgeGlue.swift)
         isGenerating = true
         defer {
             isGenerating = false
@@ -643,7 +660,11 @@ final class AppState: ObservableObject {
         if ui { installStopMonitor() }
         defer { removeStopMonitor() }
         let dec = decisionToolsActive
-        let specs = tools.map { $0.specs + (dec ? DecisionTools.specs(ui: ui) : []) + (ui ? UITools.specs : []) }
+        let mem = knowledge.enabled
+        let specs = tools.map {
+            $0.specs + (dec ? DecisionTools.specs(ui: ui) : []) + (ui ? UITools.specs : [])
+                + (mem ? KnowledgeTools.specs : [])
+        }
         let lastIsUser = chats.first { $0.id == chatID }?.messages.last?.role == .user
         // Nearly full context: summarize the earlier conversation first (see Compaction.swift).
         if lastIsUser, needsCompaction(chatID) {
@@ -670,14 +691,35 @@ final class AppState: ObservableObject {
             allowed = route.allowed
             update(chatID, first.id) { $0.route = route.note.isEmpty ? nil : route.note }
         }
-        for step in 0..<max(1, s.agentMode ? s.maxAgentSteps : 1) {
+        let steps = max(1, s.agentMode ? s.maxAgentSteps : 1)
+        var ran: [String: Int] = [:]       // tool calls already run in this turn (name + arguments), and how often
+        var webCalls = 0
+        var relaxGate = false               // a call the gate held back made the reply degenerate: retried once
+        let userText = chats.first { $0.id == chatID }?.messages.last { $0.role == .user && $0.decide == nil }?.content ?? ""
+        // pages opened in earlier turns of this chat: opening the same URL again gets the same page (a failed search
+        // from the last turn was being retried word for word)
+        let opened = Set((chats.first { $0.id == chatID }?.messages ?? []).flatMap(\.toolRuns)
+            .filter { $0.call.name == "fetch_url" && $0.status == .done }.map { $0.call.name + "\u{0}" + $0.call.arguments })
+        for step in 0..<steps {
             var body = ChatClient.requestBody(messages: history(chatID, tools: tools), tools: specs,
                                               options: s.generation, model: servedName)
             // No tool needed: the tools stay in the prompt (prompt cache) but cannot be called.
             if allowed?.isEmpty == true { body["tool_choice"] = "none" }
+            // The last step: no more tools, so the turn ends with an answer from what was found instead of
+            // "Stopped after N agent steps".
+            else if steps > 1 && step == steps - 1 {
+                body["tool_choice"] = "none"
+                // and say so, or the model writes "Let me try one more search…" and stops there
+                if var msgs = body["messages"] as? [[String: Any]], let i = msgs.indices.last,
+                   msgs[i]["role"] as? String == "tool", let c = msgs[i]["content"] as? String {
+                    msgs[i]["content"] = c + "\n\n(That was the last tool call for this message. Now answer the "
+                        + "user from what you found. If you did not find it, say so, and say what you searched for.)"
+                    body["messages"] = msgs
+                }
+            }
             // The tool-call gate (server default 0.7) guards against stray calls. When the router has decided
             // that tools are needed, or the model is continuing after a tool result, a call is expected: relax it.
-            else if (allowed.map { !$0.isEmpty } ?? false) || step > 0 { body["tool_call_min_prob"] = 0.2 }
+            else if relaxGate || (allowed.map { !$0.isEmpty } ?? false) || step > 0 { body["tool_call_min_prob"] = 0.2 }
             let reply = pending ?? ChatMessage(role: .assistant, content: "")
             if pending == nil { append(chatID, reply) }
             pending = nil
@@ -730,9 +772,25 @@ final class AppState: ObservableObject {
                 let keep = Set(calls.map(\.id))
                 update(chatID, reply.id) { m in m.toolRuns.removeAll { !keep.contains($0.id) } }
             }
+            // The gate held back a tool call the model meant to make ("I'll use the remember tool…"), and what it
+            // wrote instead degenerated ("|" over and over until the loop guard). Try the step again, trusting it.
+            if calls.isEmpty, !relaxGate, step < steps - 1,
+               let st = chats.first(where: { $0.id == chatID })?.messages.first(where: { $0.id == reply.id })?.stats,
+               st.finishReason == "repetition", !(st.gateBlocked ?? []).isEmpty {
+                relaxGate = true
+                if allowed?.isEmpty == true { allowed = nil }
+                update(chatID, reply.id) { m in
+                    m.content = ""
+                    m.reasoning = ""
+                    m.stats = nil
+                }
+                pending = chats.first(where: { $0.id == chatID })?.messages.first(where: { $0.id == reply.id })
+                continue
+            }
             if calls.isEmpty {
                 // A finished text reply: check it, and rewrite it once if a check fails (ReplyReview.swift).
                 if !Task.isCancelled { await reviewAndRevise(chatID, replyID: reply.id, specs: specs) }
+                if !Task.isCancelled { learnFromLatestReply(chatID) }     // the knowledge graph, in the background
                 return
             }
             guard let tools else { return }
@@ -745,6 +803,34 @@ final class AppState: ObservableObject {
                         + (allowed.isEmpty ? "no tools" : allowed.sorted().joined(separator: ", "))
                         + "). Answer from the conversation, or use an allowed tool."
                     setRun(chatID, reply.id, call.id) { $0.status = .denied; $0.result = text }
+                    append(chatID, toolMessage(call, text))
+                    continue
+                }
+                // The same call again in this turn: its result is already above, so don't run it again.
+                let key = call.name + "\u{0}" + call.arguments
+                if let n = ran[key] {
+                    ran[key] = n + 1
+                    let text = "error: you already called \(call.name) with these arguments in this turn; the result "
+                        + "is above. Don't repeat it: try something different, or answer with what you have."
+                    setRun(chatID, reply.id, call.id) { $0.status = .done; $0.result = text }
+                    append(chatID, toolMessage(call, text))
+                    continue
+                }
+                ran[key] = 1
+                if opened.contains(key) {
+                    let text = "error: you opened this exact URL earlier in this chat; its result is above. Use it, "
+                        + "or open a different URL (for a search, use the words the user wrote)."
+                    setRun(chatID, reply.id, call.id) { $0.status = .done; $0.result = text }
+                    append(chatID, toolMessage(call, text))
+                    continue
+                }
+                if mem, KnowledgeTools.names.contains(call.name) {     // the knowledge graph (KnowledgeGlue.swift)
+                    setRun(chatID, reply.id, call.id) { $0.status = .running }
+                    let text = await runKnowledgeTool(call, chatID: chatID, messageID: reply.id)
+                    setRun(chatID, reply.id, call.id) { run in
+                        run.status = .done
+                        run.result = text
+                    }
                     append(chatID, toolMessage(call, text))
                     continue
                 }
@@ -805,6 +891,22 @@ final class AppState: ObservableObject {
                 }
                 let output = await tools.run(call)
                 result = output.text
+                // Many web lookups without an answer: say so, so the model stops searching and reports.
+                // A search for none of the user's words: usually a name romanized or translated wrong. Say so.
+                if call.name == "fetch_url", let u = call.argumentDict["url"] as? String,
+                   WebFetch.searchMissesUserWords(u, userText: userText) {
+                    result += "\n\n(This search uses none of the words in the user's message. Names are often "
+                        + "spelled differently in another language: search with the words exactly as the user wrote "
+                        + "them, in their language.)"
+                }
+                if AgentTools.webTools.contains(call.name) {
+                    webCalls += 1
+                    if webCalls >= 5 {
+                        result += "\n\n(Web call \(webCalls) in this turn, \(steps - step - 1) step(s) left. If these "
+                            + "pages don't answer it, stop searching: tell the user what you found and what you "
+                            + "couldn't find.)"
+                    }
+                }
                 setRun(chatID, reply.id, call.id) { run in
                     run.status = .done
                     run.result = output.text

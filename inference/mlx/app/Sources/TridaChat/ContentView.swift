@@ -1,9 +1,11 @@
 import AppKit
 import SwiftUI
 import TridaChatCore
+import TridaKnowledgeUI
 
 struct ContentView: View {
     @EnvironmentObject var state: AppState
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         NavigationSplitView {
@@ -38,6 +40,15 @@ struct ContentView: View {
                 .listStyle(.sidebar)
                 .scrollContentBackground(.hidden)
                 if state.showMascot && !state.mascotInMargin { MascotPanel() }
+                // the knowledge graph: click the brain to open it (⇧⌘K)
+                BrainBar(model: state.knowledge) { relations in
+                    state.knowledge.showRelations = relations
+                    openWindow(id: "knowledge")
+                }
+                .background(Theme.sidebar)
+                .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
+                // the status bar is a bottom inset over the whole window and covers the sidebar's last line
+                Color.clear.frame(height: 28)
             }
             .background(Theme.sidebar)
             .navigationSplitViewColumnWidth(min: 180, ideal: 220)

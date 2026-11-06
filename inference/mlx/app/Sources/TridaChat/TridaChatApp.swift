@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TridaKnowledgeUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -64,6 +65,8 @@ struct TridaChatApp: App {
                 Button("Export Training Data…") { delegate.state.exportTrainingData() }
             }
             CommandGroup(after: .sidebar) {
+                OpenKnowledgeButton()
+                    .keyboardShortcut("k", modifiers: [.command, .shift])
                 Button("Show or Hide Mascot") { delegate.state.showMascot.toggle() }
                     .keyboardShortcut("m", modifiers: [.command, .shift])
                 Button("Show or Hide Code Viewer") { delegate.state.showViewer.toggle() }
@@ -77,6 +80,11 @@ struct TridaChatApp: App {
                 OpenDecideButton()
                     .keyboardShortcut("d", modifiers: [.command, .shift])
             }
+        }
+
+        Window("Knowledge", id: "knowledge") {
+            KnowledgeView(model: delegate.state.knowledge)
+                .tint(Theme.accent)
         }
 
         Window("Decide", id: "decide") {

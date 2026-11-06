@@ -17,6 +17,38 @@ public enum WebFetch {
         }
     }
 
+    /// The words a search or encyclopedia URL looks up (its `query` / `q` / `search` / `wd` parameter, or the
+    /// title after /wiki/ or /w/), decoded and lowercased; nil for other pages.
+    public static func searchWords(_ s: String) -> [String]? {
+        guard let u = url(s), let c = URLComponents(url: u, resolvingAgainstBaseURL: false) else { return nil }
+        var text: String?
+        if let q = c.queryItems?.first(where: { ["query", "q", "search", "wd", "p"].contains($0.name.lowercased()) }) {
+            text = q.value
+        } else {
+            let parts = c.path.split(separator: "/")
+            if parts.count >= 2, ["wiki", "w"].contains(parts[parts.count - 2].lowercased()) {
+                text = String(parts.last!).removingPercentEncoding ?? String(parts.last!)
+            }
+        }
+        guard let t = text?.replacingOccurrences(of: "+", with: " ").replacingOccurrences(of: "_", with: " ") else {
+            return nil
+        }
+        let words = t.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init).filter { $0.count >= 2 }
+        return words.isEmpty ? nil : words
+    }
+
+    /// Whether a search shares no word with what the user wrote (a name searched in another spelling: the user
+    /// wrote a Korean school name and the search is for a romanized guess at it). A word counts when the user's
+    /// text contains it, so Korean words with particles attached still match.
+    /// Only searches (a query parameter): an encyclopedia title in English is a fine source for a Korean question.
+    public static func searchMissesUserWords(_ s: String, userText: String) -> Bool {
+        guard let u = url(s), let c = URLComponents(url: u, resolvingAgainstBaseURL: false),
+              c.queryItems?.contains(where: { ["query", "q", "search", "wd", "p"].contains($0.name.lowercased()) }) == true,
+              let words = searchWords(s) else { return false }
+        let said = userText.lowercased()
+        return !words.contains { said.contains($0) }
+    }
+
     public static func url(_ s: String) -> URL? {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let u = URL(string: t.contains("://") ? t : "https://" + t),
