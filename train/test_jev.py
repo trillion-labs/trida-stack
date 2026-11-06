@@ -1,5 +1,8 @@
-"""CPU tests for Jev decision training data (train/jev.py). No GPU, no network. Parity with kev itself (encoding and
-forward, on real kev data and a tiny model) is checked by train/tools/jev_parity_{kev,trida}.py."""
+"""CPU tests for Jev training data and model components. No GPU, no network.
+
+Parity with kev itself (encoding and forward, on real kev data and a tiny model)
+is checked by train/tools/jev_parity_{kev,trida}.py.
+"""
 import importlib.util
 import math
 import random
@@ -11,19 +14,18 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from train.jev import (
+from train.data.jev import (
     MIN_PACK,
     SPECIAL,
     JevRowDataset,
-    PointerHead,
     augment,
     encode_rows,
-    jev_loss,
     materialize,
     none_pair,
     pack_jev,
     training_context,
 )
+from train.models.jev import PointerHead, jev_loss
 
 
 class CharTok:

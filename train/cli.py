@@ -92,8 +92,9 @@ def build_parser():
                         "globally causal (vLLM-servable). Default off = original BD behavior.")
     p.add_argument("--max_segments", type=int, default=0, help="max segments per packed row (0=unlimited)")
     p.add_argument("--jev_data", default="",
-                   help="comma-separated kev-format JSONL files/dirs: adds Jev decision training (train/jev.py) — a "
-                        "pointer head on the clean causal stream, trained jointly with the SFT objective")
+                   help="comma-separated kev-format JSONL files/dirs: adds Jev decision training (data: "
+                        "train/data/jev.py; pointer head and loss: train/models/jev.py) — a pointer head on the clean "
+                        "causal stream, trained jointly with the SFT objective")
     p.add_argument("--jev_only", action="store_true",
                    help="train only the Jev decision objective (no SFT data, no diffusion loss): each optimizer "
                         "step is --jev_micro_per_step Jev micro-batches")
@@ -140,3 +141,7 @@ def build_parser():
                    help="W&B project; if unset, wandb falls back to $WANDB_PROJECT / its default")
     p.add_argument("--run_name", default=None)
     return p
+
+
+def parse_int_list(s):
+    return tuple(int(x) for x in s.split(",")) if s else None
