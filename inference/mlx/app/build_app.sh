@@ -18,7 +18,7 @@ setopt null_glob
 cd "$(dirname "$0")"
 HERE="$PWD"
 MLX_DIR="$(cd .. && pwd)"
-VERSION=0.4.0
+VERSION=0.5.0
 PYVER=3.12
 
 BUNDLE=0; ZIP=0; DMG=0; INSTALL=0

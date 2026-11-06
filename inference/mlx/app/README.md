@@ -17,7 +17,7 @@ of the prompt came from the cache.
   system serif. Under each reply, one quiet line: a draft meter (one cell per token self-spec may commit
   per step, filled to the reply's average), the speed, a seal when the reply checks pass (only failing or
   unsure checks are spelled out), and the reply's actions.
-- **Mascot.** A pixel Zoro-1 at the bottom of the sidebar shows what the model is doing: ready, reading
+- **Mascot.** A pixel Zoro-1 shows what the model is doing. It stands right beside the latest reply, in place of its avatar and level with the newest text as the reply streams in. A new chat shows it in the middle. When the window is too narrow, it moves to the bottom of the sidebar. Resting poses move at half speed. It shows: ready, reading
   your message (with the token count), thinking (a thought bubble), deciding (weighing two options, a
   "?"), using a tool (it holds a prop for the tool: a magnifier, a page, a folder, a terminal, a pen or a
   camera, with the tool's argument below), answering (speed lines when most drafted tokens are
@@ -40,7 +40,7 @@ of the prompt came from the cache.
   workspace folder you choose:
   - always on: `list_dir`, `read_file`, `find_files` (by name), `search_files` (inside files),
     `calculator`, `now`. Paths may be relative or absolute, but must be inside the workspace;
-  - `write_file` (opt-in in Settings → Agent; asks before every call) and `run_shell` (on by default), a terminal
+  - `write_file` (opt-in in Settings → Agent; asks before every call, except into the scratch folder) and `run_shell` (on by default), a terminal
     for the model: each chat has its own, whose working directory and exported variables carry over
     between commands (it starts in the workspace). Read-only commands (`ls`, `cat`, `grep`, `find`
     without `-exec`/`-delete`, `git status`/`log`/`diff`, …, also piped or chained, with no redirection to
@@ -95,9 +95,53 @@ of the prompt came from the cache.
   the right answer when the model got it wrong (or to confirm it); Export Training Data writes the
   marked questions to `decision_labels.jsonl` as kev's labelled records, ready for
   `train.py --jev_data`. Decisions with an image in the state are not kept.
+- **Web browsing.** Four tools read the web like a text browser.
+  - `fetch_url(url)` opens a page and returns its title, its section headings, how many links it has, and
+    the start of its text. On Wikipedia that start is the infobox and the lead.
+  - `find_in_page(query)` finds every place a phrase occurs on that page, with the text around it, its
+    section and the matching links. If the whole phrase doesn't occur, it tries the longest words.
+  - `read_section(heading)` reads one section.
+  - `open_link(link)` follows a link by its text or number, so the model clicks through instead of
+    guessing addresses.
+  - Pages are read as text: scripts, styles, menus, headers, the language list, citation marks and the
+    reference list are dropped. Plain http is upgraded to https except on your own network. Each page's
+    whole text is saved in the scratch folder.
+  - Opening a page asks first in manual mode; in auto mode Zoro-1 judges it, and addresses on your own
+    network always ask.
+  - The system prompt gives today's date and asks the model to look up facts that may have changed, to
+    answer only from what the page says, and to quote the line it used.
+  - After a web lookup, the reply check adds "backed by the pages". It fails when the reply states current
+    facts the page text doesn't show, and the reply is rewritten.
 - **PDFs.** `read_pdf(path, pages)` returns a PDF's text page by page (default the first 5); pages
   without a text layer come back as images when the model can see. `read_file` on a `.pdf` returns
   its text too.
+- **Auto and manual approvals.** The pill next to the context meter switches modes; so do ⇧⌘A and `/auto`.
+  - *Manual* asks before every write, command and screenshot.
+  - *Auto* runs them without asking, except risky ones, which always ask: deleting or moving files, sudo,
+    git push/reset/clean, piping a download into a shell, uploads and remote connections, killing
+    processes, permissions, system settings, hidden files, screenshots (`AutoApproval` in TridaChatCore).
+  - Zoro-1 judges everything else with one yes/no decision ("safe to run without asking?"). It runs at
+    P ≥ 0.8; below that, or if the check fails, the app asks. Read-only commands and scratch writes never
+    ask in either mode.
+  - The tool card shows how each call got through, and the decisions are kept as labels.
+- **Code viewer.** A panel on the right (⇧⌘E, or the toolbar's *Code* button) shows the files the model
+  wrote in this chat.
+  - *Changes* is a line diff against the file before the write, with 3 lines of context. *File* is the
+    file as it is now on disk.
+  - It opens by itself when the model writes a file; you can turn that off in Settings. Each
+    `write_file` card has a *View* button.
+- **Scratch folder.** Each chat has its own working folder in
+  `~/Library/Caches/co.trillionlabs.zoro1chat/scratch/<chat>/`. The system prompt gives the model the path,
+  and `run_shell` exports it as `$SCRATCH`.
+  - The model keeps drafts, extracted text, scripts and long command output there. `write_file` into it
+    runs without asking, even with workspace writes turned off.
+  - Long outputs of `read_pdf`, `search_files`, `find_files` and `list_dir` (over 8,000 characters) are
+    saved there, and the model gets the first 3,000 characters and the file's path. `read_file` takes an
+    `offset` to read the rest in slices.
+  - The toolbar's *Scratch* button lists the files: open one, show it in Finder, or save a copy to the
+    workspace.
+  - A chat's folder is deleted with the chat. At launch, folders of deleted chats and folders untouched
+    for a week are removed. Scratch files are not part of the training export.
 - **Undo for writes.** Before `write_file` changes a file, the app keeps a copy (or notes that the file
   did not exist); the tool card's *Undo* puts it back and tells the model in that call's result.
   Shell commands are not covered.

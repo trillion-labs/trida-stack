@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Zoro-1 Chat:
+  - **Web browsing:** `fetch_url` returns a page outline (title, sections, links, start of the text), and
+    `find_in_page`, `read_section` and `open_link` navigate the page. The system prompt carries today's
+    date and asks for answers quoted from the page, and a "backed by the pages" reply check runs after web
+    tools.
+  - **Auto and manual approvals:** auto mode runs writes and commands without asking. Risky patterns always
+    ask, and Zoro-1 judges the rest (P(safe) ≥ 0.8 runs).
+  - **Code viewer:** a right-hand panel with each written file's diff or current contents.
+  - **Scratch folder:** each chat gets a working folder that the model writes to without approval.
+    Long tool outputs are saved there with a preview and a path, `read_file` reads slices with `offset`,
+    and the toolbar's *Scratch* button lists the files.
   - **Decision labels:** each reply keeps its typed decisions. You mark the right answers, and
     `trida-mlx-datamine` writes them to `decision_labels.jsonl` as kev records (`--jev_data`).
   - **`read_pdf`:** reads PDF text, with scanned pages as images.
@@ -118,6 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `inference/mlx`: tool calls written without the `<tool_call>` wrapper (bare `<function=…>` blocks after a first wrapped call) are now parsed instead of dropped. A stray `</tool_call>` no longer shows up in the reply.
 - The metrics population split is read from `docs/metrics/first-party.txt` instead
   of an API lookup. Organisation membership here is private, so neither
   `/collaborators` nor `author_association` can answer it from a workflow: both
