@@ -29,6 +29,23 @@ struct FakeBackend: KnowledgeBackend {
     func complete(system: String, user: String, maxTokens: Int) async throws -> String { proposal }
 }
 
+/// Like FakeBackend, but types new entries by name (the "What kind of thing is …" choice).
+struct TypingBackend: KnowledgeBackend {
+    var proposal: String
+    var types: [String: String]
+
+    func yesNo(state: [(String, String)], question: String) async throws -> Double { 0.95 }
+
+    func choose(state: [(String, String)], question: String, options: [(key: String, label: String)]) async throws
+        -> [String: Double] {
+        var out = Dictionary(uniqueKeysWithValues: options.map { ($0.key, 0.05) })
+        if let name = state.first(where: { $0.0 == "name" })?.1, let t = types[name] { out[t] = 0.9 } else { out["new"] = 0.9 }
+        return out
+    }
+
+    func complete(system: String, user: String, maxTokens: Int) async throws -> String { proposal }
+}
+
 let day = 86400.0
 let t0 = Date(timeIntervalSince1970: 1_790_000_000)
 
@@ -101,9 +118,18 @@ do {
         """)
     check(raw.count == 2 && raw[0].object == "Trillion Labs", "JSON inside a code fence is parsed")
 
+    // what Zoro-1 actually wrote: one bare object, not an array, with "organization" as the type
+    let bare = Learner.parse(#"{"subject": "user", "subject_type": "person", "relation": "works_at", "object": "Trillionlabs", "object_type": "organization", "source": "user"} {"subject": "me", "relation": "uses", "object": "Python"}"#)
+    check(bare.count == 2 && bare[0].objectType == .org, "bare objects and type synonyms are parsed")
+    let said = Exchange(chatID: "c", messageID: "b", userText: "내 이름은 홍길동이야. Trillionlabs에서 일하고 있어", replyText: "반가워요")
+    check(Learner.check(bare[0], said)?.subject == KnowledgeGraph.meName, "\"user\" is the user's own entry")
+
     let x = Exchange(chatID: "c", messageID: "m", userText: "I work at Trillion Labs now", replyText: "Nice!")
     check(Learner.check(raw[0], x) != nil, "a fact about the user is kept")
-    check(Learner.check(raw[1], x) == nil, "an unknown relation is dropped")
+    check(Learner.check(raw[1], x) == nil, "a fact naming nothing the user wrote is dropped")
+    var odd = raw[0]
+    odd.relation = "is the person who happens to work at"
+    check(Learner.check(odd, x) == nil, "a relation longer than 4 words is dropped")
 
     var secret = raw[0]
     secret.object = "my password is hunter2"
@@ -176,6 +202,195 @@ do {
     } catch {
         check(false, "pipeline threw \(error)")
     }
+}
+
+// MARK: facts from documents the reply read
+
+do {
+    let blog = FileText(path: "/Users/me/blog/posts/zoro-mlx.md",
+                        text: "# Running Zoro-1 on a Mac\nZoro-1 runs on Apple Silicon with MLX, using self-speculative decoding.")
+    let x = Exchange(chatID: "c", messageID: "d1", userText: "블로그 글들 요약해줘", replyText: "요약입니다…", files: [blog])
+    let fact = RawFact(subject: "Zoro-1", subjectType: .project, relation: "uses", object: "MLX", objectType: .topic,
+                       source: "file", quote: "Zoro-1 runs on Apple Silicon with MLX")
+    check(Learner.check(fact, x) != nil, "a document fact with a real quote is kept")
+    var made = fact
+    made.quote = "Zoro-1 runs on CUDA only"
+    check(Learner.check(made, x) == nil, "a quote that is not in the document is dropped")
+    var aboutMe = fact
+    aboutMe.subject = "me"
+    aboutMe.subjectType = .me
+    check(Learner.check(aboutMe, x) == nil, "a document cannot say anything about the user")
+    var g = KnowledgeGraph()
+    let f = ProposedFact(subject: .new(name: "Zoro-1", type: .project), relation: "uses", object: .new(name: "MLX", type: .topic),
+                         quote: fact.quote)
+    var ff = f
+    ff.fromFile = true
+    g.apply([ff], x)
+    check(g.edges.first?.origin == .file && g.edges.first?.sourceURL == blog.path, "the fact records its document")
+    check(g.provenance(g.edges[0]).hasPrefix("from zoro-mlx.md"), "provenance names the document")
+}
+
+// MARK: provenance and history
+
+do {
+    var g = KnowledgeGraph()
+    var x = Exchange(chatID: "chat-1", messageID: "msg-1", userText: "나는 서울에 살아", replyText: "네", date: t0)
+    x.chatTitle = "Moving"
+    x.model = "zoro-1-mlx-q8"
+    var f = ProposedFact(subject: .me, relation: "lives_in", object: .new(name: "Seoul", type: .place))
+    f.confidence = 0.83
+    g.apply([f], x)
+    let e = g.edges[0]
+    check(e.learnedAt == t0 && e.chatID == "chat-1" && e.messageID == "msg-1" && e.chatTitle == "Moving"
+          && e.model == "zoro-1-mlx-q8" && e.via == "learned" && e.userText == "나는 서울에 살아" && e.confidence == 0.83,
+          "a fact records when, where, by which model, how, from what and how sure")
+    // a newer fact ends it, and both sides of the change are in its history
+    var x2 = x
+    x2.messageID = "msg-2"
+    x2.userText = "이제 부산에 살아"
+    x2.date = t0 + day
+    g.apply([ProposedFact(subject: .me, relation: "lives_in", object: .new(name: "Busan", type: .place))], x2)
+    let old = g.edges.first { $0.id == e.id }!
+    check(old.history?.last?.what == "replaced" && old.history?.last?.from == "Seoul" && old.history?.last?.to == "Busan",
+          "the replaced fact's history says what replaced it")
+    g.setEnded(old.id, at: nil)
+    check(g.edges.first { $0.id == e.id }?.history?.last?.what == "reopened", "edits are logged")
+}
+
+// MARK: relations added while learning
+
+do {
+    // an old file without customRelations still loads
+    let old = #"{"nodes": [], "edges": [], "records": {"m": {"edges": ["e"], "nodes": [], "ended": []}}}"#
+    let dec = JSONDecoder()
+    dec.dateDecodingStrategy = .iso8601
+    let loaded = try? dec.decode(KnowledgeGraph.self, from: Data(old.utf8))
+    check(loaded?.customRelations.isEmpty == true && loaded?.records["m"]?.relations.isEmpty == true,
+          "a file from before custom relations still loads")
+    check(Relation.key(for: "Reports To") == "reports_to" && Relation.key(for: "a b c d e") == nil,
+          "relation names become snake_case keys of 1-4 words")
+
+    // a new relation: Zoro-1 finds no existing one that means the same, then decides its two flags
+    var g = KnowledgeGraph()
+    let x = Exchange(chatID: "c", messageID: "r1", userText: "나는 김팀장한테 보고해", replyText: "알겠습니다", date: t0)
+    let backend = FakeBackend(proposal: """
+        [{"subject": "me", "subject_type": "me", "relation": "reports_to", "object": "김팀장", "object_type": "person", "source": "user"}]
+        """)
+    let facts = try await Learner.propose(x, graph: g, backend: backend)
+    check(facts.first?.newRelation?.key == "reports_to" && facts.first?.newRelation?.provisional == true,
+          "an unlisted relation is proposed as a new provisional one")
+    g.apply(facts, x)
+    check(g.relation("reports_to")?.custom == true && g.edges.count == 1, "the new relation and its fact are added")
+    check(g.records["r1"]?.relations == ["reports_to"], "the record remembers the relation it made")
+    check(Learner.proposalSystem(g).contains("reports_to"), "later proposals can reuse it")
+
+    // a synonym maps onto the existing relation when Zoro-1 picks it
+    let synonym = FakeBackend(proposal: """
+        [{"subject": "me", "subject_type": "me", "relation": "employed_by", "object": "Trillion Labs", "object_type": "org", "source": "user"}]
+        """, linkPick: String((g.relations.firstIndex { $0.key == "works_at" } ?? 0) + 1))
+    let x2 = Exchange(chatID: "c", messageID: "r2", userText: "Trillion Labs에 다녀", replyText: "네", date: t0)
+    let f2 = try await Learner.propose(x2, graph: g, backend: synonym)
+    check(f2.first?.relation == "works_at" && f2.first?.newRelation == nil, "a synonym is mapped to the existing relation")
+
+    // promotion after enough facts use it; merge; delete keeps the facts as "related to"
+    for i in 0..<3 {
+        let p = g.addNode(name: "P\(i)", type: .person)
+        _ = g.addFact(KGEdge(subject: p, relation: "reports_to", object: g.me!.id, origin: .user), at: t0)
+        g.promoteIfUsedForTests("reports_to")
+    }
+    check(g.relation("reports_to")?.provisional == false, "a relation used enough is no longer provisional")
+    g.addRelation(Relation(key: "manager", label: "manager", functional: true, timeSensitive: false, hint: "",
+                           provisional: true))
+    let boss = g.addNode(name: "Boss", type: .person)
+    _ = g.addFact(KGEdge(subject: g.me!.id, relation: "manager", object: boss, origin: .user), at: t0)
+    g.mergeRelation("manager", into: "reports_to")
+    check(g.relation("manager") == nil && g.edges.contains { $0.relation == "reports_to" && $0.object == boss },
+          "merging moves the facts")
+    let n = g.edges.filter { $0.relation == "reports_to" }.count
+    g.deleteRelation("reports_to")
+    check(g.relation("reports_to") == nil && g.edges.filter { $0.relation == "related_to" && $0.note == "reports to" }.count == n,
+          "deleting keeps the facts as related to, with a note")
+    check(g.relation("works_at") != nil, "built-in relations stay")
+} catch {
+    check(false, "relations threw \(error)")
+}
+
+// MARK: relation types and direction
+
+do {
+    check(!Relations.fits("member_of", .org, .role) && !Relations.fits("member_of", .role, .org),
+          "a job title is not a member, and nothing is a member of one")
+    check(!Relations.fits("created_by", .org, .value), "created by a date does not fit")
+    check(Relations.fits("works_at", .me, .org) && Relations.fits("related_to", .role, .value), "fits checks types")
+
+    // the hiring section of a company page: "Member of Technical Staff" is a role (Zoro-1 types new entries)
+    let x = Exchange(chatID: "c", messageID: "jobs", userText: "Trillion Labs에 대해 알려줘", replyText: "…",
+                     webEvidence: "Join our team\nMember of Technical Staff\nTrillion Labs is based in Seoul, Korea",
+                     webSources: ["https://trillionlabs.co"], webGrounded: true)
+    let proposal = """
+        [{"subject": "Trillion Labs", "subject_type": "org", "relation": "member_of", "object": "Technical Staff", "object_type": "team", "source": "web", "quote": "Member of Technical Staff"},
+         {"subject": "Seoul", "subject_type": "place", "relation": "located_in", "object": "Trillion Labs", "object_type": "org", "source": "web", "quote": "Trillion Labs is based in Seoul, Korea"}]
+        """
+    var g = KnowledgeGraph()
+    let types = ["Technical Staff": "role", "Trillion Labs": "org", "Seoul": "place"]
+    let facts = try await Learner.propose(x, graph: g, backend: TypingBackend(proposal: proposal, types: types))
+    g.apply(facts, x)
+    check(!g.edges.contains { $0.relation == "member_of" }, "a company is not a member of a job title")
+    let loc = g.edges.first { $0.relation == "located_in" }
+    check(loc.map { g.node($0.subject)?.name == "Trillion Labs" && g.node($0.object)?.name == "Seoul" } == true,
+          "a fact that only fits the other way round is turned around")
+}
+
+// MARK: /update-kg (the whole chat)
+
+do {
+    // an earlier turn read the page; the last turn only listed facts (the gate would have said no)
+    var x = Exchange(chatID: "c", messageID: "last", userText: "Trillion Labs에 대해 알려줘\n\ncan you list up triples?",
+                     replyText: "Trillion Labs → located in → Seoul", webEvidence: "Trillion Labs is based in Seoul, Korea",
+                     webSources: ["https://trillionlabs.co"], webGrounded: true, explicit: true)
+    x.wholeChat = true
+    let proposal = """
+        [{"subject": "Trillion Labs", "subject_type": "org", "relation": "located_in", "object": "Seoul", "object_type": "place", "source": "web", "quote": "Trillion Labs is based in Seoul, Korea"},
+         {"subject": "Trillion Labs", "subject_type": "org", "relation": "ceo", "object": "Someone", "object_type": "person", "source": "web", "quote": "a line that is not on the page"}]
+        """
+    var g = KnowledgeGraph()
+    let facts = try await Learner.propose(x, graph: g, backend: FakeBackend(gate: 0.1, proposal: proposal))
+    g.apply(facts, x)
+    check(g.edges.count == 1 && g.edges.first?.relation == "located_in", "/update-kg skips the gate but still checks quotes")
+    check(g.edges.first?.via == "update-kg", "facts from /update-kg say so")
+    check(Learner.proposalUser(x).contains("The user's messages in this chat"), "the whole chat goes to the proposal")
+}
+
+// MARK: repairing Zoro-1's JSON
+
+do {
+    let broken = #"[{"subject": "A Co", "relation": "is_a", "object": "lab", "source": "web", "quote": "Our mission is "recursive" AI"}, {"subject": "B", "relation": "uses", "object": "C", "quote": "line one"# + "\n" + #"line two"}]"#
+    let facts = Learner.parse(broken)
+    check(facts.count == 2, "a quote mark or a line break inside a string does not lose the facts after it")
+    check(facts.first?.quote == "Our mission is \"recursive\" AI", "the quote keeps its quote marks")
+    let fine = #"[{"subject": "x", "relation": "uses", "object": "y \"z\"", "source": "user"}]"#
+    check(Learner.parse(fine).first?.object == "y \"z\"", "valid JSON is unchanged")
+}
+
+// MARK: whole-graph layout
+
+do {
+    var g = KnowledgeGraph()
+    let a = g.addNode(name: "A", type: .person), b = g.addNode(name: "B", type: .org)
+    let c = g.addNode(name: "C", type: .place), d = g.addNode(name: "D", type: .topic)
+    let lone = g.addNode(name: "Lone", type: .topic)
+    _ = g.addFact(KGEdge(subject: a, relation: "works_at", object: b, origin: .user), at: t0)
+    _ = g.addFact(KGEdge(subject: c, relation: "related_to", object: d, origin: .user), at: t0)
+    let pos = KnowledgeLayout.layout(g)
+    check(pos.count == g.nodes.count, "every entry gets a position, isolated ones too")
+    func dist(_ x: String, _ y: String) -> Double {
+        guard let p = pos[x], let q = pos[y] else { return -1 }
+        return ((p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y)).squareRoot()
+    }
+    check(dist(a, b) > 20 && dist(c, d) > 20, "linked entries do not sit on top of each other")
+    check([dist(a, c), dist(a, d), dist(b, c), dist(b, d), dist(a, lone), dist(c, lone)].allSatisfy { $0 > 40 },
+          "separate groups are kept apart")
+    check(KnowledgeLayout.layout(g) == pos, "the layout is deterministic")
 }
 
 print(failures == 0 ? "kg-selftest: all checks passed" : "kg-selftest: \(failures) check(s) failed")

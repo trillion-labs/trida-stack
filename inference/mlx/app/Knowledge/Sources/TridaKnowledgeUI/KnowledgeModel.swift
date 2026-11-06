@@ -14,7 +14,14 @@ public final class KnowledgeModel: ObservableObject {
     }
     /// The exchange currently being learned from (the chip shows "Learning…").
     @Published public private(set) var learning: String?
-    @Published public private(set) var lastError: String?
+    @Published public var lastError: String?
+    /// The last time learning added facts, and how many (the brain's pop and "+N").
+    @Published public private(set) var lastLearned: LearnedPulse?
+
+    public struct LearnedPulse: Equatable {
+        public var count: Int
+        public var at: Date
+    }
 
     // the Knowledge window
     @Published public var search = ""
@@ -29,6 +36,35 @@ public final class KnowledgeModel: ObservableObject {
     @Published public var newObject = ""
     @Published public var newObjectType: NodeType = .topic
     @Published public var newObjectIsSubject = false
+    // the whole-graph view: zoom and pan (and the layout, computed once per graph shape)
+    @Published public var wholeGraph = false
+    @Published public var zoom: CGFloat = 1
+    @Published public var pan: CGSize = .zero
+    var zoomBase: CGFloat?
+    var panBase: CGSize?
+    private var layoutKey = ""
+    private var layoutCache: [String: KnowledgeLayout.Point] = [:]
+
+    /// Node positions for the whole-graph view; recomputed only when entries or links change.
+    public func layout() -> [String: KnowledgeLayout.Point] {
+        let key = graph.nodes.map(\.id).joined(separator: ",") + "|"
+            + graph.edges.filter { showEnded || $0.isCurrent() }.map { $0.subject + ">" + $0.object }.joined(separator: ",")
+        if key != layoutKey {
+            layoutCache = KnowledgeLayout.layout(graph, includeEnded: showEnded)
+            layoutKey = key
+        }
+        return layoutCache
+    }
+
+    public func resetView() {
+        zoom = 1
+        pan = .zero
+    }
+
+    // the Relations tab
+    @Published public var showRelations = false
+    @Published public var selectedRelation: String?
+    @Published public var relationText = ""
 
     /// Opens the chat message a fact came from (set by the app).
     public var openSource: ((_ chatID: String, _ messageID: String) -> Void)?
@@ -117,6 +153,7 @@ public final class KnowledgeModel: ObservableObject {
             var rec: LearnedRecord?
             mutate { rec = $0.apply(facts, x) }
             lastError = nil
+            if let rec { lastLearned = LearnedPulse(count: rec.edges.count, at: Date()) }
             return rec
         } catch {
             lastError = error.localizedDescription
@@ -141,6 +178,11 @@ public final class KnowledgeModel: ObservableObject {
         focus = e.subject
         selectedEdge = id
         selectedNode = nil
+    }
+
+    public func select(relation key: String) {
+        selectedRelation = key
+        relationText = graph.relation(key)?.label ?? ""
     }
 
     public func select(node id: String) {
@@ -181,6 +223,7 @@ public final class KnowledgeModel: ObservableObject {
             guard s != o else { return }
             var e = KGEdge(subject: s, relation: relation, object: o, origin: .edited)
             e.validFrom = Date()
+            e.via = "manual"
             _ = g.addFact(e)
         }
         newObject = ""

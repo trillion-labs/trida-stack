@@ -15,6 +15,7 @@ public enum KnowledgeColors {
         case .topic: return Color(red: 0.77, green: 0.33, blue: 0.5)
         case .event: return Color(red: 0.72, green: 0.58, blue: 0.1)
         case .value: return Color(red: 0.55, green: 0.55, blue: 0.55)
+        case .role: return Color(red: 0.36, green: 0.56, blue: 0.2)
         }
     }
 }
@@ -29,12 +30,19 @@ public struct KnowledgeView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            HStack(spacing: 0) {
-                KnowledgeSidebar(model: model).frame(width: 230)
-                Divider()
-                KnowledgeGraphView(model: model).frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-                Divider()
-                KnowledgeInspector(model: model).frame(width: 310)
+            if model.showRelations {
+                RelationsView(model: model)
+            } else {
+                HStack(spacing: 0) {
+                    KnowledgeSidebar(model: model).frame(width: 230)
+                    Divider()
+                    Group {
+                        if model.wholeGraph { WholeGraphView(model: model) } else { KnowledgeGraphView(model: model) }
+                    }
+                    .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+                    Divider()
+                    KnowledgeInspector(model: model).frame(width: 310)
+                }
             }
         }
         .frame(minWidth: 1000, minHeight: 560)
@@ -43,6 +51,18 @@ public struct KnowledgeView: View {
     var header: some View {
         HStack(spacing: 14) {
             Text("Knowledge").font(.headline)
+            Picker("", selection: Binding(get: { model.showRelations ? 2 : model.wholeGraph ? 1 : 0 }, set: { v in
+                model.showRelations = v == 2
+                if v < 2 { model.wholeGraph = v == 1 }
+            })) {
+                Text("Focus").tag(0)
+                Text("All").tag(1)
+                Text("Relations" + (model.graph.customRelations.contains { $0.provisional } ? " •" : "")).tag(2)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 250)
+            .help("Focus: one entry and its neighbors · All: every entry, including isolated ones · Relations")
             Text("\(model.graph.nodes.count) entries · \(model.graph.edges.filter { $0.isCurrent() }.count) facts")
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
@@ -123,12 +143,12 @@ struct KnowledgeGraphView: View {
                 ZStack {
                     Canvas { ctx, _ in
                         for s in spokes {
-                            var p = Path()
-                            p.move(to: mid)
-                            p.addLine(to: s.pos)
                             let current = s.edges.contains { $0.isCurrent() }
-                            ctx.stroke(p, with: .color(.secondary.opacity(current ? 0.55 : 0.25)),
-                                       style: StrokeStyle(lineWidth: current ? 1.4 : 1, dash: current ? [] : [5, 4]))
+                            let out = s.edges.contains { $0.subject == cid }, inn = s.edges.contains { $0.object == cid }
+                            Arrow.draw(in: ctx, from: mid, to: s.pos, fromRadius: 18, toRadius: 12,
+                                       headAtEnd: out, headAtStart: inn,
+                                       color: .secondary.opacity(current ? 0.6 : 0.3), width: current ? 1.4 : 1,
+                                       dashed: !current)
                         }
                     }
                     ForEach(spokes) { s in
@@ -181,18 +201,22 @@ struct KnowledgeGraphView: View {
 
     func nodeBubble(_ n: KGNode, big: Bool) -> some View {
         let selected = model.selectedNode == n.id && model.selectedEdge == nil
-        return VStack(spacing: 3) {
-            Circle()
-                .fill(KnowledgeColors.of(n.type))
-                .frame(width: big ? 30 : 18, height: big ? 30 : 18)
-                .overlay(Circle().stroke(Color.primary.opacity(selected ? 0.8 : 0), lineWidth: 2).padding(-3))
-            Text(n.name)
-                .font(big ? .callout.weight(.semibold) : .caption)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 120)
-        }
-        .contentShape(Rectangle())
+        let d: CGFloat = big ? 30 : 18
+        // the circle is the view (so .position centers it, and arrows end at its edge); the name hangs below
+        return Circle()
+            .fill(KnowledgeColors.of(n.type))
+            .frame(width: d, height: d)
+            .overlay(Circle().stroke(Color.primary.opacity(selected ? 0.8 : 0), lineWidth: 2).padding(-3))
+            .overlay(alignment: .top) {
+                Text(n.name)
+                    .font(big ? .callout.weight(.semibold) : .caption)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .frame(width: 130)
+                    .offset(y: d + 3)
+                    .allowsHitTesting(false)
+            }
+        .contentShape(Circle().inset(by: -6))
         .onTapGesture(count: 2) {
             model.focus = n.id
             model.select(node: n.id)
@@ -205,7 +229,7 @@ struct KnowledgeGraphView: View {
         VStack(spacing: 2) {
             ForEach(s.edges.prefix(3)) { e in
                 let out = e.subject == model.center
-                Text((out ? "" : "← ") + Relations.label(e.relation) + (out ? " →" : ""))
+                Text((out ? "" : "← ") + model.graph.relationLabel(e.relation) + (out ? " →" : ""))
                     .font(.caption2)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -302,7 +326,7 @@ struct KnowledgeInspector: View {
             }
             section("Add a fact") {
                 Picker("Relation", selection: $model.newRelation) {
-                    ForEach(Relations.all, id: \.key) { Text($0.label).tag($0.key) }
+                    ForEach(model.graph.relations, id: \.key) { Text($0.label).tag($0.key) }
                 }
                 Toggle("\(n.name) is the object", isOn: $model.newObjectIsSubject).toggleStyle(.checkbox)
                 TextField("Other entry (found by name, or new)", text: $model.newObject)
@@ -351,9 +375,12 @@ struct KnowledgeInspector: View {
             HStack(spacing: 6) {
                 Button(g.name(e.subject)) { model.select(node: e.subject) }
                 Picker("", selection: Binding(get: { e.relation }, set: { r in
-                    model.mutate { $0.update(edge: e.id) { $0.relation = r; $0.origin = .edited } }
+                    model.mutate { g in
+                        let from = g.relationLabel(e.relation), to = g.relationLabel(r)
+                        g.update(edge: e.id) { $0.relation = r; $0.origin = .edited; $0.log("relation", from: from, to: to, by: "you") }
+                    }
                 })) {
-                    ForEach(Relations.all, id: \.key) { Text($0.label).tag($0.key) }
+                    ForEach(g.relations, id: \.key) { Text($0.label + ($0.provisional ? " (new)" : "")).tag($0.key) }
                 }
                 .labelsHidden()
                 .frame(maxWidth: 150)
@@ -362,13 +389,49 @@ struct KnowledgeInspector: View {
             .buttonStyle(.link)
             section("Where it comes from") {
                 Text(g.provenance(e)).font(.callout)
+                Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 3) {
+                    row("Added", e.learnedAt.formatted(date: .abbreviated, time: .standard))
+                    row("How", e.via.map { ["learned": "learned after a reply", "remember": "you asked to remember it",
+                                           "manual": "added in this window",
+                                           "update-kg": "you ran /update-kg on the chat"][$0] ?? $0 }
+                            ?? "learned after a reply")
+                    row("Source", ["user": "your message", "web": "a web page", "file": "a document",
+                                   "edited": "your edit"][e.origin.rawValue] ?? e.origin.rawValue)
+                    if let t = e.chatTitle { row("Chat", t) }
+                    if let m = e.model { row("Model", m) }
+                    if e.via != "manual" && e.via != "remember" {
+                        row("Confidence", String(format: "%.2f", e.confidence))
+                    }
+                }
+                .font(.caption)
+                if let u = e.userText, e.origin == .user {
+                    Text("Your message: “\(u)”").font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true).lineLimit(4)
+                }
                 if let q = e.quote {
                     Text("“\(q)”").font(.callout).italic().foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if let u = e.sourceURL, let url = URL(string: u) { Link(u, destination: url).font(.caption).lineLimit(1) }
+                if let u = e.sourceURL {
+                    if u.hasPrefix("http"), let url = URL(string: u) {
+                        Link(u, destination: url).font(.caption).lineLimit(1)
+                    } else {
+                        Button(u) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: u)]) }
+                            .buttonStyle(.link).font(.caption).lineLimit(1).truncationMode(.head)
+                            .help("Show the document in Finder")
+                    }
+                }
                 if let c = e.chatID, let m = e.messageID, let open = model.openSource {
                     Button("Open the message it came from") { open(c, m) }.buttonStyle(.link)
+                }
+            }
+            if let h = e.history, !h.isEmpty {
+                section("History") {
+                    ForEach(Array(h.enumerated().reversed()), id: \.offset) { _, c in
+                        Text(c.at.formatted(date: .abbreviated, time: .shortened) + " · " + c.by + ": " + c.what
+                             + (c.from.map { " " + $0 } ?? "") + (c.to.map { " → " + $0 } ?? ""))
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             section("When") {
@@ -396,6 +459,13 @@ struct KnowledgeInspector: View {
 
     static func day(_ d: Date) -> String { d.formatted(date: .abbreviated, time: .omitted) }
 
+    func row(_ k: String, _ v: String) -> some View {
+        GridRow {
+            Text(k).foregroundStyle(.secondary)
+            Text(v).textSelection(.enabled).lineLimit(2)
+        }
+    }
+
     func section<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
@@ -419,6 +489,14 @@ public struct LearnedChip: View {
         self.open = open
     }
 
+    static func prefix(_ e: KGEdge) -> String {
+        switch e.origin {
+        case .web: return "Learned from \(e.sourceURL.flatMap { URL(string: $0)?.host } ?? "the web"): "
+        case .file: return "Learned from \(e.sourceURL.map { ($0 as NSString).lastPathComponent } ?? "a document"): "
+        default: return "Learned: "
+        }
+    }
+
     public var body: some View {
         if model.learning == messageID {
             HStack(spacing: 6) {
@@ -428,12 +506,12 @@ public struct LearnedChip: View {
         } else if let rec = model.record(messageID), let first = rec.edges.first,
                   let e = model.graph.edges.first(where: { $0.id == first }) {
             HStack(spacing: 8) {
-                Image(systemName: e.origin == .web ? "globe" : "brain").foregroundStyle(.secondary)
+                Image(systemName: e.origin == .web ? "globe" : e.origin == .file ? "doc.text" : "brain")
+                    .foregroundStyle(.secondary)
                 Button {
                     open(first)
                 } label: {
-                    Text((e.origin == .web ? "Learned from \(e.sourceURL.flatMap { URL(string: $0)?.host } ?? "the web"): "
-                                           : "Learned: ") + model.graph.describe(e)
+                    Text(Self.prefix(e) + model.graph.describe(e)
                          + (rec.edges.count > 1 ? "  +\(rec.edges.count - 1) more" : ""))
                         .font(.caption)
                         .lineLimit(1)
@@ -448,5 +526,153 @@ public struct LearnedChip: View {
             .padding(.vertical, 3)
             .background(Capsule().fill(Color.secondary.opacity(0.1)))
         }
+    }
+}
+
+// MARK: - relations
+
+/// The relations: the 21 built in and the ones added while learning. New ones are provisional until they are used
+/// \(KnowledgeGraph.promoteAfter) times or approved; custom ones can be renamed, re-flagged, merged or deleted.
+struct RelationsView: View {
+    @ObservedObject var model: KnowledgeModel
+
+    var body: some View {
+        let g = model.graph
+        let counts = g.relationCounts
+        HStack(spacing: 0) {
+            List {
+                Section("Added while learning") {
+                    if g.customRelations.isEmpty {
+                        Text("None yet. When a fact needs a relation that isn't listed, Zoro-1 adds one here.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    ForEach(g.customRelations, id: \.key) { r in row(r, counts[r.key] ?? 0) }
+                }
+                Section("Built in") {
+                    ForEach(Relations.all, id: \.key) { r in row(r, counts[r.key] ?? 0) }
+                }
+            }
+            .listStyle(.inset)
+            .frame(width: 360)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let key = model.selectedRelation, let r = g.relation(key) {
+                        editor(r, counts[r.key] ?? 0)
+                    } else {
+                        Text("Select a relation.").foregroundStyle(.secondary)
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    func row(_ r: Relation, _ n: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(r.label)
+            if r.provisional {
+                Text("new").font(.caption2.weight(.semibold)).foregroundStyle(.orange)
+                    .padding(.horizontal, 5).background(Capsule().stroke(Color.orange.opacity(0.6)))
+            }
+            Spacer()
+            Text("\(n)").font(.caption).foregroundStyle(.secondary)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { model.select(relation: r.key) }
+        .listRowBackground(model.selectedRelation == r.key ? Color.accentColor.opacity(0.15) : Color.clear)
+    }
+
+    func editor(_ r: Relation, _ n: Int) -> some View {
+        let key = r.key
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(r.label).font(.title3.weight(.semibold))
+            Text("\(n) fact\(n == 1 ? "" : "s") · \(r.hint)").font(.callout).foregroundStyle(.secondary)
+            if r.custom {
+                TextField("Name", text: $model.relationText)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit {
+                        let t = model.relationText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !t.isEmpty { model.mutate { $0.updateRelation(key) { $0.label = t } } }
+                    }
+                Toggle("One at a time (a new fact ends the old one)", isOn: Binding(get: { r.functional }, set: { v in
+                    model.mutate { $0.updateRelation(key) { $0.functional = v } }
+                }))
+                Toggle("Changes over time (flagged after 30 days)", isOn: Binding(get: { r.timeSensitive }, set: { v in
+                    model.mutate { $0.updateRelation(key) { $0.timeSensitive = v } }
+                }))
+                if r.provisional {
+                    Text("New: added by Zoro-1 while learning. It becomes a regular relation after "
+                         + "\(KnowledgeGraph.promoteAfter) facts use it, or when you approve it.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Button("Approve") { model.mutate { $0.updateRelation(key) { $0.provisional = false } } }
+                }
+                HStack {
+                    Menu("Merge into…") {
+                        ForEach(model.graph.relations.filter { $0.key != key }, id: \.key) { o in
+                            Button(o.label) {
+                                model.mutate { $0.mergeRelation(key, into: o.key) }
+                                model.select(relation: o.key)
+                            }
+                        }
+                    }
+                    .help("The same relation under two names: move its facts to another relation")
+                    Spacer()
+                    Button("Delete", role: .destructive) {
+                        model.mutate { $0.deleteRelation(key) }
+                        model.selectedRelation = nil
+                    }
+                    .help("Its facts are kept as \"related to\", with this name as their note")
+                }
+            } else {
+                Text((r.functional ? "One at a time. " : "") + (r.timeSensitive ? "Changes over time. " : "")
+                     + "Built in: it can't be renamed or deleted, but added relations can be merged into it.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if n > 0 {
+                Text("FACTS").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(model.graph.edges.filter { $0.relation == key }.prefix(50)) { e in
+                    Button {
+                        model.showRelations = false
+                        model.show(edge: e.id)
+                    } label: {
+                        Text(model.graph.describe(e)).font(.callout)
+                            .foregroundStyle(e.isCurrent() ? Color.primary : Color.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - arrows
+
+/// A relation drawn as an arrow from subject to object, trimmed at both circles.
+enum Arrow {
+    static func draw(in ctx: GraphicsContext, from a: CGPoint, to b: CGPoint, fromRadius: CGFloat, toRadius: CGFloat,
+                     headAtEnd: Bool = true, headAtStart: Bool = false, color: Color, width: CGFloat = 1.4,
+                     dashed: Bool = false, head: CGFloat = 8) {
+        let dx = b.x - a.x, dy = b.y - a.y, len = max(0.001, (dx * dx + dy * dy).squareRoot())
+        guard len > fromRadius + toRadius + 2 else { return }
+        let ux = dx / len, uy = dy / len
+        let start = CGPoint(x: a.x + ux * fromRadius, y: a.y + uy * fromRadius)
+        let end = CGPoint(x: b.x - ux * toRadius, y: b.y - uy * toRadius)
+        var line = Path()
+        line.move(to: headAtStart ? CGPoint(x: start.x + ux * head * 0.8, y: start.y + uy * head * 0.8) : start)
+        line.addLine(to: headAtEnd ? CGPoint(x: end.x - ux * head * 0.8, y: end.y - uy * head * 0.8) : end)
+        ctx.stroke(line, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round, dash: dashed ? [5, 4] : []))
+        func tip(_ p: CGPoint, _ dirX: CGFloat, _ dirY: CGFloat) {
+            var t = Path()
+            t.move(to: p)
+            t.addLine(to: CGPoint(x: p.x - dirX * head - dirY * head * 0.5, y: p.y - dirY * head + dirX * head * 0.5))
+            t.addLine(to: CGPoint(x: p.x - dirX * head + dirY * head * 0.5, y: p.y - dirY * head - dirX * head * 0.5))
+            t.closeSubpath()
+            ctx.fill(t, with: .color(color))
+        }
+        if headAtEnd { tip(end, ux, uy) }
+        if headAtStart { tip(start, -ux, -uy) }
     }
 }
