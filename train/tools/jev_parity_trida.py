@@ -4,7 +4,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from transformers.models.qwen3_5 import modeling_qwen3_5 as mq     # CPU: torch reference GDN / conv kernels
 mq.chunk_gated_delta_rule = None; mq.causal_conv1d_fn = None; mq.causal_conv1d_update = None; mq.FusedRMSNormGated = None
 from transformers import AutoTokenizer
-from train.jev import augment, materialize, none_pair, encode_rows, training_context, pack_jev, jev_loss
+from train.data.jev import augment, materialize, none_pair, encode_rows, training_context, pack_jev
+from train.models.jev import jev_loss
 S = sys.argv[1]
 K = json.load(open(f"{S}/kev_encode.json"))
 tok = AutoTokenizer.from_pretrained(f"{S}/tiny")
@@ -16,7 +17,7 @@ for i, r in enumerate(K["records"]):
 same = sum(a == [{k: row[k] for k in ("ids", "decide", "opts")} for row in b] for a, b in zip(K["rows"], ours))
 print(f"[1] encoding: {same}/{len(K['rows'])} variants identical to kev (counts {len(K['rows'])} vs {len(ours)})")
 
-from train.hf_block_diffusion_hybrid import HFBlockDiffusionHybrid
+from train.models.hybrid import HFBlockDiffusionHybrid
 torch.manual_seed(0)
 def build(gc, attn_impl="flex_attention"):
     m = HFBlockDiffusionHybrid(model_id=f"{S}/tiny", bd_size=8, dtype=torch.float32, ar_loss_weight=0.1, full_mask=True,
@@ -34,7 +35,7 @@ def probs(batch):
     return logs
 worst = 0.0
 def z_of(batch):   # rerun the head to get logits
-    from train.hf_block_diffusion_hybrid import _cu_seqlens_from_seg
+    from train.models.hybrid import _cu_seqlens_from_seg
     return None
 for single in (True, False):
     batches = [pack_jev([r], tok) for r in rows] if single else [pack_jev(rows, tok)]
