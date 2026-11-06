@@ -13,6 +13,7 @@ benchmark/
 ├── bfcl_v4/          # Berkeley Function-Calling Leaderboard v4 (tool use)
 ├── functionchat/     # FunctionChat-Bench (Korean tool use; LLM-judge)
 ├── ko_agentbench/    # Ko-AgentBench (Korean agent, L1–L7; LLM-judge)
+├── workflow_evals/   # TypeSafe workflow decisions (saved references; no runtime LLM judge)
 ├── tau2/             # τ²-bench (multi-turn tool use w/ simulated user; pass^k)
 ├── swe_bench/        # agentic software-engineering benchmark (scaffold)
 └── terminal_bench/   # agentic terminal benchmark — Hard subset (scaffold)
@@ -56,6 +57,7 @@ replica pool.
 | **BFCL v4** | Tool use (function calling) | per-category accuracy | Runnable (`bfcl_v4/`) | Apache-2.0 |
 | **FunctionChat-Bench** | Korean tool use (LLM-judge) | per-category pass rate | Runnable (`functionchat/`) | Apache-2.0 |
 | **Ko-AgentBench** | Korean agent (L1–L7, LLM-judge) | per-dimension metrics | Runnable (`ko_agentbench/`) | Apache-2.0 |
+| **WorkflowEvals** | Typed decisions + policy workflows | action agreement, elapsed time | Runnable ([setup](workflow_evals/README.md)); decision server required | Apache-2.0 code; dataset licenses separate |
 | **τ²-bench (tau2)** | Multi-turn tool use w/ simulated user | reward / pass^k | Runnable (`tau2/`) | MIT |
 | **SWE-bench (Verified)** | **Agentic software** | resolve real GitHub issues | Scaffold (`swe_bench/`) | **MIT** |
 | **Terminal-Bench (Hard)** | **Agentic terminal** | hard terminal tasks in Docker | Scaffold (`terminal_bench/`) | **Apache-2.0** (runs untrusted code, Docker) |
