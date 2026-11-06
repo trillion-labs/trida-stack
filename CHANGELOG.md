@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Zoro-1 Chat 0.6.0: **a personal knowledge graph** learned from chats (`inference/mlx/app/Knowledge`,
+  a standalone Swift package with its own `kg-selftest`).
+  - **Learning:** after each reply, Zoro-1 decides whether there is something lasting to remember and
+    proposes `subject —relation→ object` facts from your messages, grounded web answers and the documents
+    it read. Web and document facts need a quote that is really in what was read. Each relation has types
+    for its two ends: a fact that fits only the other way round is turned around, and one that fits neither
+    way is dropped. Zoro-1 also types new entries (a Role type for job titles) and links names to existing
+    entries.
+  - **Provenance:** each fact records when and how it was added, the chat, the model, the source page or
+    file with its quote, your message, and a history of changes. Functional relations end the older fact
+    instead of deleting it.
+  - **`/update-kg [focus]`:** learns from the whole chat (every turn, page and document), without the gate.
+  - **Using it:** the facts relevant to a message go with it, fixed when the message is sent so the prompt
+    cache still matches; `recall`, `remember` and `forget` tools.
+  - **Knowledge window** (⇧⌘K): Focus, All (every entry and group, isolated ones too, laid out by force;
+    drag, pinch, Fit) and Relations views. Facts are arrows from subject to object, dashed once ended.
+    An inspector edits entries and facts. A chip under each reply lists what it added, with Undo.
+  - **Brain button** in the sidebar: a pixel brain with a graph on it that shows learning, new facts and
+    relations waiting for review.
 - Zoro-1 Chat:
   - **Web browsing:** `fetch_url` returns a page outline (title, sections, links, start of the text), and
     `find_in_page`, `read_section` and `open_link` navigate the page. The system prompt carries today's
@@ -128,6 +147,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Zoro-1 Chat:
+  - **Prompt cache across messages:** the tool router's empty reply placeholder was sent as an empty
+    assistant turn, so each new message re-read the whole chat (about 80 s at 42k tokens).
+  - **Agent loop:** the last step answers without tools instead of stopping at "Stopped after N agent
+    steps". A call repeated in the same turn, or a URL already opened earlier in the chat, is not run again.
+    After five web calls, the results say how many steps are left.
+  - **Searches:** a search that uses none of the user's words gets a note to search with their words as
+    written, since names were being romanized wrongly. `fetch_url` suggests Naver and namu.wiki for Korean
+    subjects.
+  - **Tool-call gate:** when the gate held back a call the model meant to make and the reply degenerated
+    into `|` until the loop guard, the step is retried once with the gate relaxed. Saving to the knowledge
+    graph now routes to the memory tools.
 - `inference/mlx`: tool calls written without the `<tool_call>` wrapper (bare `<function=…>` blocks after a first wrapped call) are now parsed instead of dropped. A stray `</tool_call>` no longer shows up in the reply.
 - The metrics population split is read from `docs/metrics/first-party.txt` instead
   of an API lookup. Organisation membership here is private, so neither

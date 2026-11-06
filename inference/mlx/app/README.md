@@ -53,7 +53,8 @@ of the prompt came from the cache.
 - **Slash commands.** Typing `/` in the composer opens a command menu, as in Claude Code: ↑↓ to
   choose, Return to run (`/de` + Return runs `/decide`), Tab to complete, Esc to close.
   `/decide [question]`, `/new`, `/mode`
-  (self-spec ↔ AR). Unknown `/words` are sent as normal messages.
+  (self-spec ↔ AR), `/update-kg [focus]` (add this chat's facts to the knowledge graph). Unknown `/words`
+  are sent as normal messages.
 - **`/decide` in the chat.** Run `/decide` (or `/decide <question>`): the conversation so far, and
   its latest image, becomes the decision state, and the app asks step by step: the question, then
   its options (comma-separated, `key: description` allowed; or `yes/no`; or `score: low, medium,
@@ -165,6 +166,14 @@ of the prompt came from the cache.
   probability is below 0.7: `decide_choice(question, options, context)`, `decide_yes_no(question,
   context)`, `pick_file(goal, path)` (over a folder's names), `locate_files(query, path)` and, with the
   UI agent, `ui_check(goal)` (is it done on screen?). They change nothing, so they never ask.
+- **Knowledge graph** (Settings → *Learn from chats automatically*, on by default). Zoro-1 learns
+  `subject —relation→ object` facts from your messages, grounded web answers and the documents it reads,
+  each with its source, date, chat and history, and uses them in later chats (`recall`, `remember`,
+  `forget`). The brain in the sidebar, or ⇧⌘K, opens the Knowledge window: the graph around one entry,
+  the whole graph (isolated groups too), and the relations. A chip under each reply lists what it added,
+  with Undo; `/update-kg` learns from the whole chat. The graph is a separate package
+  (`Knowledge/`, see `Knowledge/INTEGRATION.md`) and is saved in
+  `~/Library/Application Support/Zoro-1 Chat/knowledge.json`.
 - **`locate_files`** finds which files hold what a question is about, by meaning and in any language,
   without an index: every file's path and opening lines go to the decision model 40 at a time (one
   choice question each, top 5 kept), and the pooled files plus keyword search's top 10 go to a final
