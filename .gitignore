@@ -39,6 +39,8 @@ output_models/
 checkpoints/
 evals_results/
 results/
+# serve.py --log / LOG= server logs that eval.py --server-log reads (the speedrun writes them next to eval.py)
+inference/*/server*.log
 *.tar.gz
 benchmarking/swe_bench/predictions*.jsonl
 # build cache / eval outputs / stray logs (added during qwen3.5 bd work)

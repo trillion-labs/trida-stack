@@ -82,13 +82,14 @@ def local_checkpoint(model):
 def _complete_shim(out, raw, tool):
     """True when `out` is a finished shim of `raw`: a shaped config.json plus every file `raw` carries, each link
     still resolving."""
+    names = tool.carried_names(raw)
     try:
         if not tool.is_shaped(json.loads((out / "config.json").read_text())):
             return False
+        present = {p.name for p in out.iterdir()}   # `out` can be moved aside by another replica at any point
     except (OSError, ValueError):
         return False
-    names = tool.carried_names(raw)
-    return {p.name for p in out.iterdir()} == {"config.json", *names} and all((out / n).exists() for n in names)
+    return present == {"config.json", *names} and all((out / n).exists() for n in names)
 
 
 def for_sglang(model, cache=None):
@@ -96,9 +97,10 @@ def for_sglang(model, cache=None):
     shim of it under `cache` (made once, reused after). An HF id is downloaded first.
 
     The shim is built in a temp dir unique to this build and renamed into place, so a crash, Ctrl-C or another
-    replica (even PID 1 in another container on a shared cache) never sees a half-written one. A finished shim is
-    never deleted: if another replica installed one first, it is used. A shim that is incomplete, or whose links
-    no longer resolve, is moved aside and replaced."""
+    replica (even PID 1 in another container on a shared cache) never sees a half-written one. If another replica
+    installed a complete shim first, it is used, not rebuilt. A shim that is incomplete, or whose links no longer
+    resolve, is moved aside and replaced; when several replicas race on a stale one, the path can be absent for
+    the moment between two renames, and the shim that ends up there is equivalent to the one moved aside."""
     raw = local_checkpoint(model)
     tool = _shape_tool()
     cfg_text = (raw / "config.json").read_text()
@@ -110,8 +112,11 @@ def for_sglang(model, cache=None):
         key = hashlib.sha1((str(raw) + "\n" + cfg_text).encode()).hexdigest()[:8]
         name = f"{raw.name}-{key}"
     else:
-        # an HF snapshot dir is named by its revision; keep the repo name too so the cache reads well
-        name = f"{model.replace('/', '--')}-{raw.name[:12]}"
+        # an HF snapshot dir is named by its revision; keep the repo name too so the cache reads well. The snapshot's
+        # path is in the key as well: the shim links to it, and a shim cache shared by nodes with their own HF caches
+        # (an NFS home, per-node scratch) must give each node its own shim rather than one they keep replacing.
+        where = hashlib.sha1(str(raw).encode()).hexdigest()[:8]
+        name = f"{model.replace('/', '--')}-{raw.name[:12]}-{where}"
     out = cache / name
     if _complete_shim(out, raw, tool):
         return str(out)
@@ -134,8 +139,8 @@ def for_sglang(model, cache=None):
 def _install(tmp, out, work, out_is_complete):
     """Rename the finished shim `tmp` to `out`. -> True if ours is now at `out`; False if `out` holds a complete shim
     another process installed (kept: it may be loading from it) or a racing process got there first. A stale `out` is
-    moved into `work`, which the caller deletes, so a shim is never deleted in place and the only gap is between two
-    renames."""
+    moved into `work`, which the caller deletes; nothing is deleted at `out` itself, so `out` is absent only between
+    the two renames below."""
     try:
         os.replace(tmp, out)                      # succeeds when `out` is absent (or an empty dir)
         return True

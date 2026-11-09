@@ -72,11 +72,21 @@ Say the chip and memory in the description (e.g. "M3 Pro 18 GB, q8").
 ### Submit a record
 
 ```bash
-python serve.py --port 30000 --log server.log &                    # or vllm/serve_diffusion.sh, or the MLX server
-python eval.py gsm8k --num-problems 200 --max-workers 1 --server-log server.log   # 50 on MLX
+# 1. serve, and wait until it answers (the first start downloads and shapes Zoro-1)
+python serve.py --port 30000 --log server.log &                       # SGLang, port 30000
+#   LOG=server.log PORT=30000 bash vllm/serve_diffusion.sh &          # or vLLM (its default port is 8000)
+#   (cd mlx && uv run trida-mlx-server --model ~/models/Zoro-1-mlx-q8 --gen-block 8 --port 30000) &   # or MLX
+until curl -sf localhost:30000/v1/models >/dev/null; do sleep 10; done
+
+# 2. the run: 200 problems on the GPU tracks, 50 on MLX (MLX has no --server-log counters)
+python eval.py gsm8k --port 30000 --num-problems 200 --max-workers 1 --server-log server.log
+
+# 3. check it and record it
 python speedrun/leaderboard.py add results/gsm8k_<stamp>/summary.json --track h100 \
-    --description "what you changed, in one line" --log <link to summary.json + requests.jsonl> --contributors @you
+    --description "what you changed, in one line" --log <https link to summary.json + requests.jsonl> --contributors @you
 ```
+
+Say the backend and its self-spec setting in the description: `serve.py` runs `b15_g8`, while `vllm/serve_diffusion.sh` defaults to `SELFSPEC_N=4`, so the two backends' default runs are not the same decode. `server.log` and `results/` are git-ignored; commit only your change and the new record row.
 
 `add` checks the run against the rules above and that it beats the track's record, appends it to `speedrun/records/<track>.csv`, and redraws the table and chart. Open a PR with your change, the new row, and the run's `summary.json` + `requests.jsonl` (attach them or link them). A maintainer re-runs it on the same hardware class before merging, and the record stands only if the re-run is also at or above the floor and within noise of the submitted time. `add` can't see which weights were served (the served id is the SGLang shim path), so the re-run is also where the model is checked. CI fails if the README tables or charts drift from the record files (`python speedrun/leaderboard.py check`).
 
@@ -124,8 +134,9 @@ Three levels, from no hardware to the full stack:
    Decisions on MLX are not supported yet.
 3. **GPU, everything** — serve each mode and compare with the model card (GSM8K 89.9, MMLU-Pro 62.7 self-spec):
    ```bash
-   python serve.py --mode causal    --port 30000 &   python eval.py gsm8k --num-problems 200
-   python serve.py --mode self-spec --port 30000 &   python eval.py gsm8k --num-problems 200
+   wait_up() { until curl -sf "localhost:$1/v1/models" >/dev/null; do sleep 10; done; }
+   python serve.py --mode causal    --port 30000 & wait_up 30000; python eval.py gsm8k --num-problems 200; kill %1
+   python serve.py --mode self-spec --port 30000 & wait_up 30000; python eval.py gsm8k --num-problems 200; kill %1
    python serve.py --mode decide    --port 30001      # then the /v1/decide example under Decisions
    ```
 
@@ -167,7 +178,7 @@ gsm8k: 36/40 = 90.00%   errors=0   wall=110s
 
 From the *same* requests you get **accuracy**, **tok/s** (aggregate at the client concurrency `--max-workers`, and per request), **latency** p50/p90/mean, mean output length, and — with `--server-log` — **tokens per forward** (vLLM: from its `DiffusionDecoding` counters; SGLang self-spec: from the algorithm's stats line; SGLang causal logs no counter → `n/a`; causal is 1 by definition). Every request is written to `requests.jsonl` (prediction, gold, tokens, latency) so you can re-slice without re-running. For a per-stream latency profile use `--max-workers 1`; for aggregate throughput raise it. Keep `--max-tokens` a *budget*, not a knob: if the truncation percentage is not ~0, the number measures the budget, not the model. On the vLLM script use `LOG=server.log bash vllm/serve_diffusion.sh`.
 
-Defaults: temp 1.0 / top_p 0.95 / top_k 20, no presence penalty, thinking on, `--max-tokens 8192` — Zoro-1's self-spec setting (the model card's), identical to the SGLang self-spec config, so a number from `eval.py` means the same thing on either backend. Both backends honor these fields in self-spec (vLLM via its stock rejection sampler, `TRIDA_SS_SAMPLE=0` for exact greedy). `gsm8k`/`mmlu_pro` are self-contained (extraction-based); **ifeval** uses the Google Research IFEval scorer vendored in `ifeval_lib/` (Apache-2.0). `chat.py`/`eval.py` pick the served model id up from `/v1/models`, so they work unchanged against either backend.
+Defaults: temp 1.0 / top_p 0.95 / top_k 20, no presence penalty, thinking on, `--max-tokens 8192` — Zoro-1's self-spec sampling setting (the model card's), identical to the SGLang self-spec config. The sampling matches on either backend, but the default draft block does not yet: `serve.py` runs `b15_g8`, `vllm/serve_diffusion.sh` defaults to `SELFSPEC_N=4`, so compare tok/forward and speed across backends only at a matching block setting. Both backends honor these fields in self-spec (vLLM via its stock rejection sampler, `TRIDA_SS_SAMPLE=0` for exact greedy). `gsm8k`/`mmlu_pro` are self-contained (extraction-based); **ifeval** uses the Google Research IFEval scorer vendored in `ifeval_lib/` (Apache-2.0). `chat.py`/`eval.py` pick the served model id up from `/v1/models`, so they work unchanged against either backend.
 
 ## Decisions
 

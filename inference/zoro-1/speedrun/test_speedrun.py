@@ -75,6 +75,23 @@ def test_table_and_chart():
     assert "no record yet" in lb.chart("h100", [])
 
 
+def test_record_text_that_would_break_the_readme_is_rejected():
+    ok = {"description": "self-spec b15_g8", "log": "https://example.com/run/summary.json", "contributors": "@a"}
+    assert lb.record_problems(ok) == []
+    assert lb.record_problems({**ok, "log": ""}) == []                       # a log is optional
+    bad = {
+        "log scheme": {**ok, "log": "javascript:alert(1)"},
+        "log http": {**ok, "log": "http://example.com/run"},
+        "log paren": {**ok, "log": "https://example.com/a)b"},
+        "log space": {**ok, "log": "https://example.com/a b"},
+        "marker": {**ok, "description": "fast <!-- /speedrun:h100 --> x"},
+        "html": {**ok, "contributors": "<img src=x>"},
+        "newline": {**ok, "description": "line one\nline two"},
+    }
+    for why, rec in bad.items():
+        assert lb.record_problems(rec), why
+
+
 def test_table_escapes_pipes_in_free_text():
     rec = {"date": "2026-10-29", "wall_s": "812.4", "accuracy_pct": "89.5", "tok_per_s_per_request": "312.0",
            "description": "b15|g8", "log": "", "contributors": "@a | @b"}

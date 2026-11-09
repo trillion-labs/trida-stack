@@ -76,6 +76,24 @@ def check_run(summary, track, records):
     return errs
 
 
+# A record's free text lands in README Markdown between <!-- speedrun:… --> markers. The log must be a plain https
+# link (it becomes a Markdown link target); description and contributors must be one line with no HTML, so they can
+# neither end the marker block early nor add markup.
+LOG_RE = re.compile(r"https://[^\s()<>|\"']+")
+
+
+def record_problems(rec):
+    """-> why this record's text can't go into the README (empty = fine)."""
+    errs = []
+    log = rec.get("log") or ""
+    if log and not LOG_RE.fullmatch(log):
+        errs.append(f"log must be a plain https:// link (no spaces, quotes, parentheses, < > or |), got {log!r}")
+    for key in ("description", "contributors"):
+        if re.search(r"[<>\r\n]", rec.get(key) or ""):
+            errs.append(f"{key} must be one line of plain text (no <, > or line breaks)")
+    return errs
+
+
 def table(track, records):
     rows = ["| # | Wall-clock | GSM8K | tok/s per request | Description | Date | Log | Contributors |",
             "|---|---|---|---|---|---|---|---|"]
@@ -138,8 +156,11 @@ def render():
 
 
 def stale():
-    """-> files that `render` would change."""
+    """-> files that `render` would change, and records (added by hand, not by `add`) whose text isn't allowed."""
     out = []
+    for track in TRACKS:
+        for i, rec in enumerate(load(track), 1):
+            out += [f"records/{track}.csv row {i}: {e}" for e in record_problems(rec)]
     if rendered_readme(README.read_text(encoding="utf-8")) != README.read_text(encoding="utf-8"):
         out.append(str(README))
     for track in TRACKS:
@@ -166,12 +187,12 @@ def main():
     if args.cmd == "add":
         summary = json.loads(Path(args.summary).read_text(encoding="utf-8"))
         records = load(args.track)
-        errs = check_run(summary, args.track, records)
-        if errs:
-            sys.exit("not a record:\n  - " + "\n  - ".join(errs))
         row = {"date": args.date, "wall_s": summary["wall_s"], "accuracy_pct": summary["accuracy_pct"],
                "tok_per_s_per_request": summary["tok_per_s_per_request"], "description": args.description,
                "log": args.log, "contributors": args.contributors}
+        errs = check_run(summary, args.track, records) + record_problems(row)
+        if errs:
+            sys.exit("not a record:\n  - " + "\n  - ".join(errs))
         with open(RECORDS / f"{args.track}.csv", "a", newline="", encoding="utf-8") as fh:
             csv.DictWriter(fh, FIELDS).writerow(row)
         render()

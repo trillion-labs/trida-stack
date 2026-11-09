@@ -235,6 +235,42 @@ def test_temp_dirs_are_unique_per_build_not_per_pid(monkeypatch, tmp_path):
     assert len(made) == 2 and Path(made[0]).name != Path(made[1]).name
 
 
+def test_hf_shims_from_different_caches_get_different_names(monkeypatch, tmp_path):
+    # One shared shim cache (e.g. an NFS home), a per-node HF cache: the same repo and revision then live at
+    # different paths, and each node's shim must link to its own copy instead of replacing the other's.
+    import shutil
+    import types
+    snaps = []
+    for node in ("node-a", "node-b"):
+        snap = tmp_path / node / "snapshots" / "766c5522cfb7aaaa"
+        snap.parent.mkdir(parents=True)
+        shutil.copytree(_raw_ckpt(tmp_path / node), snap)
+        snaps.append(snap)
+    cache = tmp_path / "shared-cache"
+    outs = []
+    for snap in snaps:
+        monkeypatch.setitem(sys.modules, "huggingface_hub",
+                            types.SimpleNamespace(snapshot_download=lambda repo, s=snap: str(s)))
+        outs.append(serve.for_sglang("trillionlabs/Zoro-1", cache))
+    assert outs[0] != outs[1]
+    assert all(Path(o).name.startswith("trillionlabs--Zoro-1-766c5522cfb7") for o in outs)   # still readable
+    assert serve._complete_shim(Path(outs[0]), snaps[0].resolve(), serve._shape_tool())       # neither replaced
+
+
+def test_a_shim_moved_away_mid_check_is_incomplete_not_a_crash(monkeypatch, tmp_path):
+    # another replica can move `out` aside between reading its config and listing it
+    raw = _raw_ckpt(tmp_path)
+    out = Path(serve.for_sglang(str(raw), tmp_path / "cache"))
+    real_iterdir = Path.iterdir
+
+    def vanished(self):
+        if self == out:
+            raise FileNotFoundError(str(self))
+        return real_iterdir(self)
+    monkeypatch.setattr(Path, "iterdir", vanished)
+    assert serve._complete_shim(out, raw.resolve(), serve._shape_tool()) is False
+
+
 def main():
     import inspect
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
