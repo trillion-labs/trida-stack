@@ -242,7 +242,7 @@ safetensors==0.8.0
     #   transformers
 sentencepiece==0.2.2
     # via -r requirements.txt
-setuptools==81.0.0
+setuptools==84.1.0
     # via torch
 six==1.17.0
     # via python-dateutil
