@@ -19,9 +19,14 @@ from typing import Iterator, Optional
 
 import mlx.core as mx
 
-from .decode import DecodeStats, SamplingParams, ar_generate, selfspec_generate
+from .decode import (DIFFUSION_BLOCK, DIFFUSION_THRESHOLD, DecodeStats, SamplingParams, ar_generate,
+                     diffusion_generate, selfspec_generate)
 from .model import DEFAULT_MODEL, TridaRuntime, load_model, mask_id_of
 from .vision import ImageProcessorConfig, image_key, load_image, preprocess
+
+
+# decode modes a request may ask for ("ar" is an alias of "causal")
+MODES = ("self-spec", "causal", "ar", "diffusion")
 
 
 class IncrementalDetokenizer:
@@ -58,6 +63,7 @@ class Engine:
     with one slot every side request would evict the main conversation's cache."""
 
     def __init__(self, model: str = DEFAULT_MODEL, *, mode: str = "self-spec", gen_block: Optional[int] = None,
+                 diffusion_block: int = DIFFUSION_BLOCK, diffusion_threshold: float = DIFFUSION_THRESHOLD,
                  prefill_chunk: int = 512, prompt_cache: bool = True, fused_gdn: bool = True,
                  cache_slots: int = 3, max_image_pixels: int = 1024 * 1024, image_cache: int = 16):
         from transformers import AutoTokenizer
@@ -78,6 +84,14 @@ class Engine:
         # AR step vs 1.18x for N=4, so N=4 decodes faster (52.4 vs 43.0 tok/s). On GPUs, where
         # extra canvas rows are nearly free, the checkpoint's bd_size (8, the b15_g8 config) wins.
         self.mode, self.n = mode, gen_block or 4
+        if mode not in MODES:
+            raise ValueError(f"unknown decode mode {mode!r}; expected one of {', '.join(MODES)}")
+        # pure block diffusion (mode "diffusion"): canvas length and commit gate; see decode.diffusion_generate
+        if diffusion_block < 2:
+            raise ValueError("diffusion_block must be >= 2 (a seed and at least one masked position)")
+        if not 0 <= diffusion_threshold <= 1:
+            raise ValueError("diffusion_threshold must be between 0 and 1")
+        self.diffusion_block, self.diffusion_threshold = diffusion_block, diffusion_threshold
         self.model_id = model
         self.eos_ids = self._eos_ids()
         self.im_start = self.tokenizer.convert_tokens_to_ids("<|im_start|>")
@@ -234,6 +248,8 @@ class Engine:
         eos_ids = self.eos_ids | set(stop_ids or ())
         sp = sampling or SamplingParams()
         mode = mode or self.mode
+        if mode not in MODES:
+            raise ValueError(f"unknown decode mode {mode!r}; expected one of {', '.join(MODES)}")
         stats = stats if stats is not None else DecodeStats()
         t = time.perf_counter()
         self._position_cache(prompt)
@@ -255,6 +271,10 @@ class Engine:
         if mode in ("causal", "ar"):
             gen = ar_generate(self.rt, self.cache, prompt, max_new_tokens=max_tokens, eos_ids=eos_ids,
                               sp=sp, stats=stats)
+        elif mode == "diffusion":
+            gen = diffusion_generate(self.rt, self.cache, prompt, max_new_tokens=max_tokens, eos_ids=eos_ids,
+                                     sp=sp, mask_id=self.mask_id, block=self.diffusion_block,
+                                     threshold=self.diffusion_threshold, stats=stats)
         else:
             gen = selfspec_generate(self.rt, self.cache, prompt, max_new_tokens=max_tokens,
                                     eos_ids=eos_ids, sp=sp, mask_id=self.mask_id, n=self.n, stats=stats)

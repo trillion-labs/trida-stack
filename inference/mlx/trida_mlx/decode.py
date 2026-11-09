@@ -1,4 +1,4 @@
-"""Decoders: autoregressive baseline and self-speculative (AR-Trust) decoding.
+"""Decoders: autoregressive baseline, self-speculative (AR-Trust) decoding and block diffusion.
 
 Self-spec follows the SGLang reference ``HybridDiffusionSelfSpec`` (variant
 ``bd_bidir_shift``, ``block_size = 2N-1``, ``gen_block_size = N``):
@@ -15,11 +15,26 @@ With temperature > 0 the ``strict_truncated`` policy is used: drafts are sampled
 same top-k/top-p truncated distribution the verifier uses, accepted with prob
 ``min(1, p/q)`` and corrected from ``norm(max(0, p - q))`` — standard speculative
 sampling, so the output *distribution* matches AR sampling.
+
+Block diffusion follows the reference ``LowConfidenceShiftHybridDiffusion`` (variant
+``hybrid_diffusion_shift``; the vLLM port is ``_denoise_shift_step`` in
+``inference/vllm/vllm_native_diffusion/qwen3_5_diffusion.py``), canvas length B:
+    denoise round : [seed, x_1..x_{B-1}] with every unfilled x_i = MASK, one clean row (the seed);
+                    x_i is read from row i-1 (shift). Masked positions whose confidence beats the
+                    threshold are filled; if none does, the single most confident one is.
+                    Repeated until no MASK is left. Nothing is kept in the cache.
+    commit        : causal forward over the finished block; its last logit picks the next seed.
+                    The block [seed, x_1..x_{B-1}] is emitted.
+Not lossless: a MASK row reads the block-end state, so x_2.. are drafts committed on confidence
+alone, never checked against the AR logits. x_1 (read from the clean seed row) and every seed come
+from exact AR logits, so greedy B = 2 decodes exactly like greedy ``ar_generate``. Sampled, they
+differ: diffusion uses the reference diffusion sampler (``diffusion_probs``, whose top-p drops the
+token that crosses top_p), and the server's diffusion default top-k is the reference yaml's.
 """
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterator, Optional
 
 import collections
@@ -143,6 +158,8 @@ class DecodeStats:
     forwards: int = 0
     cold_forwards: int = 0
     accept_hist: list = field(default_factory=list)
+    rounds_hist: list = field(default_factory=list)  # diffusion: blocks by denoise rounds taken (index = rounds)
+    route: Optional[dict] = None  # trida_mode "auto": the routing decision (routing.route)
     gate_blocked: list = field(default_factory=list)  # raw probabilities of blocked gated tokens (>= 0.05)
     loop_stopped_thinking: bool = False  # the loop guard closed the thinking and the model answered after it
     prefill_s: float = 0.0
@@ -165,6 +182,8 @@ class DecodeStats:
             "tokens_per_forward": round(self.tokens_per_forward, 3), "accept_hist": self.accept_hist,
             "prefill_s": round(self.prefill_s, 4), "decode_s": round(self.decode_s, 4),
             "decode_tok_s": round(self.decode_tps, 2), "finish_reason": self.finish_reason,
+            **({"rounds_hist": self.rounds_hist} if self.rounds_hist else {}),
+            **({"route": self.route} if self.route else {}),
             **({"gate_blocked": self.gate_blocked} if self.gate_blocked else {}),
             **({"loop_stopped_thinking": True} if self.loop_stopped_thinking else {}),
         }
@@ -384,4 +403,98 @@ def selfspec_generate(rt: TridaRuntime, cache: SeqCache, prompt: list, *, max_ne
             pending, specs, spec_q = clean, new_specs, new_q
         if out:
             yield out
+    stats.decode_s = time.perf_counter() - t_start
+
+
+# ----------------------------------------------------------------------------- block diffusion
+DIFFUSION_BLOCK = 3         # canvas length B (trida_diffusion_b4.yaml block_size: seed + 2 masks)
+DIFFUSION_THRESHOLD = 0.95  # commit gate on a masked position's top-1 probability (same yaml)
+DIFFUSION_TOP_K = 20        # the yaml's sampling top-k (temperature 1.0 and top-p 0.95 match the server defaults)
+
+
+def diffusion_probs(logits: mx.array, sp: SamplingParams) -> mx.array:
+    """Sampling distribution of the reference diffusion sampler (``LowConfidenceShiftHybridDiffusion.
+    _sample_tokens``), float32 [..., V]: temperature, top-k, then top-p keeping only the tokens whose
+    cumulative probability stays <= top_p (the top token is always kept). ``truncated_probs`` (the
+    self-spec reference) also keeps the token that crosses top_p; the two decoders differ there."""
+    x = apply_ban(logits.astype(mx.float32), sp) / sp.temperature
+    V = x.shape[-1]
+    if 0 < sp.top_k < V:
+        top = mx.sort(mx.topk(x, sp.top_k, axis=-1), axis=-1)[..., ::-1]  # [.., k] descending
+        x = mx.where(x < top[..., -1:], -mx.inf, x)
+    else:
+        top = mx.sort(x, axis=-1)[..., ::-1] if sp.top_p < 1.0 else None
+    if sp.top_p < 1.0:
+        cum = mx.cumsum(mx.softmax(top, axis=-1), axis=-1)
+        n_keep = mx.maximum((cum <= sp.top_p).sum(axis=-1, keepdims=True), 1)  # a prefix: cum is sorted
+        x = mx.where(x < mx.take_along_axis(top, n_keep - 1, axis=-1), -mx.inf, x)
+    return mx.softmax(x, axis=-1)
+
+
+def denoise_pick(L: mx.array, sp: SamplingParams) -> tuple:
+    """Token and confidence for each row of a denoise round's logits ``L`` [rows, V], as the reference:
+    the token is the argmax (greedy) or a sample from ``diffusion_probs``, both with ``sp``'s bans; the
+    confidence is that token's probability under the plain softmax of ``L`` (temperature 1, nothing
+    truncated or banned), so the threshold means the same at every sampling setting."""
+    if sp.greedy:
+        pred = mx.argmax(apply_ban(L, sp), axis=-1)
+    else:
+        pred = sample_from_probs(diffusion_probs(L, sp))
+    conf = mx.take_along_axis(mx.softmax(L.astype(mx.float32), axis=-1), pred[:, None], axis=-1)[:, 0]
+    return pred.tolist(), conf.tolist()
+
+
+def diffusion_generate(rt: TridaRuntime, cache: SeqCache, prompt: list, *, max_new_tokens: int,
+                       eos_ids: set, sp: SamplingParams, mask_id: int, block: int = DIFFUSION_BLOCK,
+                       threshold: float = DIFFUSION_THRESHOLD,
+                       stats: Optional[DecodeStats] = None) -> Iterator[list]:
+    """Block diffusion (see the module docstring). Tokens and seeds are the argmax (greedy) or sampled
+    from ``diffusion_probs``; the gate reads ``denoise_pick``'s confidence. Matches the reference except
+    that MASK can never be produced (the reference does not exclude it)."""
+    if block < 2:
+        raise ValueError("diffusion block must be >= 2 (a seed and at least one masked position)")
+    stats = stats or DecodeStats()
+    stats.mode = f"diffusion(B={block})"
+    stats.rounds_hist = [0] * block  # 1..B-1 rounds per block; index 0 unused
+    if sp.seed is not None:
+        mx.random.seed(sp.seed)
+    # MASK is an input symbol, never an output: a predicted MASK would leave its position unfilled.
+    sp = replace(sp, banned=tuple(sp.banned) + (mask_id,))
+
+    def pick(logits):  # exact AR rows (prompt end, commit forward): the seed
+        _gate_note(sp, logits)
+        if sp.greedy:
+            return int(mx.argmax(apply_ban(logits, sp)).item())
+        return int(sample_from_probs(diffusion_probs(logits, sp)).item())
+
+    logits = _prefill(rt, cache, prompt, stats)
+    emit = _Emitter(stats, max_new_tokens, eos_ids)
+    t_start = time.perf_counter()
+    seed = pick(logits)
+
+    while not emit.done:
+        canvas = [seed] + [mask_id] * (block - 1)
+        rounds = 0
+        while mask_id in canvas[1:]:
+            # row i-1 reads position i; the last row (next block's seed) is not used here
+            L = rt.canvas(cache, canvas, 1, rows=block - 1 if rt.skip_rows else None)[: block - 1]
+            rt.discard(cache)
+            stats.forwards += 1
+            rounds += 1
+            pred_l, conf_l = denoise_pick(L, sp)
+            masked = [i for i in range(1, block) if canvas[i] == mask_id]
+            fill = [i for i in masked if conf_l[i - 1] > threshold]
+            if not fill:
+                fill = [max(masked, key=lambda i: conf_l[i - 1])]
+            for i in fill:
+                canvas[i] = pred_l[i - 1]
+        stats.rounds_hist[rounds] += 1
+        out = emit(canvas)
+        if out:
+            yield out
+        if emit.done:  # skip the commit forward: nothing after this block is decoded
+            break
+        logits = rt.prefill(cache, canvas)  # commit: causal over the block, exact next-token logits
+        stats.forwards += 1
+        seed = pick(logits)
     stats.decode_s = time.perf_counter() - t_start

@@ -7,7 +7,7 @@ stream, no CUDA:
 
 | | file | what |
 |---|---|---|
-| decoder | `trida_mlx/model.py`, `trida_mlx/decode.py` | `causal` (AR baseline) and **`self-spec`** (diffusion draft + exact AR verify, lossless) |
+| decoder | `trida_mlx/model.py`, `trida_mlx/decode.py` | `causal` (AR baseline), **`self-spec`** (diffusion draft + exact AR verify, lossless) and `diffusion` (block diffusion, not lossless) |
 | server | `trida_mlx/server.py` | OpenAI-compatible `/v1/chat/completions` (+ `/v1/completions`), SSE streaming, **tool calls**, reasoning split, prompt cache |
 | agent | `trida_mlx/agent.py` | a tiny tool-using agent loop against the server (files, search, calculator; opt-in shell/write) |
 | decisions | `trida_mlx/decision.py`, `trida_mlx/decide_request.py` | `/v1/decide`: typed decisions (choice / yes-no / score) through Zoro-1's pointer head, escalating to self-spec reasoning when unsure |
@@ -54,9 +54,11 @@ r = c.chat.completions.create(model="trida", messages=[{"role": "user", "content
 print(r.choices[0].message.content, r.usage)   # usage.trida has tok/s, tok/forward, accept histogram
 ```
 
-Server flags: `--mode self-spec|causal`, `--gen-block N` (canvas `2N-1`, default 4 → `b7_g4`; see
+Server flags: `--mode self-spec|causal|diffusion|auto`, `--gen-block N` (canvas `2N-1`, default 4 → `b7_g4`; see
 "Block size" below), `--temperature/--top-k/--top-p` defaults
-(1.0 / 50 / 0.95, the canonical Trida self-spec setting), `--no-think`, `--max-tokens`,
+(1.0 / 50 / 0.95, the canonical Trida self-spec setting), `--diffusion-block` / `--diffusion-threshold` /
+`--diffusion-top-k` (3 / 0.95 / 20, as `inference/configs/trida_diffusion_b4.yaml`; see "Block diffusion"
+below), `--route-threshold` (0.5; see "Self-routing" below), `--no-think`, `--max-tokens`,
 `--no-prompt-cache`, `--max-image-pixels`. Per request: `trida_mode`, `chat_template_kwargs`,
 `tools`, `stop`, `seed`, `stream`.
 
@@ -202,6 +204,59 @@ system block, and one just before the last `<|im_start|>` of the previous prompt
 turn's re-rendered history still agrees with it). A follow-up turn then only prefills the new messages; `usage.prompt_tokens_details.cached_tokens`
 shows the reuse.
 
+## Block diffusion
+
+`diffusion` follows the SGLang `LowConfidenceShiftHybridDiffusion` (`hybrid_diffusion_shift`, block 3,
+gen 1, threshold 0.95; the vLLM plugin's `_denoise_shift_step` ports the same loop). Shown for B = 3:
+
+```
+denoise : [seed, M, M]   x_i read from row i-1 (shift). Fill each MASK whose confidence > threshold,
+                         else only the most confident one; repeat until no MASK is left. Nothing is cached
+                         (rt.discard drops the canvas).
+commit  : [seed, x1, x2] one causal forward; its last logit is the next seed. Emit [seed, x1, x2].
+```
+
+| piece | reference (SGLang) | here |
+|---|---|---|
+| denoise / commit | as above | same; the commit forward is `rt.prefill` over the finished block |
+| token | argmax, or a sample from temperature → top-k → top-p | same; top-p keeps only tokens whose cumulative probability stays ≤ top_p (the self-spec sampler also keeps the one that crosses it) |
+| confidence | the token's probability under the plain softmax (temperature 1, nothing truncated) | same |
+| sampling settings | fixed by the algorithm yaml (1.0 / 20 / 0.95); request values are ignored | yaml values are the defaults; a request's `temperature`/`top_k`/`top_p` override them |
+| MASK as output | not excluded | banned (a predicted MASK would leave its position unfilled for good) |
+
+Not lossless: MASK rows read the block-end state, so `x_2..` are drafts committed on confidence alone.
+`x_1` and every seed are exact AR picks, so B = 2 decodes exactly like `causal`. Each block costs at least
+two forwards (one denoise round + the commit) for B tokens, so B = 3 tops out at 1.5 tokens per forward,
+below self-spec's measured ≈ 2.4 at N = 4: on a Mac `diffusion` is not the fast mode at the reference block.
+On Zoro-1 (and, per `inference/README.md`, Trida2.0-4B) it is also not a good mode: their full-mask training
+leaves partly filled blocks untrained, so after the first round masked positions rarely pass the threshold
+(≈ 1.0 token per forward measured) and text degrades, badly at B = 7. The decoder itself checks out on real
+weights: B = 2 matches `causal` up to bf16/q8 near-ties and `discard` restores the cache exactly.
+
+## Self-routing (`auto`) — proof of concept
+
+> **Proof of concept.** This shows how one checkpoint's three paths (autoregressive decoding, block diffusion
+> and the Jev decision head) can work together in a single engine for faster inference: the decision head
+> routes each request to the fast or the exact decoder. It is not a tuned or production router.
+
+With a decision checkpoint (`jev_head.pt`), `--mode auto` or `"trida_mode": "auto"` lets the model pick the decode
+mode per request (`trida_mlx/routing.py`): one yes/no decision, *does the next reply need careful generation?*,
+over the tool names and the conversation, oldest turn first. That order makes each turn's decision state extend
+the previous turn's, so the decision prefix cache only prefills the new turns; a conversation longer than the
+decision context drops its oldest turns at fixed cut points, which keeps that prefix stable between cuts. P(yes) ≥
+`route_threshold` (server `--route-threshold`, per request `route_threshold`) decodes `causal`, otherwise
+`diffusion`. The response's `usage.trida.route` reports `mode`, `p_careful`, `threshold` and the decision time; if
+the decision fails for any reason the request still decodes, `causal`, and says why under `fallback`. Bad
+`--route-threshold` / `--diffusion-*` values fail at startup.
+
+What the proof of concept does not settle:
+- The routing question is asked zero-shot: no head was trained on it. On Zoro-1 q8 it ranks requests sensibly
+  (chit-chat 0.01–0.06 < JSON 0.16 ≈ GSM8K 0.18 < tool call 0.29 < arithmetic 0.37 < code 0.49) but low, so at
+  0.5 everything goes to diffusion; 0.2 splits them as intended except GSM8K.
+- The decision prefills the context as a Jev state, separately from the chat prompt (~0.2 s per request here).
+  Sharing that prefill needs the question trained as a suffix of the chat prompt.
+- The diffusion side is only as good as the checkpoint's diffusion decoding; see "Block diffusion".
+
 ## Tests
 
 ```bash
@@ -210,13 +265,16 @@ uv run python tests/test_tiny.py   # decoder invariants on a tiny random Qwen3.5
 uv run python tests/test_e2e.py    # tiny raw-HF checkpoint: loader, convert q8, prompt cache, server, parsing
 uv run pytest tests/test_vision.py  # tiny multimodal checkpoint: image input end to end
 uv run pytest tests/test_decision.py  # tiny multimodal checkpoint + random pointer head: /v1/decide
+uv run pytest tests/test_diffusion.py  # block diffusion: discard, B=2 = AR, cache, sampler = reference
+uv run pytest tests/test_routing.py    # trida_mode auto: routing state, threshold policy, fallback, HTTP
 ```
 
 Pinned: chunked prefill = one-shot; canvas clean rows = AR logits; MASK rows read the block-end GDN
 state (independent per-token re-derivation); `commit(adv)` = AR state for every `adv`; greedy
 self-spec = greedy AR (also with oracle drafts that exercise the accept path, ~3 tok/forward);
 top-k/top-p matches the reference sampler; sampled self-spec reproduces the AR sampling
-distribution; snapshot/restore = fresh prefill; server non-stream / SSE / completions round trip;
+distribution; diffusion: `discard` restores the cache, B = 2 = greedy AR, the cache after decoding = a fresh
+prefill, the sampler and confidence match the reference `_sample_tokens`; snapshot/restore = fresh prefill; server non-stream / SSE / completions round trip;
 with an image: greedy self-spec = greedy AR, chunked prefill = one-shot, MRoPE positions, no prompt-cache
 reuse across different images, convert keeps the vision tower bit-identical, server `image_url` round trip.
 Decisions: the packaged decide_request.py equals inference/decide_request.py; branching from the shared state snapshot gives the

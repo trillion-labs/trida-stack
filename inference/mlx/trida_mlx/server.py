@@ -9,7 +9,9 @@ POST /v1/completions, POST /v1/decide (typed decisions through the checkpoint's 
 parsed from ``<tool_call>`` blocks into OpenAI ``tool_calls``), ``stream``, reasoning split
 (``message.reasoning_content``), ``stop``, ``seed`` and per-request
 ``chat_template_kwargs`` (e.g. ``{"enable_thinking": false}``). Extra body field
-``trida_mode`` = ``self-spec`` | ``causal`` overrides the server's decode mode.
+``trida_mode`` = ``self-spec`` | ``causal`` | ``diffusion`` | ``auto`` overrides the server's decode mode;
+``auto`` lets the checkpoint's pointer head pick causal or diffusion per request (routing.py,
+``route_threshold``).
 One device, one stream: requests are serialized.
 """
 from __future__ import annotations
@@ -26,8 +28,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .decision import Decider
 from .decide_request import RequestError as DecisionError, parse as parse_decision
-from .decode import DecodeStats, SamplingParams
-from .engine import Engine, IncrementalDetokenizer
+from .decode import DIFFUSION_BLOCK, DIFFUSION_THRESHOLD, DIFFUSION_TOP_K, DecodeStats, SamplingParams
+from . import routing
+from .engine import MODES, Engine, IncrementalDetokenizer
 from .parsing import StreamSplitter, parse_tool_calls, split_reasoning, to_openai_tool_calls
 
 ENGINE: Engine = None  # set in main()
@@ -35,11 +38,25 @@ DECIDER: Optional[Decider] = None  # set when the checkpoint has a pointer head 
 DEFAULTS: dict = {}
 
 
-def _sampling(body: dict) -> SamplingParams:
+SERVER_MODES = MODES + ("auto",)
+
+
+def _route_threshold(body: dict) -> float:
+    t = body.get("route_threshold", DEFAULTS.get("route_threshold", routing.ROUTE_THRESHOLD))
+    if isinstance(t, bool) or not isinstance(t, (int, float)) or not 0 <= t <= 1:
+        raise BadRequest("route_threshold must be a number between 0 and 1")
+    return float(t)
+
+
+def _sampling(body: dict, mode: Optional[str] = None) -> SamplingParams:
+    """``mode``: the decode mode the request resolved to (after routing); default: the request's or server's."""
     t = body.get("temperature", DEFAULTS["temperature"])
+    # diffusion samples with the reference's top-k (trida_diffusion_b4.yaml) unless the request sets one
+    diffusion = (mode or body.get("trida_mode") or DEFAULTS.get("mode")) == "diffusion"
+    top_k = DEFAULTS.get("diffusion_top_k", DIFFUSION_TOP_K) if diffusion else DEFAULTS["top_k"]
     return SamplingParams(
         temperature=float(t if t is not None else DEFAULTS["temperature"]),
-        top_k=int(body.get("top_k") or DEFAULTS["top_k"]),
+        top_k=int(body.get("top_k") or top_k),
         top_p=float(body.get("top_p") or DEFAULTS["top_p"]),
         seed=body.get("seed"),
         banned=tuple(body.get("_banned_ids") or ()),
@@ -195,10 +212,21 @@ class _Job:
         text = ""
         detok = IncrementalDetokenizer(ENGINE.tokenizer)
         progress = (lambda done, total: self.out.put(("progress", done, total))) if self.want_progress else None
-        sp = _sampling(body)
+        mode = body.get("trida_mode") or DEFAULTS.get("mode")
+        if mode == "auto":  # the pointer head picks causal or diffusion for this request
+            if progress is not None:
+                progress(0, len(self.prompt))  # a keep-alive: routing prefills the conversation as a decision state
+            state = routing.route_state(body.get("messages"), body.get("prompt"), body.get("tools"))
+            stats.route = routing.route(DECIDER, state, _route_threshold(body))
+            mode = stats.route["mode"]
+            if self.cancelled:  # the client left while the router decided: do not start decoding
+                stats.finish_reason = "cancelled"
+                self.out.put(("done", stats))
+                return
+        sp = _sampling(body, mode)
         produced: list = []
         gen = ENGINE.generate_ids(self.prompt, max_tokens=self.max_tokens, sampling=sp,
-                                  mode=body.get("trida_mode"), stats=stats, progress=progress)
+                                  mode=mode, stats=stats, progress=progress)
         try:
             for ids in gen:
                 produced.extend(ids)
@@ -233,7 +261,7 @@ class _Job:
             stats2 = DecodeStats()
             detok2 = IncrementalDetokenizer(ENGINE.tokenizer)
             gen2 = ENGINE.generate_ids(self.prompt + produced + ENGINE.encode(forced), max_tokens=rest, sampling=sp,
-                                       mode=body.get("trida_mode"), stats=stats2)
+                                       mode=mode, stats=stats2)
             try:
                 for ids in gen2:
                     if self.cancelled:
@@ -389,7 +417,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith(("/v1/models/", "/models/")):
             return self._json(200, self._model_card())
         if path in ("/health", "/v1/health", ""):
-            return self._json(200, {"status": "ok", "mode": ENGINE.mode})
+            return self._json(200, {"status": "ok", "mode": DEFAULTS.get("mode") or ENGINE.mode})
         if path == "/stats":
             return self._json(200, {"last": ENGINE.last_stats, "cache_slots": ENGINE.cached_tokens()})
         self._json(404, {"error": {"message": f"no route {self.path}"}})
@@ -445,6 +473,13 @@ class Handler(BaseHTTPRequestHandler):
     def _run(self, prompt: list, body: dict, on_delta, keepalive=None):
         """Generate on the MLX worker thread; call on_delta(text) here per decoded delta.
         Returns (full_text, stats). A client disconnect cancels the generation."""
+        mode = body.get("trida_mode")
+        if mode is not None and mode not in SERVER_MODES:
+            raise BadRequest(f"unknown trida_mode {mode!r}; expected one of {', '.join(SERVER_MODES)}")
+        if (mode or DEFAULTS.get("mode")) == "auto":
+            if DECIDER is None:
+                raise BadRequest('trida_mode "auto" needs a checkpoint with a decision head (jev_head.pt)')
+            _route_threshold(body)  # validate here: a bad value is the client's error, not the worker's
         max_tokens = self._budget(prompt, body)
         job = _Job(prompt, body, max_tokens, want_progress=keepalive is not None)
         WORKER.submit(job)
@@ -643,8 +678,17 @@ def main(argv=None):
                     help="HF id or local dir (raw checkpoint or convert.py output)")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8080)
-    ap.add_argument("--mode", default="self-spec", choices=["self-spec", "causal"])
+    ap.add_argument("--mode", default="self-spec", choices=["self-spec", "causal", "diffusion", "auto"],
+                    help="auto (proof of concept): the checkpoint's pointer head picks causal or diffusion per request")
+    ap.add_argument("--route-threshold", type=float, default=routing.ROUTE_THRESHOLD,
+                    help="auto mode: decode causally when P(needs careful generation) >= this, else diffusion")
     ap.add_argument("--gen-block", type=int, default=None, help="N tokens per self-spec step (canvas 2N-1); default 4 (fastest on Apple Silicon)")
+    ap.add_argument("--diffusion-block", type=int, default=DIFFUSION_BLOCK,
+                    help="diffusion mode: canvas length (seed + masks); default 3, as trida_diffusion_b4.yaml")
+    ap.add_argument("--diffusion-threshold", type=float, default=DIFFUSION_THRESHOLD,
+                    help="diffusion mode: fill a masked position once its top-1 probability exceeds this")
+    ap.add_argument("--diffusion-top-k", type=int, default=DIFFUSION_TOP_K,
+                    help="diffusion mode: top-k for requests that do not set one; default 20, as trida_diffusion_b4.yaml")
     ap.add_argument("--prefill-chunk", type=int, default=512)
     ap.add_argument("--no-prompt-cache", action="store_true")
     ap.add_argument("--temperature", type=float, default=1.0)
@@ -676,9 +720,16 @@ def main(argv=None):
     ap.add_argument("--decision-image-temperature", type=float, default=None,
                     help="the same for requests with an image (default: temperature.json, else 1.0 = uncalibrated)")
     a = ap.parse_args(argv)
+    if not 0 <= a.route_threshold <= 1:
+        ap.error("--route-threshold must be between 0 and 1")
+    if a.diffusion_block < 2:
+        ap.error("--diffusion-block must be >= 2 (a seed and at least one masked position)")
+    if not 0 <= a.diffusion_threshold <= 1:
+        ap.error("--diffusion-threshold must be between 0 and 1")
     from . import decode as _decode
     _decode._Emitter.loop_guard = a.loop_guard
     DEFAULTS.update(temperature=a.temperature, top_k=a.top_k, top_p=a.top_p, max_tokens=a.max_tokens,
+                    mode=a.mode, diffusion_top_k=a.diffusion_top_k, route_threshold=a.route_threshold,
                     enable_thinking=not a.no_think, context_length=a.context_length,
                     served_name=a.served_model_name, log_requests=a.log_requests,
                     decision_cache_mb=a.decision_cache_mb,
@@ -686,13 +737,17 @@ def main(argv=None):
                     decision_image_temperature=a.decision_image_temperature,
                     tool_call_gate=a.tool_call_gate, loop_guard=a.loop_guard)
     print(f"[trida-mlx] loading {a.model} ...", flush=True)
-    WORKER = _Worker(dict(model=a.model, mode=a.mode, gen_block=a.gen_block, prefill_chunk=a.prefill_chunk,
+    WORKER = _Worker(dict(model=a.model, mode="self-spec" if a.mode == "auto" else a.mode, gen_block=a.gen_block,
+                          diffusion_block=a.diffusion_block, diffusion_threshold=a.diffusion_threshold,
+                          prefill_chunk=a.prefill_chunk,
                           prompt_cache=not a.no_prompt_cache, fused_gdn=not a.no_fused_gdn,
                           cache_slots=a.cache_slots, max_image_pixels=a.max_image_pixels))
     WORKER.start()
     WORKER.ready.wait()
     if WORKER.error is not None:
         raise WORKER.error
+    if a.mode == "auto" and DECIDER is None:
+        sys.exit("[trida-mlx] --mode auto needs a checkpoint with a decision head (jev_head.pt)")
     print(f"[trida-mlx] ready in {ENGINE.load_s:.1f}s  mode={a.mode} N={ENGINE.n} mask_id={ENGINE.mask_id} "
           f"eos={sorted(ENGINE.eos_ids)} ctx={a.context_length} vision={ENGINE.supports_vision} "
           f"decision={'yes (T text %.2f, image %.2f)' % (DECIDER.temps['text'], DECIDER.temps['image']) if DECIDER else 'no (no jev_head.pt)'} "

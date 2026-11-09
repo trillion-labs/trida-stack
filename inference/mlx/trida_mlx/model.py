@@ -483,6 +483,19 @@ class TridaRuntime:
         self._canvas_tokens = list(canvas_tokens)
         return logits[0].astype(mx.float32)
 
+    def discard(self, cache: SeqCache) -> None:
+        """Drop the pending canvas and keep none of it: the cache is left exactly as it was before
+        ``canvas``. Diffusion denoising runs several canvas forwards over one block before any token
+        is kept. A canvas forward only appends to the attention KV (GDN layers keep their state and
+        record the canvas in ``pending``), so trimming the KV is the whole undo."""
+        recs, blk = cache.pending, cache.canvas_len
+        assert recs is not None
+        for i, rec in enumerate(recs):
+            if rec is None:
+                cache.layers[i].trim(blk)
+        cache.pending = None
+        cache.canvas_len = 0
+
     def commit(self, cache: SeqCache, adv: int) -> None:
         """Keep the first ``adv`` (1..n_clean) canvas tokens in the cache."""
         recs, blk = cache.pending, cache.canvas_len

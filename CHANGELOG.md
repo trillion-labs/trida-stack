@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Block diffusion in the MLX server (`--mode diffusion`, or `"trida_mode": "diffusion"` per request): the
+  SGLang `LowConfidenceShiftHybridDiffusion` loop, defaults from `trida_diffusion_b4.yaml` (block 3,
+  threshold 0.95, top-k 20) with request sampling values taking precedence. An unknown `trida_mode` is now
+  a 400 instead of silently decoding self-spec.
+- Self-routing in the MLX server (`--mode auto`, or `"trida_mode": "auto"`), a proof of concept of using one
+  checkpoint's AR, diffusion and decision paths together for faster inference: the pointer head decides per
+  request whether the reply needs careful generation and decodes `causal` or `diffusion` accordingly
+  (`--route-threshold` / `route_threshold`); the decision is reported in `usage.trida.route`. The routing
+  question is asked zero-shot; it is not a tuned router.
 - Shared SGLang/MLX decision requests and answer formatting, torch-free pointer-head
   conversion to safetensors, bounded state reuse, and parity/HTTP regression tests (#61).
 

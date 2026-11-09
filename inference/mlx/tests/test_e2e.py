@@ -198,6 +198,25 @@ def test_server_roundtrip():
     assert r["usage"]["completion_tokens"] <= 10
     models = json.loads(urllib.request.urlopen(f"{base}/models").read())
     assert models["data"][0]["context_length"] == 2048 and models["data"][0]["id"] == "trida2.0-4b"
+    # per-request decode mode: diffusion through the real handler; an unknown mode is the client's error
+    r = json.loads(urllib.request.urlopen(urllib.request.Request(
+        f"{base}/chat/completions", data=json.dumps({**body, "stream": False, "trida_mode": "diffusion"}).encode(),
+        headers={"Content-Type": "application/json"})).read())
+    assert r["usage"]["trida"]["mode"].startswith("diffusion") and r["usage"]["trida"]["new_tokens"] > 0
+    try:
+        urllib.request.urlopen(urllib.request.Request(
+            f"{base}/chat/completions", data=json.dumps({**body, "stream": False, "trida_mode": "bogus"}).encode(),
+            headers={"Content-Type": "application/json"}))
+        assert False, "expected 400"
+    except urllib.error.HTTPError as e:
+        assert e.code == 400 and "trida_mode" in json.loads(e.read())["error"]["message"]
+    try:  # this checkpoint has no pointer head, so it cannot route itself
+        urllib.request.urlopen(urllib.request.Request(
+            f"{base}/chat/completions", data=json.dumps({**body, "stream": False, "trida_mode": "auto"}).encode(),
+            headers={"Content-Type": "application/json"}))
+        assert False, "expected 400"
+    except urllib.error.HTTPError as e:
+        assert e.code == 400 and "decision head" in json.loads(e.read())["error"]["message"]
     # context overflow -> OpenAI-style 400 that harnesses recognise (and compress)
     big = {"messages": [{"role": "user", "content": "hello world " * 3000}], "stream": True}
     try:
