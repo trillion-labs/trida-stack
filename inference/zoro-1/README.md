@@ -8,9 +8,8 @@ Self-speculative generation and typed decisions from one set of weights, behind 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../../LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Backends](https://img.shields.io/badge/backends-SGLang%20%C2%B7%20vLLM%20%C2%B7%20MLX-8A2BE2.svg)](#backends)
-[![Speedrun](https://img.shields.io/badge/speedrun-H100%20%C2%B7%20L40S%20%C2%B7%20MLX-orange.svg)](#speedrun)
 
-[Speedrun](#speedrun) · [Quickstart](#quickstart) · [Test it](#test-it) · [Usage](#usage) · [Decisions](#decisions) · [Backends](#backends) · [Contributing](#contributing)
+[Quickstart](#quickstart) · [Test it](#test-it) · [Usage](#usage) · [Decisions](#decisions) · [Backends](#backends) · [Contributing](#contributing)
 
 </div>
 
@@ -25,81 +24,6 @@ In the spirit of nanoGPT, this directory serves **one model** and nothing else, 
 | `decide` | typed decisions (`/v1/decide`: yes/no, choice, score with probabilities), reason-then-decide, and OpenAI chat from one engine ([Decisions](#decisions)) |
 
 Zoro-1 does not support pure iterative diffusion decoding, so there is no `diffusion` mode. Other models get their own nano-inference next to this one (`inference/<model>/`).
-
-## Speedrun
-
-Like the [NanoGPT speedrun](https://github.com/KellerJordan/modded-nanogpt): one fixed task, a leaderboard per hardware track, and anyone can take a record.
-
-**The task:** answer a fixed GSM8K subsample with Zoro-1, one request at a time, as fast as possible.
-
-- **Record = wall-clock** of `eval.py` (`wall_s` in its `summary.json`). Lower is better.
-- **Accuracy floor: 87.0%.** Any change counts — kernels, configs, decode tricks, lossy ones too — as long as accuracy stays at or above the floor. On 50-200 problems at temperature 1.0 one run is a noisy estimate, so the floor screens a submission and the maintainer's re-run (below) checks accuracy as well as time.
-- **Fixed:** the `trillionlabs/Zoro-1` weights — quantising them is allowed if the description says how (e.g. "q8") — client concurrency 1, temperature 1.0 / top-p 0.95 / top-k 20, thinking on, 8192-token budget, no failed requests.
-- **Problems:** 200 on the GPU tracks, 50 on MLX: exactly `eval.py --num-problems N`, which takes the same seed-42 subsample every time, without `--shard`. `add` reads `num_problems`, `seed` and `shard` from `summary.json` and rejects anything else.
-
-### 1× NVIDIA H100
-
-![H100 speedrun](speedrun/h100.svg)
-
-<!-- speedrun:h100 -->
-| # | Wall-clock | GSM8K | tok/s per request | Description | Date | Log | Contributors |
-|---|---|---|---|---|---|---|---|
-| – | no record yet: be the first | | | | | | |
-<!-- /speedrun:h100 -->
-
-### 1× NVIDIA L40S
-
-![L40S speedrun](speedrun/l40s.svg)
-
-<!-- speedrun:l40s -->
-| # | Wall-clock | GSM8K | tok/s per request | Description | Date | Log | Contributors |
-|---|---|---|---|---|---|---|---|
-| – | no record yet: be the first | | | | | | |
-<!-- /speedrun:l40s -->
-
-### Apple Silicon (MLX)
-
-Say the chip and memory in the description (e.g. "M3 Pro 18 GB, q8").
-
-![MLX speedrun](speedrun/mlx.svg)
-
-<!-- speedrun:mlx -->
-| # | Wall-clock | GSM8K | tok/s per request | Description | Date | Log | Contributors |
-|---|---|---|---|---|---|---|---|
-| – | no record yet: be the first | | | | | | |
-<!-- /speedrun:mlx -->
-
-### Submit a record
-
-```bash
-# wait until the server on port $1 (process $2) answers; give up if it exits or after 30 minutes
-wait_up() {
-  for _ in $(seq 180); do
-    curl -sf "localhost:$1/v1/models" >/dev/null && return 0
-    kill -0 "$2" 2>/dev/null || { echo "server exited before it was ready" >&2; return 1; }
-    sleep 10
-  done
-  echo "server not ready after 30 minutes" >&2; return 1
-}
-
-# 1. serve (the first start downloads and shapes Zoro-1), and wait until it answers
-python serve.py --port 30000 --log server.log & pid=$!               # SGLang, port 30000
-#   LOG=server.log PORT=30000 bash vllm/serve_diffusion.sh & pid=$!  # or vLLM (its default port is 8000)
-#   (cd mlx && uv run trida-mlx-server --model ~/models/Zoro-1-mlx-q8 --gen-block 8 --port 30000) & pid=$!   # or MLX
-wait_up 30000 $pid
-
-# 2. the run: 200 problems on the GPU tracks, 50 on MLX (MLX has no --server-log counters)
-python eval.py gsm8k --port 30000 --num-problems 200 --max-workers 1 --server-log server.log
-kill $pid; wait $pid
-
-# 3. check it and record it
-python speedrun/leaderboard.py add results/gsm8k_<stamp>/summary.json --track h100 \
-    --description "what you changed, in one line" --log <https link to summary.json + requests.jsonl> --contributors @you
-```
-
-Say the backend and its self-spec setting in the description: `serve.py` runs `b15_g8`, while `vllm/serve_diffusion.sh` defaults to `SELFSPEC_N=4`, so the two backends' default runs are not the same decode. `server.log` and `results/` are git-ignored; commit only your change and the new record row.
-
-`add` checks the run against the rules above and that it beats the track's record, appends it to `speedrun/records/<track>.csv`, and redraws the table and chart. Open a PR with your change, the new row, and the run's `summary.json` + `requests.jsonl` (attach them or link them). A maintainer re-runs it on the same hardware class before merging, and the record stands only if the re-run is also at or above the floor and within noise of the submitted time. `add` can't see which weights were served (the served id is the SGLang shim path), so the re-run is also where the model is checked. CI fails if the README tables or charts drift from the record files (`python speedrun/leaderboard.py check`).
 
 ## Quickstart
 
@@ -131,7 +55,7 @@ hf auth login            # or: export HF_TOKEN=hf_...
 
 Three levels, from no hardware to the full stack:
 
-1. **No model, any machine** — wiring, request encoding, decision head, chat parsing, the speedrun checker:
+1. **No model, any machine** — wiring, request encoding, decision head, chat parsing:
    ```bash
    pytest -q            # from the repo root; CI runs the same
    ```
@@ -145,7 +69,16 @@ Three levels, from no hardware to the full stack:
    Decisions on MLX are not supported yet.
 3. **GPU, everything** — serve each mode and compare with the model card (GSM8K 89.9, MMLU-Pro 62.7 self-spec):
    ```bash
-   # wait_up as defined under "Submit a record" above; `wait` lets the old server free the port and GPU first
+   # wait until the server on port $1 (process $2) answers; give up if it exits or after 30 minutes
+   wait_up() {
+     for _ in $(seq 180); do
+       curl -sf "localhost:$1/v1/models" >/dev/null && return 0
+       kill -0 "$2" 2>/dev/null || { echo "server exited before it was ready" >&2; return 1; }
+       sleep 10
+     done
+     echo "server not ready after 30 minutes" >&2; return 1
+   }
+   # `wait` lets the old server free the port and GPU before the next one starts
    for mode in causal self-spec; do
      python serve.py --mode $mode --port 30000 & pid=$!
      wait_up 30000 $pid && python eval.py gsm8k --num-problems 200
@@ -287,12 +220,11 @@ The **vLLM** backend likewise needs one file fetched: `block_causal_readout.py`,
 ```bash
 python test_smoke.py              # no GPU: command construction, modes, the b15_g8 config
 pytest -q test_decide_cpu.py      # no GPU: decision requests, prefix prompts, head, chat parsing, HTTP
-pytest -q speedrun/               # the speedrun rules and the leaderboard rendering
 ```
 
 ## Contributing
 
-The best way in is the [speedrun](#speedrun): make Zoro-1 faster on your hardware and take a record. Beyond that:
+Open directions:
 
 - prefer server-parsed `content`/`reasoning_content` in `chat.py`/`eval.py` when `--reasoning-parser` is set
 - decisions on vLLM and MLX ([#60](https://github.com/trillion-labs/trida-stack/issues/60), [#61](https://github.com/trillion-labs/trida-stack/issues/61))

@@ -15,7 +15,7 @@ Two independent stacks:
 | | stack | what it does |
 |---|---|---|
 | 🏋️ | **`train/`** | **AR → diffusion conversion.** Block-diffusion SFT starting from a *pretrained AR checkpoint* (no diffusion pretraining), with an AR auxiliary loss so the same weights keep a working causal head. Optional **typed-decision joint training** (a pointer head for yes/no, choice and score questions) and **image inputs** for vision-language checkpoints. |
-| ⚡ | **`inference/<model>/`** | **nano-inference: one small, nanoGPT-style serving stack per model.** [`inference/zoro-1/`](inference/zoro-1/) serves `trillionlabs/Zoro-1`: self-speculative generation and typed decisions from one checkpoint, OpenAI-compatible, on **SGLang**, **vLLM** or **MLX**, with a [speedrun leaderboard](inference/zoro-1/README.md#speedrun). |
+| ⚡ | **`inference/<model>/`** | **nano-inference: one small, nanoGPT-style serving stack per model.** [`inference/zoro-1/`](inference/zoro-1/) serves `trillionlabs/Zoro-1`: self-speculative generation and typed decisions from one checkpoint, OpenAI-compatible, on **SGLang**, **vLLM** or **MLX**. |
 
 `train/` and `inference/` do not import each other. `benchmark/` holds the heavier agentic eval
 harnesses; `inference/` ships its own quick quality/throughput benchmarks (gsm8k / mmlu_pro / ifeval).
@@ -157,7 +157,7 @@ python inference/zoro-1/serve.py --mode decide    --port 30001   # typed decisio
 Self-speculative decoding is **lossless** at matched sampling settings: every committed token is
 either an accepted draft that equals the AR token, or the AR correction. Its benefit is
 **tokens per forward**, not a different answer. See [`inference/zoro-1/README.md`](inference/zoro-1/README.md)
-for chat, decisions, benchmarks, the model contract and the **speedrun leaderboard** (H100, L40S, MLX).
+for chat, decisions, benchmarks and the model contract.
 
 ### Decisions (`--mode decide`)
 `--mode decide` runs `serve_decide.py` on **stock SGLang ≥ 0.5.22** (no fork or patch): typed
@@ -185,12 +185,6 @@ See [`inference/zoro-1/README.md#decisions`](inference/zoro-1/README.md#decision
 | **vLLM** | [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) | out-of-tree plugin, self-spec |
 | **MLX** | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) | on-device (Apple Silicon): lossless self-spec, OpenAI-compatible server, image input, a small agent; q8 fits 16–18 GB |
 
-### Speedrun
-A [NanoGPT-speedrun](https://github.com/KellerJordan/modded-nanogpt)-style leaderboard: answer a fixed
-GSM8K subsample with Zoro-1, one request at a time, as fast as possible, with accuracy ≥ 87.0%.
-Tracks: 1× H100, 1× L40S, Apple Silicon (MLX). Rules and records:
-[`inference/zoro-1/README.md#speedrun`](inference/zoro-1/README.md#speedrun).
-
 ---
 
 ## Layout
@@ -208,14 +202,13 @@ train/                   AR -> diffusion SFT trainer    (entry: train.py -> trai
   data/text_sft_data.py      packing / bucketing / multi-turn
 inference/               nano-inference: one small serving stack per model
   zoro-1/                    trillionlabs/Zoro-1
-    README.md                  serving, decisions, benchmarks, speedrun leaderboard
+    README.md                  serving, decisions, benchmarks
     getting_started.ipynb      serving tutorial
     MODEL_CONTRACT.md          what the serving code expects from the checkpoint
     serve.py                   --mode causal | self-spec | decide; launches the server
     serve_decide.py, decide_*.py, jev*.py   typed-decision server (/v1/decide) on stock SGLang
     chat.py                    OpenAI-compatible client
     eval.py / eval_ifeval.py   gsm8k / mmlu_pro / ifeval quality + throughput
-    speedrun/                  leaderboard rules, records per hardware track, charts
     ifeval_lib/                vendored IFEval scorers
     configs/                   self-spec decode config (b15_g8)
     sglang/                    recipe for the patched SGLang backend

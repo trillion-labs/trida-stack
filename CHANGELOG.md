@@ -12,12 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `README.ko.md`: a Korean README, linked from the English one (#57).
 - README: a Models table with Hugging Face links for Zoro-1 and Zoro (formerly Trida2.0-4B), and
   sections on typed-decision joint training, image training, `--mode decide` serving, the backends
-  (SGLang, vLLM, MLX), the speedrun and the two getting-started notebooks (#57).
-- `inference/zoro-1/speedrun/`: a NanoGPT-style speedrun for Zoro-1 inference. The task is GSM8K at
-  client concurrency 1 with fixed sampling; the record is `eval.py`'s wall-clock, with an 87.0%
-  accuracy floor. There are three hardware tracks (1× H100, 1× L40S, Apple Silicon MLX).
-  `leaderboard.py add` checks a run against the rules and records it, `render` draws the README
-  tables and SVG charts, and `check` (run in CI) fails if they drift from the record files.
+  (SGLang, vLLM, MLX) and the two getting-started notebooks (#57).
 - Image+text training for Qwen3.5 vision-language checkpoints. Conversations under
   `--pack --multiturn` may carry image parts. The vision encoder is frozen and the
   projector trains at `--projector_lr_scale` × `--lr`. Images above

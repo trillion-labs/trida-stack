@@ -39,7 +39,7 @@ output_models/
 checkpoints/
 evals_results/
 results/
-# serve.py --log / LOG= server logs that eval.py --server-log reads (the speedrun writes them next to eval.py)
+# serve.py --log / LOG= server logs that eval.py --server-log reads
 inference/*/server*.log
 *.tar.gz
 benchmarking/swe_bench/predictions*.jsonl

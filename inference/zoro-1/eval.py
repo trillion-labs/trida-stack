@@ -25,7 +25,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # requests and datasets are imported where they are used, so the summary and scoring code imports without them
-# (the speedrun tests check eval.py's summary against the leaderboard rules in CI).
+# (so CPU tests can import summarize() without a network stack).
 
 LETTERS = "ABCDEFGHIJ"
 SUBSAMPLE_SEED = 42

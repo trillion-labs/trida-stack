@@ -15,7 +15,7 @@
 | | 스택 | 주요 기능 |
 |---|---|---|
 | 🏋️ | **`train/`** | **AR → 디퓨전 전환.** 별도의 디퓨전 사전학습 없이 *사전학습된 AR 체크포인트*에 블록 디퓨전 지도 미세조정(SFT)을 바로 적용합니다. AR 보조 손실을 함께 사용해 동일한 가중치로 자기회귀 생성도 수행할 수 있도록 학습합니다. 선택적으로 **유형별 의사결정(typed decision) 공동 학습**(예/아니오·선택·점수형 질문에 답하는 포인터 헤드)과 비전-언어 체크포인트의 **이미지 입력 학습**을 지원합니다. |
-| ⚡ | **`inference/<model>/`** | **nano-inference: nanoGPT 스타일의 간결한 모델별 서빙 스택.** [`inference/zoro-1/`](inference/zoro-1/)은 `trillionlabs/Zoro-1`을 서빙합니다. 하나의 체크포인트로 self-speculative 디코딩과 유형별 의사결정을 지원합니다. **SGLang**, **vLLM**, **MLX** 백엔드에서 OpenAI 호환 API를 제공하며, [스피드런 리더보드](inference/zoro-1/README.md#speedrun)에서 성능 기록을 확인할 수 있습니다. |
+| ⚡ | **`inference/<model>/`** | **nano-inference: nanoGPT 스타일의 간결한 모델별 서빙 스택.** [`inference/zoro-1/`](inference/zoro-1/)은 `trillionlabs/Zoro-1`을 서빙합니다. 하나의 체크포인트로 self-speculative 디코딩과 유형별 의사결정을 지원합니다. **SGLang**, **vLLM**, **MLX** 백엔드에서 OpenAI 호환 API를 제공합니다. |
 
 `train/`과 `inference/` 사이에는 상호 임포트 의존성이 없습니다. `benchmark/`는 에이전트 평가를 위한 종합 평가 도구를,
 `inference/`는 품질과 처리량을 간단히 측정할 수 있는 벤치마크(gsm8k / mmlu_pro / ifeval)를 제공합니다.
@@ -154,8 +154,8 @@ python inference/zoro-1/serve.py --mode decide    --port 30001   # 유형별 의
 ```
 
 Self-speculative 디코딩은 동일한 샘플링 설정에서 **무손실**로 동작합니다. 확정되는 토큰은 AR 검증을 통과한 초안 토큰이거나 AR이 제시한 수정 토큰입니다.
-이를 통해 AR 생성 결과의 분포를 유지하면서 **순전파 한 번에 생성하는 토큰 수**를 늘립니다. 채팅, 의사결정, 벤치마크, 체크포인트 요구사항,
-**스피드런 리더보드**(H100, L40S, MLX)에 관한 자세한 내용은 [`inference/zoro-1/README.md`](inference/zoro-1/README.md)를 참고하세요.
+이를 통해 AR 생성 결과의 분포를 유지하면서 **순전파 한 번에 생성하는 토큰 수**를 늘립니다. 채팅, 의사결정, 벤치마크, 체크포인트 요구사항에
+관한 자세한 내용은 [`inference/zoro-1/README.md`](inference/zoro-1/README.md)를 참고하세요.
 
 ### 의사결정 서빙 (`--mode decide`)
 
@@ -186,12 +186,6 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
 | **vLLM** | [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) | 외부 플러그인(out-of-tree) 방식의 self-spec 디코딩 |
 | **MLX** | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) | Apple Silicon 기기 내 실행: 무손실 self-spec 디코딩, OpenAI 호환 서버, 이미지 입력, 경량 에이전트. q8 모델은 메모리 16–18 GB의 Mac에서 실행할 수 있습니다 |
 
-### 스피드런
-
-[NanoGPT 스피드런](https://github.com/KellerJordan/modded-nanogpt) 방식의 리더보드입니다. Zoro-1으로 정해진 GSM8K 표본의 요청을 하나씩 처리하면서,
-정확도 87.0% 이상을 유지하고 전체 처리 시간을 최소화하는 것이 목표입니다. H100 1대, L40S 1대, Apple Silicon(MLX)의 세 트랙으로 운영합니다.
-규칙과 기록: [`inference/zoro-1/README.md#speedrun`](inference/zoro-1/README.md#speedrun).
-
 ---
 
 ## 디렉터리 구조
@@ -209,7 +203,7 @@ train/                         AR → 디퓨전 SFT 학습 코드 (진입점: tr
   data/text_sft_data.py        패킹 / 버킷팅 / 멀티턴 데이터 처리
 inference/                     nano-inference: 모델별로 구성된 간결한 서빙 스택
   zoro-1/                      trillionlabs/Zoro-1
-    README.md                  서빙, 의사결정, 벤치마크, 스피드런 리더보드
+    README.md                  서빙, 의사결정, 벤치마크
     getting_started.ipynb      서빙 튜토리얼
     MODEL_CONTRACT.md          서빙 코드가 요구하는 체크포인트 규격
     serve.py                   서버 실행 (--mode causal | self-spec | decide)
@@ -217,7 +211,6 @@ inference/                     nano-inference: 모델별로 구성된 간결한 
                                기본 SGLang 배포판에서 실행하는 의사결정 서버 (/v1/decide)
     chat.py                    OpenAI 호환 클라이언트
     eval.py / eval_ifeval.py   gsm8k / mmlu_pro / ifeval 품질·처리량 평가
-    speedrun/                  리더보드 규칙, 하드웨어 트랙별 기록, 차트
     ifeval_lib/                저장소에 포함된 IFEval 채점 코드
     configs/                   self-spec 디코딩 설정 (b15_g8)
     sglang/                    패치된 SGLang 백엔드 설치 절차
