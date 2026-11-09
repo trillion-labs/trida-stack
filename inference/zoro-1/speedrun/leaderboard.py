@@ -67,30 +67,58 @@ def check_run(summary, track, records):
     for k, v in SETTINGS.items():
         if got.get(k) != v:
             errs.append(f"settings.{k} must be {v!r}, got {got.get(k)!r}")
-    acc = summary.get("accuracy_pct", 0)
-    if acc < ACCURACY_FLOOR:
-        errs.append(f"accuracy {acc}% is below the {ACCURACY_FLOOR}% floor")
-    best = min((float(r["wall_s"]) for r in records), default=None)
-    if best is not None and summary.get("wall_s", float("inf")) >= best:
-        errs.append(f"wall_s {summary.get('wall_s')} does not beat the current {track} record ({best} s)")
+    acc, wall = _number(summary.get("accuracy_pct")), _number(summary.get("wall_s"))
+    if acc is None or not acc >= ACCURACY_FLOOR:          # `not >=`, so NaN fails too
+        errs.append(f"accuracy {summary.get('accuracy_pct')!r}% is below the {ACCURACY_FLOOR}% floor")
+    if wall is None or not 0 < wall < float("inf"):
+        errs.append(f"wall_s must be a positive number of seconds, got {summary.get('wall_s')!r}")
+    else:
+        best = min((float(r["wall_s"]) for r in records), default=None)
+        if best is not None and not wall < best:
+            errs.append(f"wall_s {wall} does not beat the current {track} record ({best} s)")
     return errs
 
 
-# A record's free text lands in README Markdown between <!-- speedrun:… --> markers. The log must be a plain https
-# link (it becomes a Markdown link target); description and contributors must be one line with no HTML, so they can
-# neither end the marker block early nor add markup.
-LOG_RE = re.compile(r"https://[^\s()<>|\"']+")
+def _number(v):
+    """`v` as a finite float, else None (missing, text, NaN or infinite)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f and abs(f) != float("inf") else None
+
+
+# A record's fields land in README Markdown between <!-- speedrun:… --> markers, so each one is checked against what
+# it may be (an allowlist), not against characters that broke it before: a date is an ISO date, numbers are finite,
+# the log is a plain https link, contributors are @handles, and the description is one line of text with no HTML,
+# links, images or backslash escapes (emphasis and parentheses are fine).
+LOG_RE = re.compile(r"https://[^\s()<>|\"'\\]+")
+CONTRIBUTORS_RE = re.compile(r"@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:, ?@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*")
+DESCRIPTION_RE = re.compile(r"[^<>\[\]\\\r\n]{1,200}")
 
 
 def record_problems(rec):
-    """-> why this record's text can't go into the README (empty = fine)."""
+    """-> why this record can't go into the README (empty = fine)."""
     errs = []
+    date = rec.get("date") or ""
+    try:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+            raise ValueError
+        datetime.date.fromisoformat(date)
+    except ValueError:
+        errs.append(f"date must be an ISO date (YYYY-MM-DD), got {date!r}")
+    for key, lo, hi in (("wall_s", 0, None), ("accuracy_pct", 0, 100), ("tok_per_s_per_request", 0, None)):
+        v = _number(rec.get(key))
+        if v is None or v < lo or (hi is not None and v > hi) or (key == "wall_s" and v == 0):
+            errs.append(f"{key} must be a finite number{f' in [{lo}, {hi}]' if hi else ' > 0'}, got {rec.get(key)!r}")
     log = rec.get("log") or ""
     if log and not LOG_RE.fullmatch(log):
-        errs.append(f"log must be a plain https:// link (no spaces, quotes, parentheses, < > or |), got {log!r}")
-    for key in ("description", "contributors"):
-        if re.search(r"[<>\r\n]", rec.get(key) or ""):
-            errs.append(f"{key} must be one line of plain text (no <, > or line breaks)")
+        errs.append(f"log must be a plain https:// link (no spaces, quotes, parentheses, backslashes, < > or |), "
+                    f"got {log!r}")
+    if not CONTRIBUTORS_RE.fullmatch(rec.get("contributors") or ""):
+        errs.append(f"contributors must be GitHub handles like '@you, @them', got {rec.get('contributors')!r}")
+    if not DESCRIPTION_RE.fullmatch(rec.get("description") or ""):
+        errs.append("description must be one line of 1-200 characters without < > [ ] or backslashes")
     return errs
 
 
@@ -155,12 +183,15 @@ def render():
         (HERE / f"{track}.svg").write_text(chart(track, load(track)), encoding="utf-8")
 
 
+def bad_records():
+    """-> problems with rows in records/*.csv (a row edited by hand rather than written by `add`)."""
+    return [f"records/{track}.csv row {i}: {e}"
+            for track in TRACKS for i, rec in enumerate(load(track), 1) for e in record_problems(rec)]
+
+
 def stale():
-    """-> files that `render` would change, and records (added by hand, not by `add`) whose text isn't allowed."""
+    """-> files that `render` would change."""
     out = []
-    for track in TRACKS:
-        for i, rec in enumerate(load(track), 1):
-            out += [f"records/{track}.csv row {i}: {e}" for e in record_problems(rec)]
     if rendered_readme(README.read_text(encoding="utf-8")) != README.read_text(encoding="utf-8"):
         out.append(str(README))
     for track in TRACKS:
@@ -181,16 +212,17 @@ def main():
     a.add_argument("--contributors", required=True, help="e.g. '@you, @them'")
     a.add_argument("--date", default=datetime.date.today().isoformat())
     sub.add_parser("render", help="rewrite the README tables and charts from speedrun/records/")
-    sub.add_parser("check", help="exit 1 if the README tables or charts are out of date")
+    sub.add_parser("check", help="exit 1 if a record row is invalid or the README tables or charts are out of date")
     args = ap.parse_args()
 
     if args.cmd == "add":
         summary = json.loads(Path(args.summary).read_text(encoding="utf-8"))
         records = load(args.track)
-        row = {"date": args.date, "wall_s": summary["wall_s"], "accuracy_pct": summary["accuracy_pct"],
-               "tok_per_s_per_request": summary["tok_per_s_per_request"], "description": args.description,
+        row = {"date": args.date, "wall_s": summary.get("wall_s"), "accuracy_pct": summary.get("accuracy_pct"),
+               "tok_per_s_per_request": summary.get("tok_per_s_per_request"), "description": args.description,
                "log": args.log, "contributors": args.contributors}
-        errs = check_run(summary, args.track, records) + record_problems(row)
+        errs = check_run(summary, args.track, records)
+        errs += [e for e in record_problems(row) if e not in errs]
         if errs:
             sys.exit("not a record:\n  - " + "\n  - ".join(errs))
         with open(RECORDS / f"{args.track}.csv", "a", newline="", encoding="utf-8") as fh:
@@ -200,9 +232,15 @@ def main():
     elif args.cmd == "render":
         render()
     else:
+        msgs = []
+        bad = bad_records()
+        if bad:
+            msgs.append("fix these rows in speedrun/records/*.csv (render can't):\n  - " + "\n  - ".join(bad))
         out = stale()
         if out:
-            sys.exit("out of date (run `python speedrun/leaderboard.py render`): " + ", ".join(out))
+            msgs.append("out of date (run `python speedrun/leaderboard.py render`): " + ", ".join(out))
+        if msgs:
+            sys.exit("\n".join(msgs))
 
 
 if __name__ == "__main__":

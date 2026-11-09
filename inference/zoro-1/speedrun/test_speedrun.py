@@ -75,21 +75,70 @@ def test_table_and_chart():
     assert "no record yet" in lb.chart("h100", [])
 
 
-def test_record_text_that_would_break_the_readme_is_rejected():
-    ok = {"description": "self-spec b15_g8", "log": "https://example.com/run/summary.json", "contributors": "@a"}
-    assert lb.record_problems(ok) == []
-    assert lb.record_problems({**ok, "log": ""}) == []                       # a log is optional
+OK_RECORD = {"date": "2026-10-29", "wall_s": "812.4", "accuracy_pct": "89.5", "tok_per_s_per_request": "312.0",
+             "description": "self-spec b15_g8 (SGLang), q8 *fast*", "log": "https://github.com/o/r/pull/9#issue-1",
+             "contributors": "@a, @b-c"}
+
+
+def test_every_record_field_must_be_a_known_good_value():
+    # each field is checked against what it may be, not against a list of characters that broke it before
+    assert lb.record_problems(OK_RECORD) == []
+    assert lb.record_problems({**OK_RECORD, "log": ""}) == []               # a log is optional
     bad = {
-        "log scheme": {**ok, "log": "javascript:alert(1)"},
-        "log http": {**ok, "log": "http://example.com/run"},
-        "log paren": {**ok, "log": "https://example.com/a)b"},
-        "log space": {**ok, "log": "https://example.com/a b"},
-        "marker": {**ok, "description": "fast <!-- /speedrun:h100 --> x"},
-        "html": {**ok, "contributors": "<img src=x>"},
-        "newline": {**ok, "description": "line one\nline two"},
+        "date html": {"date": "<img src=x>"},
+        "date marker": {"date": "<!-- /speedrun:h100 -->"},
+        "date pipe": {"date": "2026-10-29 | x"},
+        "date link": {"date": "[x](https://e.com)"},
+        "date format": {"date": "29/10/2026"},
+        "date invalid": {"date": "2026-13-40"},
+        "wall nan": {"wall_s": "nan"},
+        "wall inf": {"wall_s": "inf"},
+        "wall text": {"wall_s": "fast"},
+        "wall zero": {"wall_s": "0"},
+        "accuracy range": {"accuracy_pct": "101"},
+        "tok nan": {"tok_per_s_per_request": "nan"},
+        "log scheme": {"log": "javascript:alert(1)"},
+        "log http": {"log": "http://example.com/run"},
+        "log paren": {"log": "https://example.com/a)b"},
+        "log space": {"log": "https://example.com/a b"},
+        "description marker": {"description": "fast <!-- /speedrun:h100 --> x"},
+        "description link": {"description": "see [log](https://phish.example)"},
+        "description image": {"description": "![](https://tracker.example/p.gif)"},
+        "description backslash": {"description": "a\\|b"},
+        "description newline": {"description": "line one\nline two"},
+        "description empty": {"description": ""},
+        "contributors html": {"contributors": "<img src=x>"},
+        "contributors link": {"contributors": "[@a](https://phish.example)"},
+        "contributors free text": {"contributors": "me and my friend"},
     }
-    for why, rec in bad.items():
-        assert lb.record_problems(rec), why
+    for why, change in bad.items():
+        assert lb.record_problems({**OK_RECORD, **change}), why
+
+
+def test_a_nan_run_is_not_a_record():
+    # NaN compares False with everything, so it would pass the floor and "beat" any record
+    assert lb.check_run(run(accuracy_pct=float("nan")), "h100", [])
+    assert lb.check_run(run(wall_s=float("nan")), "h100", [{"wall_s": "900.0"}])
+    assert lb.check_run(run(wall_s=float("inf")), "h100", [])
+
+
+def test_add_reports_rule_violations_for_a_partial_summary(monkeypatch, tmp_path, capsys):
+    import json
+    import pytest
+    import sys
+    path = tmp_path / "summary.json"
+    path.write_text(json.dumps({"task": "gsm8k"}))                          # e.g. an older eval.py's summary
+    monkeypatch.setattr(sys, "argv", ["leaderboard.py", "add", str(path), "--track", "h100",
+                                      "--description", "x", "--contributors", "@a"])
+    with pytest.raises(SystemExit) as exc:
+        lb.main()
+    assert "not a record" in str(exc.value)                                 # the rule list, not a KeyError
+
+
+def test_check_separates_bad_rows_from_stale_files(monkeypatch):
+    monkeypatch.setattr(lb, "load", lambda track: [{**OK_RECORD, "log": "http://x"}] if track == "h100" else [])
+    assert any("h100.csv row 1" in p for p in lb.bad_records())
+    assert not any("csv" in p for p in lb.stale())                          # stale() is only about render output
 
 
 def test_table_escapes_pipes_in_free_text():
@@ -100,4 +149,5 @@ def test_table_escapes_pipes_in_free_text():
 
 
 def test_readme_and_charts_match_the_records():
+    assert lb.bad_records() == [], "fix these rows in speedrun/records/*.csv"
     assert lb.stale() == [], "run `python speedrun/leaderboard.py render`"

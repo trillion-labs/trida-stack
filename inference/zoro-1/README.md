@@ -72,14 +72,25 @@ Say the chip and memory in the description (e.g. "M3 Pro 18 GB, q8").
 ### Submit a record
 
 ```bash
-# 1. serve, and wait until it answers (the first start downloads and shapes Zoro-1)
-python serve.py --port 30000 --log server.log &                       # SGLang, port 30000
-#   LOG=server.log PORT=30000 bash vllm/serve_diffusion.sh &          # or vLLM (its default port is 8000)
-#   (cd mlx && uv run trida-mlx-server --model ~/models/Zoro-1-mlx-q8 --gen-block 8 --port 30000) &   # or MLX
-until curl -sf localhost:30000/v1/models >/dev/null; do sleep 10; done
+# wait until the server on port $1 (process $2) answers; give up if it exits or after 30 minutes
+wait_up() {
+  for _ in $(seq 180); do
+    curl -sf "localhost:$1/v1/models" >/dev/null && return 0
+    kill -0 "$2" 2>/dev/null || { echo "server exited before it was ready" >&2; return 1; }
+    sleep 10
+  done
+  echo "server not ready after 30 minutes" >&2; return 1
+}
+
+# 1. serve (the first start downloads and shapes Zoro-1), and wait until it answers
+python serve.py --port 30000 --log server.log & pid=$!               # SGLang, port 30000
+#   LOG=server.log PORT=30000 bash vllm/serve_diffusion.sh & pid=$!  # or vLLM (its default port is 8000)
+#   (cd mlx && uv run trida-mlx-server --model ~/models/Zoro-1-mlx-q8 --gen-block 8 --port 30000) & pid=$!   # or MLX
+wait_up 30000 $pid
 
 # 2. the run: 200 problems on the GPU tracks, 50 on MLX (MLX has no --server-log counters)
 python eval.py gsm8k --port 30000 --num-problems 200 --max-workers 1 --server-log server.log
+kill $pid; wait $pid
 
 # 3. check it and record it
 python speedrun/leaderboard.py add results/gsm8k_<stamp>/summary.json --track h100 \
@@ -134,10 +145,13 @@ Three levels, from no hardware to the full stack:
    Decisions on MLX are not supported yet.
 3. **GPU, everything** — serve each mode and compare with the model card (GSM8K 89.9, MMLU-Pro 62.7 self-spec):
    ```bash
-   wait_up() { until curl -sf "localhost:$1/v1/models" >/dev/null; do sleep 10; done; }
-   python serve.py --mode causal    --port 30000 & wait_up 30000; python eval.py gsm8k --num-problems 200; kill %1
-   python serve.py --mode self-spec --port 30000 & wait_up 30000; python eval.py gsm8k --num-problems 200; kill %1
-   python serve.py --mode decide    --port 30001      # then the /v1/decide example under Decisions
+   # wait_up as defined under "Submit a record" above; `wait` lets the old server free the port and GPU first
+   for mode in causal self-spec; do
+     python serve.py --mode $mode --port 30000 & pid=$!
+     wait_up 30000 $pid && python eval.py gsm8k --num-problems 200
+     kill $pid; wait $pid
+   done
+   python serve.py --mode decide --port 30001        # then the /v1/decide example under Decisions
    ```
 
 ## Usage
