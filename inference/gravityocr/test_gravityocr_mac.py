@@ -129,6 +129,31 @@ def test_missing_gravity_app_is_refused(tmp_path):
     assert e.value.code == 2
 
 
+def test_engine_import_writes_no_bytecode_into_the_app(tmp_path, monkeypatch):
+    # Gravity.app is signed: a __pycache__ written inside it breaks the bundle's seal. Write bytecode
+    # next to the sources, as Gravity's runtime does (Apple's system Python redirects it elsewhere).
+    import sys
+    monkeypatch.setattr(sys, "pycache_prefix", None)
+    pkg = tmp_path / "Gravity.app" / "Contents" / "Resources" / "project" / "ocr"
+    for sub in ("engine", "recognition"):
+        (pkg / sub).mkdir(parents=True)
+        (pkg / sub / "__init__.py").write_text("")
+    (pkg / "__init__.py").write_text("")
+    (pkg / "engine" / "pipeline.py").write_text(
+        "class LocalOcrEngine:\n"
+        "    def __init__(self, checkpoint, **kw):\n"
+        "        self.checkpoint = checkpoint\n")
+    (pkg / "recognition" / "model.py").write_text("def decode_ar_mlx_from_prefix(*a, **k):\n    pass\n")
+    try:
+        engine = serve_mac.load_engine(tmp_path / "Gravity.app", tmp_path, "causal")
+        assert engine.checkpoint == tmp_path
+    finally:
+        for name in [m for m in sys.modules if m == "ocr" or m.startswith("ocr.")]:
+            del sys.modules[name]
+        sys.path.remove(str(tmp_path / "Gravity.app" / "Contents" / "Resources" / "project"))
+    assert not list((tmp_path / "Gravity.app").rglob("__pycache__"))
+
+
 def test_licence_header():
     head = Path(serve_mac.__file__).read_text().splitlines()[:3]
     assert "# SPDX-License-Identifier: Apache-2.0" in head

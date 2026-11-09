@@ -16,9 +16,9 @@ One layout region per request, behind an OpenAI-compatible API: a launcher, a on
 
 ---
 
-GravityOCR is [`zai-org/GLM-OCR`](https://huggingface.co/zai-org/GLM-OCR) (a CogViT vision encoder and a 0.5B GLM text decoder) fine-tuned as a block-diffusion model: the text decoder learns to fill a block of 32 masked tokens in parallel, and an AR auxiliary loss keeps its causal head. The architecture is unchanged, so the checkpoint loads as a stock `GlmOcrForConditionalGeneration`. The weights were trained outside this repo; this folder only serves them.
+GravityOCR is [`zai-org/GLM-OCR`](https://huggingface.co/zai-org/GLM-OCR) (a CogViT vision encoder and a 0.5B GLM text decoder) fine-tuned as a block-diffusion model with a single output head that decodes both ways: with bidirectional attention over a block of 32 masked tokens it fills them in parallel, and with causal attention it predicts the next token, a skill an AR auxiliary loss keeps. The architecture is unchanged, so the checkpoint loads as a stock `GlmOcrForConditionalGeneration`. The weights were trained outside this repo; this folder only serves them.
 
-Self-speculative decoding uses both heads of that one checkpoint. Each round runs two forward passes. The **draft** pass reads the boundary token followed by 32 masks, bidirectional within that window, and proposes the next block. The **verify** pass runs the causal path over the draft, accepts the longest prefix that matches the AR head's greedy choices, and adds the AR head's own next token. A round commits up to K + 1 = 34 tokens (K = `DRAFT` = 33).
+Self-speculative decoding uses both modes of that one model. Each round runs two forward passes. The **draft** pass reads the boundary token followed by 32 masks, bidirectional within that window, and proposes the next block. The **verify** pass runs the causal path over the draft, accepts the longest prefix that matches the model's greedy AR choices, and adds its own next AR token. A round commits up to K + 1 = 34 tokens (K = `DRAFT` = 33).
 
 | `MODE` | what it does |
 |---|---|
@@ -163,7 +163,7 @@ A standard OpenAI chat completion, `POST /v1/chat/completions`, with the image f
 
 - **Hardware.** Validated only on H100 (compute capability 9.0) with driver 570 and a CUDA 12.8 toolkit.
 - **Pinned base.** The patch is a diff against SGLang v0.5.10 (`1519acf`) and does not apply to later releases without porting. FlashInfer must be exactly 0.6.7.post2: the fast attention path calls its planning internals and checks the version.
-- **Self-spec and causal can differ.** Self-spec checks every draft token against the AR head, so each committed token is the AR head's greedy choice given the tokens committed before it. The draft and verify passes, though, run other kernels and batch shapes than causal decoding. Under bf16, a near-tie between two tokens can then resolve differently, and the outputs diverge from that token on. Compare the modes on token ids over many crops, not on one. The same mode can also resolve such a near-tie differently from one server run to the next, since SGLang runs without deterministic inference by default: in two `DP=2` causal runs over the same 100 crops, one crop came out differently in one run (it stopped before a trailing `\tag`).
+- **Self-spec and causal can differ.** Self-spec checks every draft token against the model's AR prediction, so each committed token is its greedy AR choice given the tokens committed before it. The draft and verify passes, though, run other kernels and batch shapes than causal decoding. Under bf16, a near-tie between two tokens can then resolve differently, and the outputs diverge from that token on. Compare the modes on token ids over many crops, not on one. The same mode can also resolve such a near-tie differently from one server run to the next, since SGLang runs without deterministic inference by default: in two `DP=2` causal runs over the same 100 crops, one crop came out differently in one run (it stopped before a trailing `\tag`).
 - **Repetition penalty.** In speculative verification SGLang penalizes every position of a block using only the tokens committed before the block, so a token repeated inside the block escapes the penalty that causal decoding would apply. With `repetition_penalty` other than 1, set `SELFSPEC_EXACT_PENALTY=1`, which adds the in-block part for `repetition_penalty` (not for frequency or presence penalties). It is off by default.
 - **Sampling.** Validated with greedy decoding only (`temperature: 0`).
 - **Crops only.** No page layout, no PDF input, no page assembly.
@@ -192,6 +192,54 @@ MODE=causal GPU=1 PORT=30001 bash inference/gravityocr/serve.sh &   # causal on 
 "$VBIN/python" inference/gravityocr/ocr_request.py crop.png --url http://127.0.0.1:30001
 ```
 
+## Tutorial notebook
+
+[`getting_started.ipynb`](getting_started.ipynb) serves GravityOCR, reads a text, a table and a formula
+crop, and compares self-spec with causal decoding, in about 5–10 minutes after a one-time setup. It
+runs on Linux with an L40 or H100 (`serve.sh`) or on an Apple Silicon Mac (`serve_mac.py`, see
+[On a Mac](#on-a-mac)), and is driven by environment variables:
+
+| variable | default | meaning |
+|---|---|---|
+| `BACKEND` | `auto` | `sglang` (Linux) or `mac`; `auto` picks `mac` on an Apple Silicon Mac |
+| `GPU`, `CAUSAL_GPU` | `auto` | the least-loaded L40 / H100, and a second one for the causal server if there is one (else they take turns) |
+| `COMPARE_CAUSAL` | `1` | `0` skips section 5 |
+| `SGLANG_SRC`, `VBIN` | `~/src/sglang-gravityocr` | where `sglang/setup.sh` built the server environment |
+| `GRAVITYOCR_MODEL` | `trillionlabs/GravityOCR` | Hub id or local checkpoint |
+| `GRAVITY_APP` | `/Applications/Gravity.app` | the Gravity app, for `BACKEND=mac` |
+| `PORT`, `CAUSAL_PORT` | `30000`, `30001` | the two servers' ports |
+| `CUDA_HOME`, `API_KEY` | as for `serve.sh` | |
+
+The first code cell checks the kernel: Python 3.10 or newer, with Pillow and matplotlib. It installs
+whichever is missing into that kernel, with uv if there is one, so any Python ≥ 3.10 kernel works,
+including an environment that has no `pip`.
+
+**On an L40.** `serve.sh` accepts only compute capability 9.0 (H100), and the L40 is 8.9. For an L40 the
+notebook runs `serve.sh`'s other startup checks itself (a CUDA 12.x `nvcc`, `ninja` in `VBIN`) and
+passes `SKIP_PREFLIGHT=1`. The patch's vision-encoder CUDA graphs need FA3, which is Hopper-only, so
+they switch themselves off; the other `FAST=1` paths run. The recipe itself was validated on H100 only.
+
+### With a coding agent
+
+Settings come from the environment and every server stops when the kernel exits, even after a failed
+cell, so an agent can run the notebook headless. From `inference/gravityocr/`:
+
+```bash
+uv run --no-project --python 3.12 --with jupyter --with pillow --with matplotlib \
+  jupyter nbconvert --to notebook --execute getting_started.ipynb --output-dir /tmp/gravityocr-run
+```
+
+`--no-project` keeps `uv` from installing the repository's own dependencies, and `--output-dir` keeps
+the executed copy out of the repository.
+
+- **Claude Code** (`claude`): approve the commands it asks to run. If you turned on its sandbox, let
+  this command run outside it.
+- **Codex**: start it with `codex -s danger-full-access -a on-request` (it still asks before commands
+  that need approval). Its default `workspace-write` sandbox blocks the network, including the
+  servers on `127.0.0.1`, and writes to `~/.cache`. On a Mac it also blocks the GPU: with network
+  access and `~/.cache` allowed, the Mac backend still fails with *No Metal device available* (tested
+  with Codex CLI 0.166).
+
 ## On a Mac
 
 `serve_mac.py` answers the same requests as `serve.sh` on an Apple Silicon Mac, for trying the model
@@ -201,7 +249,7 @@ which must be installed, with Gravity's bundled Python, and downloads `trillionl
 into `~/.cache/gravityocr-mac/` (pinned to a commit, SHA-256 checked):
 
 ```bash
-/Applications/Gravity.app/Contents/Resources/runtime/bin/python -I inference/gravityocr/serve_mac.py
+/Applications/Gravity.app/Contents/Resources/runtime/bin/python -I -B inference/gravityocr/serve_mac.py
 python3 inference/gravityocr/ocr_request.py --synthetic 'Hello GravityOCR'
 ```
 

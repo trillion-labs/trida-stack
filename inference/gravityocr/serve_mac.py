@@ -12,9 +12,9 @@ It does not ship an engine. It imports the MLX engine inside Gravity.app
 (https://github.com/trillion-labs/GravityOCR-macOS, a separate download from Trillion Labs) and runs
 it with Gravity's bundled Python, so run it with that interpreter:
 
-    /Applications/Gravity.app/Contents/Resources/runtime/bin/python -I serve_mac.py
-    .../runtime/bin/python -I serve_mac.py --mode causal --port 30001
-    .../runtime/bin/python -I serve_mac.py --model /path/to/checkpoint
+    /Applications/Gravity.app/Contents/Resources/runtime/bin/python -I -B serve_mac.py
+    .../runtime/bin/python -I -B serve_mac.py --mode causal --port 30001
+    .../runtime/bin/python -I -B serve_mac.py --model /path/to/checkpoint
 
 How it differs from serve.sh, so its outputs and timings are not the L40 / H100 numbers:
   * MLX on the Mac GPU instead of SGLang on CUDA; text-decoder layers quantized to 6 bits (Gravity's
@@ -31,7 +31,14 @@ written against Gravity 0.3.4 and warns on any other version; an update may brea
 
 from __future__ import annotations
 
-import argparse
+import sys
+
+# Never write __pycache__ into Gravity.app: the app is signed, and new files inside the bundle break its
+# seal (codesign --verify fails, and macOS may refuse to open it). Set before any import from Gravity's
+# runtime; -B on the command line does the same.
+sys.dont_write_bytecode = True
+
+import argparse  # noqa: E402
 import base64
 import hashlib
 import io
@@ -39,7 +46,6 @@ import ipaddress
 import json
 import os
 import plistlib
-import sys
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
