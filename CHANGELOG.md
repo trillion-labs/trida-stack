@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Shared SGLang/MLX decision requests and answer formatting, torch-free pointer-head
+  conversion to safetensors, bounded state reuse, and parity/HTTP regression tests (#61).
+
 - Typed decisions in the MLX server (`POST /v1/decide`): Zoro-1's pointer head answers choice / yes-no /
   score questions over a state (one shared state prefill, a branch per question), and below a confidence
   threshold the model reasons once (self-spec) and decides again. The server also gained a `<tool_call>`
@@ -43,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   LRs) and `--adam_beta2`.
 
 ### Changed
+
+- MLX `POST /v1/decide` now defaults to `reasoning: false` instead of `"auto"`.
+  Send `reasoning: "auto"` explicitly to retain confidence-based escalation. Both
+  `true` and `"auto"` default to self-spec reasoning; `trida_mode: "causal"` overrides it.
 
 - Vulnerability reports have a second private channel: GitHub private vulnerability
   reporting is enabled, so the Security tab's **Report a vulnerability** button now
