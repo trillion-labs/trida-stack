@@ -202,3 +202,9 @@ back to `uv run trida-mlx-server` through a login shell.
 - SwiftUI's `@State` is a compiler macro on recent SDKs, and its plugin ships with Xcode but not
   with the Command Line Tools. The app keeps its view state in `AppState` instead, so it builds
   with either.
+
+Decision requests use the shared `{"request": {"state": …, "questions": …}}`
+envelope. The app maps its Always/Never controls to boolean reasoning and keeps
+Auto as `"auto"`; streamed progress events keep the same format. The server uses
+Zoro-1's model-card text calibration (1.52) when `temperature.json` has no text entry,
+including when launched outside the app.

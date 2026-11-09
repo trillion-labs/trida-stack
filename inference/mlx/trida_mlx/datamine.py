@@ -238,13 +238,14 @@ def mine_logs(d: Path):
             continue
         path, body, resp = rec.get("path", ""), rec.get("body") or {}, rec.get("response")
         if path.endswith("/decide"):
-            qs = body.get("questions") or {}
+            request = body.get("request", body)
+            qs = request.get("questions") or {}
             keys = set(qs)
             kind = ("tool_routing" if keys in ({"need"}, {"needs_tool", "kind"}) else
                     "reply_check" if keys & {"language", "request", "complete"} else
                     "ui_click" if keys & {"click", "field"} else "other")
-            decisions.append({"log": f.name, "kind": kind, "state": body.get("state"), "questions": qs,
-                              "image": bool(body.get("image")), "answers": (resp or {}).get("answers"),
+            decisions.append({"log": f.name, "kind": kind, "state": request.get("state"), "questions": qs,
+                              "image": bool(request.get("image")), "answers": (resp or {}).get("answers"),
                               "direct": ((resp or {}).get("direct") or {}).get("answers"),
                               "escalated": (resp or {}).get("escalated"), "reasoning": (resp or {}).get("reasoning"),
                               "cut": (resp or {}).get("cut")})
