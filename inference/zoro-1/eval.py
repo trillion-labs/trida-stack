@@ -24,14 +24,16 @@ import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import requests
-from datasets import load_dataset
+# requests and datasets are imported where they are used, so the summary and scoring code imports without them
+# (the speedrun tests check eval.py's summary against the leaderboard rules in CI).
 
 LETTERS = "ABCDEFGHIJ"
+SUBSAMPLE_SEED = 42
 
 
 # ---- gsm8k --------------------------------------------------------------
 def gsm8k_load():
+    from datasets import load_dataset
     ds = load_dataset("openai/gsm8k", "main", split="test")  # namespaced id: bare "gsm8k" breaks on huggingface_hub>=1.x
     return [(x["question"], x["answer"].split("####")[-1].strip().replace(",", "")) for x in ds]
 
@@ -51,6 +53,7 @@ def gsm8k_extract(c):
 
 # ---- mmlu_pro -----------------------------------------------------------
 def mmlu_load():
+    from datasets import load_dataset
     ds = load_dataset("TIGER-Lab/MMLU-Pro", split="test")
     out = []
     for x in ds:
@@ -83,14 +86,45 @@ TASKS = {
 
 def served_model_id(base):
     """The id the server exposes (vLLM rejects unknown model names; SGLang accepts any)."""
+    import requests
     try:
         return requests.get(f"{base}/v1/models", timeout=10).json()["data"][0]["id"]
-    except Exception:
+    except Exception as e:
+        # SGLang serves any name, so carry on; on vLLM every request will then fail, and this line says why
+        print(f"warning: could not read the model id from {base}/v1/models ({type(e).__name__}: {e}); "
+              f"sending model='default'", file=sys.stderr, flush=True)
         return "default"
+
+
+def summarize(args, base, model, n, recs, el):
+    """The run's summary.json. `num_problems`, `seed` and `shard` say which problems were asked: 0 / None / None is
+    the full set, otherwise a seeded subsample of `num_problems`, then every N-th of it for shard I/N."""
+    ok = [r for r in recs if r["error"] is None]
+    correct = sum(r["correct"] for r in recs)
+    tokens = sum(r["completion_tokens"] for r in ok)
+    lat = sorted(r["latency_s"] for r in ok)
+    q = lambda p: lat[min(int(p * len(lat)), len(lat) - 1)] if lat else 0.0  # noqa: E731
+    return {
+        "task": args.task, "endpoint": base, "model": model, "n": n, "correct": correct,
+        "num_problems": args.num_problems, "seed": SUBSAMPLE_SEED if args.num_problems else None,
+        "shard": args.shard,
+        "accuracy_pct": round(correct / n * 100, 2), "errors": n - len(ok),
+        "wall_s": round(el, 1), "client_concurrency": args.max_workers,
+        "tok_per_s_aggregate": round(tokens / el, 1),
+        "tok_per_s_per_request": round(statistics.mean(r["completion_tokens"] / r["latency_s"]
+                                                       for r in ok if r["latency_s"] > 0), 1) if ok else 0,
+        "latency_s": {"mean": round(statistics.mean(lat), 2) if lat else 0, "p50": q(0.5), "p90": q(0.9),
+                      "max": lat[-1] if lat else 0},
+        "completion_tokens_mean": round(tokens / max(len(ok), 1), 1),
+        "truncated_pct": round(100 * sum(r["finish_reason"] == "length" for r in ok) / max(len(ok), 1), 1),
+        "settings": {"max_tokens": args.max_tokens, "temperature": args.temperature, "top_p": args.top_p,
+                     "top_k": args.top_k, "presence_penalty": args.presence_penalty, "thinking": args.think},
+    }
 
 
 def run_one(base, model, spec, idx, item, args):
     """One request -> a record with correctness, token counts and wall-clock latency."""
+    import requests
     prompt_text, gold = item
     body = {
         "model": model,
@@ -217,8 +251,10 @@ def main():
     items = spec["load"]()
     if 0 < args.num_problems < len(items):
         import random
-        random.seed(42)
+        random.seed(SUBSAMPLE_SEED)
         items = [items[i] for i in random.sample(range(len(items)), args.num_problems)]
+    else:
+        args.num_problems = 0   # the full set (also when --num-problems is larger than the set)
     if args.shard:
         try:
             i, n = (int(x) for x in args.shard.split("/"))
@@ -250,24 +286,8 @@ def main():
 
     el = time.time() - t0
     n = len(items)
-    ok = [r for r in recs if r["error"] is None]
-    correct = sum(r["correct"] for r in recs)
-    tokens = sum(r["completion_tokens"] for r in ok)
-    lat = sorted(r["latency_s"] for r in ok)
-    q = lambda p: lat[min(int(p * len(lat)), len(lat) - 1)] if lat else 0.0
-    summary = {
-        "task": args.task, "endpoint": base, "model": model, "n": n, "correct": correct,
-        "accuracy_pct": round(correct / n * 100, 2), "errors": n - len(ok),
-        "wall_s": round(el, 1), "client_concurrency": args.max_workers,
-        "tok_per_s_aggregate": round(tokens / el, 1),
-        "tok_per_s_per_request": round(statistics.mean(r["completion_tokens"] / r["latency_s"]
-                                                       for r in ok if r["latency_s"] > 0), 1) if ok else 0,
-        "latency_s": {"mean": round(statistics.mean(lat), 2) if lat else 0, "p50": q(0.5), "p90": q(0.9), "max": lat[-1] if lat else 0},
-        "completion_tokens_mean": round(tokens / max(len(ok), 1), 1),
-        "truncated_pct": round(100 * sum(r["finish_reason"] == "length" for r in ok) / max(len(ok), 1), 1),
-        "settings": {"max_tokens": args.max_tokens, "temperature": args.temperature, "top_p": args.top_p,
-                     "top_k": args.top_k, "presence_penalty": args.presence_penalty, "thinking": args.think},
-    }
+    summary = summarize(args, base, model, n, recs, el)
+    correct = summary["correct"]
     if args.server_log:
         time.sleep(1)  # let the backend flush its last stats line
         summary["forward"] = tokens_per_forward(counters0, forward_counters(args.server_log))

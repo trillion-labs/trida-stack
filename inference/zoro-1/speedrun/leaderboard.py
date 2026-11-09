@@ -26,7 +26,11 @@ README = HERE.parent / "README.md"
 RECORDS = HERE / "records"
 
 TASK = "gsm8k"
-ACCURACY_FLOOR = 87.0   # % on the track's GSM8K subsample (seed 42); the model card reports 87.5-91.5 across settings
+# % on the track's GSM8K subsample (seed 42); the model card reports 87.5-91.5 across settings. At n=50-200 and
+# temperature 1.0 one run can't tell a 4-point regression from noise, so the floor only screens a submission: the
+# maintainer's re-run (README, "Submitting") checks accuracy as well as wall-clock before a record is merged.
+ACCURACY_FLOOR = 87.0
+SEED = 42               # eval.py's subsample seed; the same problems for every run on a track
 SETTINGS = {"max_tokens": 8192, "temperature": 1.0, "top_p": 0.95, "top_k": 20, "presence_penalty": 0.0,
             "thinking": True}
 TRACKS = {
@@ -50,6 +54,11 @@ def check_run(summary, track, records):
         errs.append(f"task must be {TASK}, got {summary.get('task')!r}")
     if summary.get("n") != spec["n"]:
         errs.append(f"{track} runs {spec['n']} problems (eval.py --num-problems {spec['n']}), got n={summary.get('n')}")
+    # n alone doesn't pin the problems: a shard of a bigger subsample also has n problems, but different ones
+    if summary.get("num_problems") != spec["n"] or summary.get("seed") != SEED or summary.get("shard") is not None:
+        errs.append(f"run the seeded subsample itself (eval.py --num-problems {spec['n']}, no --shard); got "
+                    f"num_problems={summary.get('num_problems')!r} seed={summary.get('seed')!r} "
+                    f"shard={summary.get('shard')!r}")
     if summary.get("client_concurrency") != 1:
         errs.append(f"run at client concurrency 1 (eval.py --max-workers 1), got {summary.get('client_concurrency')}")
     if summary.get("errors"):
@@ -70,11 +79,12 @@ def check_run(summary, track, records):
 def table(track, records):
     rows = ["| # | Wall-clock | GSM8K | tok/s per request | Description | Date | Log | Contributors |",
             "|---|---|---|---|---|---|---|---|"]
+    cell = lambda s: s.replace("|", "\\|")  # noqa: E731  free text must not split the Markdown row
     for i, r in enumerate(records, 1):
         log = f"[log]({r['log']})" if r["log"] else "–"
         rows.append(f"| {i} | {float(r['wall_s']):.1f} s | {float(r['accuracy_pct']):.1f}% | "
-                    f"{float(r['tok_per_s_per_request']):.0f} | {r['description']} | {r['date']} | {log} | "
-                    f"{r['contributors']} |")
+                    f"{float(r['tok_per_s_per_request']):.0f} | {cell(r['description'])} | {r['date']} | {log} | "
+                    f"{cell(r['contributors'])} |")
     if not records:
         rows.append("| – | no record yet: be the first | | | | | | |")
     return "\n".join(rows)
