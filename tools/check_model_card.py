@@ -45,8 +45,15 @@ ROW_RE = re.compile(r"^\|\s*(?:base|derived)\s*\|\s*\[([^\]]+)\]\([^)]*\)[^|]*\|
                     re.M)
 
 
+def section_4b(text: str) -> str:
+    """COMPLIANCE.md from its `## 4b.` heading up to the next `## ` heading (empty if there is none), so a row
+    elsewhere in the file can't stand in for the 4b one."""
+    m = re.search(r"^## 4b\..*?(?=^## |\Z)", text, re.M | re.S)
+    return m.group(0) if m else ""
+
+
 def model_rows(text: str) -> dict:
-    """{model id: {"licence", "access"}} from the section 4b table."""
+    """{model id: {"licence", "access"}} from the rows of a section 4b table."""
     return {m.group(1): {"licence": m.group(2).replace("**", "").strip(), "access": m.group(3).strip().lower()}
             for m in ROW_RE.finditer(text)}
 
@@ -91,7 +98,7 @@ def fetch(model_id: str) -> dict:
 
 
 def main() -> int:
-    rows = model_rows(COMPLIANCE.read_text())
+    rows = model_rows(section_4b(COMPLIANCE.read_text()))
     problems = []
     for model_id in MODELS:
         data = fetch(model_id)

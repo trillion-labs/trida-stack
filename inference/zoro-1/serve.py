@@ -19,8 +19,9 @@ Usage:
   python serve.py /path/to/local/zoro-1 --port 30000 # a local copy, or $TRIDA_MODEL
 
 The model is the optional positional argument; when omitted it falls back to $TRIDA_MODEL (for decide, first
-$TRIDA_DECIDE_MODEL), then to `trillionlabs/Zoro-1`. It is passed straight to the backend, so a Hugging Face id is
-auto-downloaded. Zoro-1 is gated: request access on its model page, then `hf auth login` or set HF_TOKEN.
+$TRIDA_DECIDE_MODEL), then to `trillionlabs/Zoro-1`. serve.py downloads a Hugging Face id itself before it starts
+the backend (except with --no-shape, which passes the id through for the backend to download, and --dry-run). Zoro-1
+is gated: request access on its model page, then `hf auth login` or set HF_TOKEN.
 
 SGLang loads Zoro-1 through the two-stream architecture, so for causal / self-spec the checkpoint is shaped once
 (sglang/tools/shape_for_sglang.py): an HF id is downloaded, then a shim with a rewritten config.json and symlinked
@@ -36,9 +37,11 @@ import importlib.util
 import json
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 CONFIGS = Path(__file__).parent / "configs"
@@ -92,9 +95,10 @@ def for_sglang(model, cache=None):
     """The checkpoint directory the SGLang backend should load: `model` itself when it is already shaped, else a
     shim of it under `cache` (made once, reused after). An HF id is downloaded first.
 
-    The shim is built in a private temp dir and renamed into place, so a crash, Ctrl-C or a second replica
-    starting at the same moment never sees a half-written one; a shim that is incomplete, or whose links no
-    longer resolve, is rebuilt."""
+    The shim is built in a temp dir unique to this build and renamed into place, so a crash, Ctrl-C or another
+    replica (even PID 1 in another container on a shared cache) never sees a half-written one. A finished shim is
+    never deleted: if another replica installed one first, it is used. A shim that is incomplete, or whose links
+    no longer resolve, is moved aside and replaced."""
     raw = local_checkpoint(model)
     tool = _shape_tool()
     cfg_text = (raw / "config.json").read_text()
@@ -111,20 +115,40 @@ def for_sglang(model, cache=None):
     out = cache / name
     if _complete_shim(out, raw, tool):
         return str(out)
-    import shutil
     cache.mkdir(parents=True, exist_ok=True)
-    tmp = cache / f".{name}.tmp-{os.getpid()}"
-    shutil.rmtree(tmp, ignore_errors=True)
-    tool.shape(raw, tmp)
-    shutil.rmtree(out, ignore_errors=True)
+    work = Path(tempfile.mkdtemp(prefix=f".{name}.tmp-", dir=cache))
     try:
-        os.replace(tmp, out)
-    except OSError:
-        shutil.rmtree(tmp, ignore_errors=True)
-        if not _complete_shim(out, raw, tool):   # another replica renamed its shim in first; use it if sound
-            raise
-    print(f"[serve] shaped {raw} -> {out}", flush=True)
+        tmp = work / "shim"                       # shape() wants a directory that does not exist yet
+        tool.shape(raw, tmp)
+        if _install(tmp, out, work, lambda: _complete_shim(out, raw, tool)):
+            print(f"[serve] shaped {raw} -> {out}", flush=True)
+        elif _complete_shim(out, raw, tool):
+            print(f"[serve] reusing the shim another replica just made: {out}", flush=True)
+        else:
+            raise RuntimeError(f"could not install the SGLang shim at {out}")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
     return str(out)
+
+
+def _install(tmp, out, work, out_is_complete):
+    """Rename the finished shim `tmp` to `out`. -> True if ours is now at `out`; False if `out` holds a complete shim
+    another process installed (kept: it may be loading from it) or a racing process got there first. A stale `out` is
+    moved into `work`, which the caller deletes, so a shim is never deleted in place and the only gap is between two
+    renames."""
+    try:
+        os.replace(tmp, out)                      # succeeds when `out` is absent (or an empty dir)
+        return True
+    except OSError:
+        pass
+    if out_is_complete():
+        return False
+    try:
+        os.replace(out, work / "stale")
+        os.replace(tmp, out)
+        return True
+    except OSError:
+        return False
 
 
 def build_decide_command(args):

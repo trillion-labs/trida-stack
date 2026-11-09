@@ -199,6 +199,42 @@ def test_shim_build_leaves_no_temp_dirs(tmp_path):
     assert [p.name for p in cache.iterdir()] == [out.name]
 
 
+def test_a_shim_another_replica_finished_first_is_kept(monkeypatch, tmp_path):
+    # Two replicas start together and both miss the cache. The one that finishes second must use the
+    # winner's shim, never delete it: the winner's SGLang may already be loading from it.
+    import types
+    raw = _raw_ckpt(tmp_path)
+    name = Path(serve.for_sglang(str(raw), tmp_path / "probe")).name
+    cache = tmp_path / "cache"
+    winner = cache / name
+    real = serve._shape_tool()
+    seen = {}
+
+    def shape_while_another_replica_wins(raw_dir, out_dir, copy=False):
+        if not winner.exists():
+            real.shape(raw_dir, winner)                       # the other replica's finished shim
+            seen["inode"] = (winner / "config.json").stat().st_ino
+        return real.shape(raw_dir, out_dir)
+
+    monkeypatch.setattr(serve, "_shape_tool", lambda: types.SimpleNamespace(
+        is_shaped=real.is_shaped, carried_names=real.carried_names, shape=shape_while_another_replica_wins))
+    assert serve.for_sglang(str(raw), cache) == str(winner)
+    assert (winner / "config.json").stat().st_ino == seen["inode"]   # not deleted and rebuilt
+    assert [p.name for p in cache.iterdir()] == [name]               # no temp dirs left behind
+
+
+def test_temp_dirs_are_unique_per_build_not_per_pid(monkeypatch, tmp_path):
+    # PID 1 in two containers sharing one cache must not build into the same temp dir
+    raw = _raw_ckpt(tmp_path)
+    monkeypatch.setattr(serve.os, "getpid", lambda: 1)
+    made = []
+    real_mkdtemp = serve.tempfile.mkdtemp
+    monkeypatch.setattr(serve.tempfile, "mkdtemp", lambda **kw: made.append(real_mkdtemp(**kw)) or made[-1])
+    serve.for_sglang(str(raw), tmp_path / "a")
+    serve.for_sglang(str(raw), tmp_path / "b")
+    assert len(made) == 2 and Path(made[0]).name != Path(made[1]).name
+
+
 def main():
     import inspect
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

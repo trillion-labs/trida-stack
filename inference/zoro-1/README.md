@@ -104,7 +104,7 @@ The model is resolved as **positional arg → `$TRIDA_MODEL` → `trillionlabs/Z
 hf auth login            # or: export HF_TOKEN=hf_...
 ```
 
-`serve.py` downloads the checkpoint itself before it starts the backend (for every mode), so a `401` / `Repository not found` from `serve.py`'s download step means the token is missing or the account has no access yet. A local checkpoint directory needs no token. The SGLang shim for `causal` / `self-spec` goes to `$TRIDA_SHAPED_DIR` (default `~/.cache/trida/sglang`); `--no-shape` serves the path as given.
+`serve.py` downloads the checkpoint itself before it starts the backend, in every mode, so a `401` / `Repository not found` at that step means the token is missing or the account has no access yet. The exceptions are `--no-shape`, which passes the id through and leaves the download (and any `401`) to the backend, and `--dry-run`, which downloads nothing. A local checkpoint directory needs no token. The SGLang shim for `causal` / `self-spec` goes to `$TRIDA_SHAPED_DIR` (default `~/.cache/trida/sglang`); `--no-shape` serves the path as given.
 
 ## Test it
 

@@ -41,6 +41,14 @@ def test_each_kind_of_drift_is_reported():
     assert any("no row" in p for p in cmc.check("trillionlabs/Unlisted", hf(), rows))
 
 
+def test_only_section_4b_is_read():
+    doc = ("## 4. Datasets\n| derived | [trillionlabs/Zoro-1](x) | **MIT** | public | elsewhere |\n"
+           "## 4b. Model weights\n" + TABLE + "\n## 5. License summary\n"
+           "| derived | [trillionlabs/Zoro](x) | **MIT** | private | later |\n")
+    rows = cmc.model_rows(cmc.section_4b(doc))
+    assert rows["trillionlabs/Zoro-1"]["access"] == "gated" and rows["trillionlabs/Zoro"]["access"] == "public"
+
+
 def test_compliance_md_lists_every_watched_model():
-    rows = cmc.model_rows(cmc.COMPLIANCE.read_text())
+    rows = cmc.model_rows(cmc.section_4b(cmc.COMPLIANCE.read_text()))
     assert set(cmc.MODELS) <= set(rows), "add a section 4b row for each model in MODELS"
