@@ -157,3 +157,23 @@ def test_engine_import_writes_no_bytecode_into_the_app(tmp_path, monkeypatch):
 def test_licence_header():
     head = Path(serve_mac.__file__).read_text().splitlines()[:3]
     assert "# SPDX-License-Identifier: Apache-2.0" in head
+
+
+def test_concurrent_requests_queue_instead_of_resetting():
+    # The notebook's page section sends 8 crops at once; the default listen backlog (5) reset some.
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    def recognize(image, task):
+        time.sleep(0.05)  # one at a time, like the engine
+        return "ok", 1, 1
+
+    httpd = serve_mac.Server(("127.0.0.1", 0), serve_mac.make_handler(recognize, "glm-ocr"))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        with ThreadPoolExecutor(32) as pool:
+            codes = list(pool.map(lambda _: _post(url, _body())[0], range(32)))
+    finally:
+        httpd.shutdown()
+    assert codes == [200] * 32

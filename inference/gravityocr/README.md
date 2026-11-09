@@ -25,7 +25,7 @@ Self-speculative decoding uses both modes of that one model. Each round runs two
 | **`self-spec`** (default) | block-diffusion draft, AR verify, inside SGLang's speculative-decoding loop (`--speculative-algorithm SELFSPEC_DIFFUSION --speculative-num-draft-tokens 33 --page-size 1`) |
 | `causal` | the same weights decoded autoregressively, one token per forward pass: the reference |
 
-The model reads **one layout region per request**: a text block, a table or a formula crop. Page layout detection and page assembly are out of scope for this folder; a full page needs a layout detector in front of the server.
+The model reads **one layout region per request**: a text block, a table or a formula crop. Page layout detection and page assembly are out of scope for this folder; a full page needs a layout detector in front of the server. Section 5 of the [tutorial notebook](#tutorial-notebook) shows one: [PP-DocLayoutV3](https://huggingface.co/PaddlePaddle/PP-DocLayoutV3_safetensors) (Apache-2.0, the detector GLM-OCR and the Gravity app use) finds typed regions in reading order, and each crop goes to the server with its task prompt.
 
 This is the second nano-inference next to [`../zoro-1/`](../zoro-1/). The two do not share a backend. This one is upstream SGLang v0.5.10 plus an Apache-2.0 patch; zoro-1's SGLang backend is a different, noncommercial-licensed fork. Build each in its own environment.
 
@@ -203,7 +203,8 @@ runs on Linux with an L40 or H100 (`serve.sh`) or on an Apple Silicon Mac (`serv
 |---|---|---|
 | `BACKEND` | `auto` | `sglang` (Linux) or `mac`; `auto` picks `mac` on an Apple Silicon Mac |
 | `GPU`, `CAUSAL_GPU` | `auto` | the least-loaded L40 / H100, and a second one for the causal server if there is one (else they take turns) |
-| `COMPARE_CAUSAL` | `1` | `0` skips section 5 |
+| `PAGE_LAYOUT` | `1` | `0` skips section 5 (a whole page with PP-DocLayoutV3; installs `torch` CPU, `transformers` ≥ 5.1 and OpenCV into the kernel) |
+| `COMPARE_CAUSAL` | `1` | `0` skips section 6 |
 | `SGLANG_SRC`, `VBIN` | `~/src/sglang-gravityocr` | where `sglang/setup.sh` built the server environment |
 | `GRAVITYOCR_MODEL` | `trillionlabs/GravityOCR` | Hub id or local checkpoint |
 | `GRAVITY_APP` | `/Applications/Gravity.app` | the Gravity app, for `BACKEND=mac` |

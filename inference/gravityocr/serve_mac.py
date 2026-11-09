@@ -197,6 +197,12 @@ def make_handler(recognize, model_name: str):
     return Handler
 
 
+class Server(HTTPServer):
+    # One request at a time (the engine is not thread-safe), but clients may send many at once: queue
+    # their connections instead of resetting them (the default backlog is 5).
+    request_queue_size = 128
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--model", default=DEFAULT_MODEL, help="Hub id or local checkpoint directory")
@@ -241,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
         text, profile = engine.recognize_profiled(image, task)
         return text, profile["visual_tokens"], profile["output_tokens"]
 
-    server = HTTPServer((host, args.port), make_handler(recognize, args.served_name))
+    server = Server((host, args.port), make_handler(recognize, args.served_name))
     log(f"serving {args.served_name} on http://{host}:{args.port}")
     try:
         server.serve_forever()
