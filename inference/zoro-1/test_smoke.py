@@ -110,6 +110,95 @@ def test_dry_run_and_no_shape_leave_the_model_alone(monkeypatch):
     assert called == []
 
 
+def _launch(monkeypatch, argv):
+    """Run serve.main() up to the exec and return the command it would exec."""
+    import pytest
+    launched = []
+
+    def fake_exec(prog, cmd):           # the real execvp never returns
+        launched.append(cmd)
+        raise SystemExit(0)
+    monkeypatch.setattr(serve.os, "execvp", fake_exec)
+    monkeypatch.setattr(sys, "argv", ["serve.py", *argv])
+    with pytest.raises(SystemExit):
+        serve.main()
+    assert len(launched) == 1
+    return launched[0]
+
+
+def test_no_shape_skips_shaping_without_dry_run(monkeypatch):
+    called = []
+    monkeypatch.setattr(serve, "for_sglang", lambda m, cache=None: called.append(m) or m)
+    _launch(monkeypatch, ["trillionlabs/Zoro-1", "--no-shape"])
+    assert called == []
+    _launch(monkeypatch, ["trillionlabs/Zoro-1"])
+    assert called == ["trillionlabs/Zoro-1"]
+
+
+def test_decide_default_model_reaches_serve_decide_as_a_local_dir(monkeypatch, tmp_path):
+    # serve_decide.py opens <ckpt>/jev_head.pt, so it needs a directory, not the HF id
+    import types
+    snap = tmp_path / "snapshot"
+    snap.mkdir()
+    monkeypatch.setitem(sys.modules, "huggingface_hub",
+                        types.SimpleNamespace(snapshot_download=lambda repo: str(snap)))
+    monkeypatch.delenv("TRIDA_MODEL", raising=False)
+    monkeypatch.delenv("TRIDA_DECIDE_MODEL", raising=False)
+    cmd = _launch(monkeypatch, ["--mode", "decide"])
+    ckpt = cmd[[i for i, c in enumerate(cmd) if c.endswith("serve_decide.py")][0] + 1]
+    assert Path(ckpt).is_dir() and Path(ckpt) == snap.resolve()
+
+
+def test_for_sglang_shapes_a_flat_causal_lm_checkpoint(tmp_path):
+    import json
+    raw = _raw_ckpt(tmp_path)
+    (raw / "config.json").write_text(json.dumps({"architectures": ["Qwen3_5ForCausalLM"],
+                                                 "model_type": "qwen3_5_text", "hidden_size": 8}))
+    cfg = json.loads((Path(serve.for_sglang(str(raw), tmp_path / "cache")) / "config.json").read_text())
+    assert cfg["architectures"] == ["Qwen3_5DLLMForConditionalGeneration"]
+    assert cfg["text_config"]["model_type"] == "qwen3_5_text" and cfg["text_config"]["hidden_size"] == 8
+    assert "architectures" not in cfg["text_config"]
+
+
+def test_an_incomplete_shim_is_rebuilt(tmp_path):
+    # a crash between writing config.json and the weight links must not leave a shim that is reused forever
+    raw = _raw_ckpt(tmp_path)
+    cache = tmp_path / "cache"
+    out = Path(serve.for_sglang(str(raw), cache))
+    (out / "model-00001-of-00002.safetensors").unlink()
+    assert serve.for_sglang(str(raw), cache) == str(out)
+    assert (out / "model-00001-of-00002.safetensors").is_symlink()
+
+
+def test_a_dangling_shim_link_is_rebuilt(tmp_path):
+    raw = _raw_ckpt(tmp_path)
+    cache = tmp_path / "cache"
+    out = Path(serve.for_sglang(str(raw), cache))
+    (raw / "tokenizer.json").unlink()                    # e.g. the HF cache was cleaned
+    assert serve.for_sglang(str(raw), cache) == str(out)
+    assert not (out / "tokenizer.json").is_symlink()     # rebuilt from what the checkpoint now has
+
+
+def test_a_changed_local_checkpoint_gets_a_fresh_shim(tmp_path):
+    import json
+    raw = _raw_ckpt(tmp_path)
+    cfg = {"architectures": ["Qwen3_5ForCausalLM"], "model_type": "qwen3_5_text", "hidden_size": 8}
+    (raw / "config.json").write_text(json.dumps(cfg))
+    cache = tmp_path / "cache"
+    first = serve.for_sglang(str(raw), cache)
+    (raw / "config.json").write_text(json.dumps({**cfg, "hidden_size": 16}))   # re-saved in place
+    second = serve.for_sglang(str(raw), cache)
+    assert second != first
+    assert json.loads((Path(second) / "config.json").read_text())["text_config"]["hidden_size"] == 16
+
+
+def test_shim_build_leaves_no_temp_dirs(tmp_path):
+    raw = _raw_ckpt(tmp_path)
+    cache = tmp_path / "cache"
+    out = Path(serve.for_sglang(str(raw), cache))
+    assert [p.name for p in cache.iterdir()] == [out.name]
+
+
 def main():
     import inspect
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

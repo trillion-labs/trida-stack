@@ -67,30 +67,62 @@ def _shape_tool():
     return mod
 
 
+def local_checkpoint(model):
+    """`model` as a local directory: a path is used as is, an HF id is downloaded (the HF cache is reused)."""
+    if Path(model).is_dir():
+        return Path(model).resolve()
+    from huggingface_hub import snapshot_download
+    print(f"[serve] fetching {model} from Hugging Face (the first run downloads the full checkpoint)", flush=True)
+    return Path(snapshot_download(model)).resolve()
+
+
+def _complete_shim(out, raw, tool):
+    """True when `out` is a finished shim of `raw`: a shaped config.json plus every file `raw` carries, each link
+    still resolving."""
+    try:
+        if not tool.is_shaped(json.loads((out / "config.json").read_text())):
+            return False
+    except (OSError, ValueError):
+        return False
+    names = tool.carried_names(raw)
+    return {p.name for p in out.iterdir()} == {"config.json", *names} and all((out / n).exists() for n in names)
+
+
 def for_sglang(model, cache=None):
     """The checkpoint directory the SGLang backend should load: `model` itself when it is already shaped, else a
-    shim of it under `cache` (made once, reused after). An HF id is downloaded first (the HF cache is reused)."""
-    raw = Path(model)
-    if not raw.is_dir():
-        from huggingface_hub import snapshot_download
-        raw = Path(snapshot_download(model))
-    raw = raw.resolve()
+    shim of it under `cache` (made once, reused after). An HF id is downloaded first.
+
+    The shim is built in a private temp dir and renamed into place, so a crash, Ctrl-C or a second replica
+    starting at the same moment never sees a half-written one; a shim that is incomplete, or whose links no
+    longer resolve, is rebuilt."""
+    raw = local_checkpoint(model)
     tool = _shape_tool()
-    if tool.is_shaped(json.loads((raw / "config.json").read_text())):
+    cfg_text = (raw / "config.json").read_text()
+    if tool.is_shaped(json.loads(cfg_text)):
         return str(raw)
     cache = Path(cache or os.environ.get("TRIDA_SHAPED_DIR", Path.home() / ".cache" / "trida" / "sglang"))
-    # an HF snapshot dir is named by its revision; keep the repo name too so the cache reads well
     if Path(model).is_dir():
-        name = f"{raw.name}-{hashlib.sha1(str(raw).encode()).hexdigest()[:8]}"
+        # a local dir can be re-saved in place, so its config is part of the key
+        key = hashlib.sha1((str(raw) + "\n" + cfg_text).encode()).hexdigest()[:8]
+        name = f"{raw.name}-{key}"
     else:
+        # an HF snapshot dir is named by its revision; keep the repo name too so the cache reads well
         name = f"{model.replace('/', '--')}-{raw.name[:12]}"
     out = cache / name
-    if out.is_dir() and tool.is_shaped(json.loads((out / "config.json").read_text())):
+    if _complete_shim(out, raw, tool):
         return str(out)
-    if out.exists():
-        import shutil
-        shutil.rmtree(out)
-    tool.shape(raw, out)
+    import shutil
+    cache.mkdir(parents=True, exist_ok=True)
+    tmp = cache / f".{name}.tmp-{os.getpid()}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tool.shape(raw, tmp)
+    shutil.rmtree(out, ignore_errors=True)
+    try:
+        os.replace(tmp, out)
+    except OSError:
+        shutil.rmtree(tmp, ignore_errors=True)
+        if not _complete_shim(out, raw, tool):   # another replica renamed its shim in first; use it if sound
+            raise
     print(f"[serve] shaped {raw} -> {out}", flush=True)
     return str(out)
 
@@ -167,6 +199,8 @@ def main():
 
     if args.mode in MODES and args.shape and not args.dry_run:
         args.model = for_sglang(args.model)
+    elif args.mode == DECIDE_MODE and not args.dry_run:
+        args.model = str(local_checkpoint(args.model))   # serve_decide.py reads <ckpt>/jev_head.pt from disk
     cmd = build_command(args)
     print("[serve]", " ".join(shlex.quote(c) for c in cmd), flush=True)
     if args.dry_run:
