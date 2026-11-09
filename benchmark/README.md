@@ -24,15 +24,15 @@ The tool-use benches default to
 **[trillionlabs/Trida-7B-Preview](https://huggingface.co/trillionlabs/Trida-7B-Preview)** (public,
 loaded with `trust_remote_code`, transformers 4.x) — the checkpoint the published numbers in this
 directory were measured on. That is a different model from the one the rest of the repo documents:
-`inference/` and the root README use
-**[trillionlabs/Trida2.0-4B](https://huggingface.co/trillionlabs/Trida2.0-4B)**, the current
+`inference/zoro-1/` and the root README use
+**[trillionlabs/Zoro-1](https://huggingface.co/trillionlabs/Zoro-1)**, the current
 two-stream reference checkpoint. Point any bench at another checkpoint with
 `MODEL=<hf-id-or-local-path>`.
 
 ### Tool-use / agent benchmarks (OpenAI-served)
 
 These tool-use benches run against an OpenAI-compatible endpoint. The checkpoint can be served
-through the SGLang or vLLM backends in `inference/` (see the root README), but the benches here use
+through the SGLang or vLLM backends in `inference/zoro-1/` (see the root README), but the benches here use
 the self-contained **shared serving stack** in `serving/` — N per-GPU replicas of
 `serve_trida_openai.py` (`.venv-serve`, transformers 4.57.1; a plain `trust_remote_code` HF server
 for the released remote-code checkpoint) behind `router.py` (round-robin + failover), launched by

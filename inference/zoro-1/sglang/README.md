@@ -13,8 +13,8 @@ from its public upstream, so `--mode self-spec` / `causal` work against Zoro-1.
 serving stack (a modified SGLang runtime). It adds the **two-stream Gated DeltaNet
 block-end readout** and the **block-diffusion decode** algorithm needed to serve a
 Qwen3.5 two-stream checkpoint — i.e. the `LowConfidenceShiftHybridDiffusion` and
-`HybridDiffusionSelfSpec` decode paths that `serve.py`'s `diffusion` and
-`self-spec` modes target. It touches 14 files under `eval/sglang/srt/…` (config
+`HybridDiffusionSelfSpec` decode paths (`serve.py`'s `self-spec` mode targets
+the latter). It touches 14 files under `eval/sglang/srt/…` (config
 registration, the dllm decode algorithms + scheduler mixin, the GDN attention
 backend, the Qwen3.5 model/logits path, and the CUDA-graph / KV-cache plumbing).
 
@@ -66,7 +66,7 @@ git checkout 6ca547a          # "Initial public release" — the pinned base com
 ### 2. Apply the patch
 
 ```bash
-git apply /path/to/inference/sglang/two_stream_diffusion.patch
+git apply /path/to/inference/zoro-1/sglang/two_stream_diffusion.patch
 ```
 
 Verify before applying with `git apply --check <patch>` (exit 0 = applies
@@ -99,7 +99,7 @@ vision-language wrapper — the vision tower is built but never used for text). 
 *raw* training checkpoint instead ships a flat `Qwen3_5ForCausalLM` /
 `model_type: qwen3_5_text` config, which this SGLang build has no implementation
 for: serving it raw fails at load (`causal`) or at the first decode block
-(`diffusion`, with `missing the decode seed`).
+(with `missing the decode seed`).
 
 `serve.py` does this automatically for `causal` / `self-spec` (it shapes once into
 `$TRIDA_SHAPED_DIR`, default `~/.cache/trida/sglang`, and reuses it). By hand,
@@ -132,10 +132,12 @@ python inference/zoro-1/serve.py --mode causal     --port 30000
 Add `--dry-run` to print the launch command without starting the server.
 
 Once it is up, confirm it generates (SGLang serves the same OpenAI-compatible API).
-SGLang uses the checkpoint you launched with as the model id, so pass `<CKPT>` as `model`:
+SGLang uses the `--model-path` it was launched with as the model id. For `causal` /
+`self-spec` that is the shaped shim directory under `$TRIDA_SHAPED_DIR` (the `--model-path` in the
+`[serve]` launch line), not the repo id, unless you passed `--no-shape`; read it from `GET /v1/models`:
 
 ```bash
-CKPT=<same repo-id-or-path you served>
+CKPT=$(curl -s http://localhost:30000/v1/models | python -c 'import json,sys; print(json.load(sys.stdin)["data"][0]["id"])')
 curl -s http://localhost:30000/v1/chat/completions \
   -H 'Content-Type: application/json' \
   -d "{\"model\":\"$CKPT\",\"messages\":[{\"role\":\"user\",\"content\":\"What is 17 * 24?\"}],\"max_tokens\":64}" \
@@ -143,12 +145,10 @@ curl -s http://localhost:30000/v1/chat/completions \
 ```
 
 A JSON reply with `choices[0].message.content` means the backend is serving.
-(The model id the server exposes is listed at `GET /v1/models`.)
 
-The `diffusion` and `self-spec` modes reference the shipped decode configs in
-[`../configs/`](../configs/) — `trida_diffusion_b4.yaml` and
-`trida_self_spec_b7_g4.yaml` respectively (override with `--config`). `causal`
-needs no dllm config. See [`../README.md`](../README.md) for what each mode does
+The `self-spec` mode references the shipped decode config in
+[`../configs/`](../configs/) — `zoro1_self_spec_b15_g8.yaml` (override with
+`--config`). `causal` needs no dllm config. See [`../README.md`](../README.md) for what each mode does
 and [`../MODEL_CONTRACT.md`](../MODEL_CONTRACT.md) for what makes a checkpoint
 compatible.
 

@@ -33,9 +33,9 @@ Like the [NanoGPT speedrun](https://github.com/KellerJordan/modded-nanogpt): one
 **The task:** answer a fixed GSM8K subsample with Zoro-1, one request at a time, as fast as possible.
 
 - **Record = wall-clock** of `eval.py` (`wall_s` in its `summary.json`). Lower is better.
-- **Accuracy floor: 87.0%.** Any change counts — kernels, configs, decode tricks, lossy ones too — as long as accuracy stays at or above the floor.
-- **Fixed:** model `trillionlabs/Zoro-1` (weights unchanged), client concurrency 1, temperature 1.0 / top-p 0.95 / top-k 20, thinking on, 8192-token budget, no failed requests.
-- **Problems:** 200 on the GPU tracks, 50 on MLX (`eval.py --num-problems N` takes the same seed-42 subsample every time).
+- **Accuracy floor: 87.0%.** Any change counts — kernels, configs, decode tricks, lossy ones too — as long as accuracy stays at or above the floor. On 50-200 problems at temperature 1.0 one run is a noisy estimate, so the floor screens a submission and the maintainer's re-run (below) checks accuracy as well as time.
+- **Fixed:** the `trillionlabs/Zoro-1` weights — quantising them is allowed if the description says how (e.g. "q8") — client concurrency 1, temperature 1.0 / top-p 0.95 / top-k 20, thinking on, 8192-token budget, no failed requests.
+- **Problems:** 200 on the GPU tracks, 50 on MLX: exactly `eval.py --num-problems N`, which takes the same seed-42 subsample every time, without `--shard`. `add` reads `num_problems`, `seed` and `shard` from `summary.json` and rejects anything else.
 
 ### 1× NVIDIA H100
 
@@ -78,7 +78,7 @@ python speedrun/leaderboard.py add results/gsm8k_<stamp>/summary.json --track h1
     --description "what you changed, in one line" --log <link to summary.json + requests.jsonl> --contributors @you
 ```
 
-`add` checks the run against the rules above and that it beats the track's record, appends it to `speedrun/records/<track>.csv`, and redraws the table and chart. Open a PR with your change, the new row, and the run's `summary.json` + `requests.jsonl` (attach them or link them). A maintainer re-runs it on the same hardware class before merging. CI fails if the README tables or charts drift from the record files (`python speedrun/leaderboard.py check`).
+`add` checks the run against the rules above and that it beats the track's record, appends it to `speedrun/records/<track>.csv`, and redraws the table and chart. Open a PR with your change, the new row, and the run's `summary.json` + `requests.jsonl` (attach them or link them). A maintainer re-runs it on the same hardware class before merging, and the record stands only if the re-run is also at or above the floor and within noise of the submitted time. `add` can't see which weights were served (the served id is the SGLang shim path), so the re-run is also where the model is checked. CI fails if the README tables or charts drift from the record files (`python speedrun/leaderboard.py check`).
 
 ## Quickstart
 
@@ -104,7 +104,7 @@ The model is resolved as **positional arg → `$TRIDA_MODEL` → `trillionlabs/Z
 hf auth login            # or: export HF_TOKEN=hf_...
 ```
 
-A `401` / `Repository not found` from the backend at startup means the token is missing or the account has no access yet. A local checkpoint directory needs no token.
+`serve.py` downloads the checkpoint itself before it starts the backend (for every mode), so a `401` / `Repository not found` from `serve.py`'s download step means the token is missing or the account has no access yet. A local checkpoint directory needs no token. The SGLang shim for `causal` / `self-spec` goes to `$TRIDA_SHAPED_DIR` (default `~/.cache/trida/sglang`); `--no-shape` serves the path as given.
 
 ## Test it
 

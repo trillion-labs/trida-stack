@@ -12,7 +12,7 @@
 #     bash inference/zoro-1/vllm/serve_diffusion.sh                        # self-spec (default), one stream
 #     MAX_NUM_SEQS=8 bash inference/zoro-1/vllm/serve_diffusion.sh         # self-spec, batched (PIECEWISE graphs)
 #     MODE=causal bash inference/zoro-1/vllm/serve_diffusion.sh            # plain autoregressive, stock vLLM
-#     MODE=diffusion bash inference/zoro-1/vllm/serve_diffusion.sh         # pure block-diffusion (other families)
+#     MODE=diffusion bash inference/zoro-1/vllm/serve_diffusion.sh         # pure block-diffusion (Zoro-1 does not support it)
 set -euo pipefail
 
 # ---- config (env-driven) ---------------------------------------------------
@@ -30,7 +30,7 @@ LOG="${LOG:-}"                        # optional: also write server output here 
 SELFSPEC_N="${SELFSPEC_N:-4}"
 [ "$SELFSPEC_N" -ge 2 ] 2>/dev/null || { echo "SELFSPEC_N must be an integer >= 2 (got '$SELFSPEC_N'); N=4 is the model's block of 8" >&2; exit 2; }
 SS_THRESHOLD="${SS_THRESHOLD:-0.90}"  # passed through as confidence_threshold; the self-spec path does not gate on it
-# diffusion (pure denoising; not supported by the Trida2.0-4B full-mask recipe)
+# diffusion (pure denoising; not supported by Zoro-1)
 CANVAS="${CANVAS:-3}"                 # block canvas length (hf canvas_length): 3 = block B=4
 THRESHOLD="${THRESHOLD:-0.95}"        # per-step commit confidence gate
 MAX_STEPS="${MAX_STEPS:-8}"           # max denoising steps per block
