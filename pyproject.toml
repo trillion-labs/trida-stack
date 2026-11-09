@@ -49,6 +49,8 @@ testpaths = [
   "inference/zoro-1/speedrun/test_speedrun.py",
   "inference/zoro-1/vllm/vllm_native_diffusion/test_two_stream_cpu.py",
   "tools/test_chat.py",
+  "tools/test_check_model_card.py",
+  "tools/test_check_supply_chain.py",
   "train/test_stream_pack.py",
   "train/test_vlm.py",
   "train/test_jev.py",

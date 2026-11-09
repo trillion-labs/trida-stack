@@ -73,7 +73,8 @@ benchmark/ko_agentbench/logs/
 benchmark/functionchat/output/
 benchmark/**/predictions*.jsonl
 
-# PolyForm-NC-derived kernel port — obtained via recipe, not committed
-inference/zoro-1/vllm/vllm_native_diffusion/block_causal_readout.py
+# PolyForm-NC-derived kernel port — obtained via recipe, not committed. A glob, not a path, so a copy fetched
+# before a directory move stays hidden too; tools/check_supply_chain.py fails CI if one is ever tracked.
+**/vllm_native_diffusion/block_causal_readout.py
 build/
 dist/
