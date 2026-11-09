@@ -271,6 +271,27 @@ def test_a_shim_moved_away_mid_check_is_incomplete_not_a_crash(monkeypatch, tmp_
     assert serve._complete_shim(out, raw.resolve(), serve._shape_tool()) is False
 
 
+def test_eval_summary_records_which_problems_ran():
+    # summary.json must say which problems were asked, not just how many: a shard of a bigger subsample has the
+    # same n but different problems
+    import argparse
+    import eval as ev
+    recs = [{"correct": i < 3, "error": None, "completion_tokens": 10, "latency_s": 1.0, "finish_reason": "stop"}
+            for i in range(4)]
+
+    def summary(num_problems, shard):
+        args = argparse.Namespace(task="gsm8k", num_problems=num_problems, shard=shard, max_workers=1,
+                                  max_tokens=8192, temperature=1.0, top_p=0.95, top_k=20, presence_penalty=0.0,
+                                  think=True)
+        return ev.summarize(args, "http://h:1", "m", len(recs), recs, 2.0)
+
+    s = summary(4, None)
+    assert (s["num_problems"], s["seed"], s["shard"]) == (4, 42, None)
+    assert (s["n"], s["correct"], s["accuracy_pct"], s["errors"]) == (4, 3, 75.0, 0)
+    assert (summary(16, "0/4")["num_problems"], summary(16, "0/4")["shard"]) == (16, "0/4")
+    assert summary(0, None)["seed"] is None                                   # the full set
+
+
 def main():
     import inspect
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
