@@ -23,24 +23,24 @@ class ToyModel(torch.nn.Module):
     def set_requires_gradient_sync(self, enabled):
         self.events.append(('sync', enabled))
 
-    def forward(self, ids, labels, mask, *, jev=None, **kwargs):
-        if jev is not None:
-            self.events.append(('jev', None))
+    def forward(self, ids, labels, mask, *, decision=None, **kwargs):
+        if decision is not None:
+            self.events.append(('decision', None))
             return 2 * self.weight.square(), {
-                'jev_acc': 1.0, 'jev_questions': 1, 'jev_tokens': 4,
+                'decision_acc': 1.0, 'decision_questions': 1, 'decision_tokens': 4,
             }
         self.events.append(('text', kwargs))
         loss = self.weight.square()
         return loss, {'diff_loss': loss.detach(), 'ar_loss': loss.detach(), 'ntok': 2}
 
 
-@pytest.mark.parametrize('mode', ['text', 'mixed', 'jev'])
+@pytest.mark.parametrize('mode', ['text', 'mixed', 'decision'])
 @pytest.mark.parametrize('resume', [False, True])
 def test_training_updates_sync_resume_and_checkpoint_boundaries(monkeypatch, mode, resume):
     args = build_parser().parse_args([])
-    args.jev_only = mode == 'jev'
-    args.jev_micro_per_step = 2
-    args.jev_loss_weight = 0.5
+    args.decision_only = mode == 'decision'
+    args.decision_micro_per_step = 2
+    args.decision_loss_weight = 0.5
     args.grad_accum = 2
     args.grad_clip = 100
     args.lr = 0.1
@@ -59,8 +59,8 @@ def test_training_updates_sync_resume_and_checkpoint_boundaries(monkeypatch, mod
         'resp_block', 'turn_id', 'pixel_values', 'image_grid_thw', 'mrope_pos',
     )}
     # Three usable micro-batches per epoch: accumulation must survive the epoch boundary.
-    text = [None, batch, batch, batch] if mode != 'jev' else None
-    jev = itertools.repeat({'questions': [{'variant': 0}]}) if mode != 'text' else None
+    text = [None, batch, batch, batch] if mode != 'decision' else None
+    decision = itertools.repeat({'questions': [{'variant': 0}]}) if mode != 'text' else None
     saved, logs = [], []
 
     def save(model, optimizer, step, args):
@@ -73,10 +73,10 @@ def test_training_updates_sync_resume_and_checkpoint_boundaries(monkeypatch, mod
     monkeypatch.setattr(trainer, 'log', logs.append)
     monkeypatch.setattr(trainer.dist, 'all_reduce', lambda *a, **k: None)
     monkeypatch.setattr(torch.cuda, 'max_memory_allocated', lambda: 0)
-    trainer.run_training(args, 'cpu', model, TrainingLoaders(text, jev), optim)
+    trainer.run_training(args, 'cpu', model, TrainingLoaders(text, decision), optim)
 
     steps = 2 if resume else 3
-    # text: grad=2*w; mixed: grad=2*w + 0.5*4*w; Jev-only: grad=0.5*4*w.
+    # text: grad=2*w; mixed: grad=2*w + 0.5*4*w; Decision-only: grad=0.5*4*w.
     factor = 0.6 if mode == 'mixed' else 0.8
     assert model.weight.item() == pytest.approx(factor ** steps, abs=1e-6)
     assert saved == [2, 3]
@@ -84,10 +84,10 @@ def test_training_updates_sync_resume_and_checkpoint_boundaries(monkeypatch, mod
     assert [e[1] for e in model.events if e[0] == 'sync'] == {
         'text': [False, True] * steps,
         'mixed': [False, False, False, True] * steps,
-        'jev': [False, True] * steps,
+        'decision': [False, True] * steps,
     }[mode]
-    assert sum(e[0] == 'text' for e in model.events) == (0 if mode == 'jev' else 2 * steps)
-    assert sum(e[0] == 'jev' for e in model.events) == (0 if mode == 'text' else 2 * steps)
+    assert sum(e[0] == 'text' for e in model.events) == (0 if mode == 'decision' else 2 * steps)
+    assert sum(e[0] == 'decision' for e in model.events) == (0 if mode == 'text' else 2 * steps)
     for kind, kwargs in model.events:
         if kind == 'text':
             assert set(kwargs) == {'seg_id', 'resp_pos', 'resp_block', 'turn_id',
@@ -104,7 +104,7 @@ def test_optimizer_preserves_parameter_group_scales():
     ]))
     optimizer = build_optimizer(args, model)
     model.param_groups.assert_called_once_with(
-        projector_lr_scale=args.projector_lr_scale, jev_head_lr_scale=args.jev_head_lr_scale,
+        projector_lr_scale=args.projector_lr_scale, decision_head_lr_scale=args.decision_head_lr_scale,
     )
     assert optimizer.defaults['betas'] == (0.9, args.adam_beta2)
     assert optimizer.defaults['weight_decay'] == args.weight_decay
@@ -166,7 +166,7 @@ def test_data_loader_preserves_text_paths(monkeypatch, pack, multiturn, collator
         monkeypatch.setattr(loaders, name, Mock())
     model = SimpleNamespace(tokenizer=object())
     result = loaders.build_data_loaders(args, model)
-    assert result.jev is None
+    assert result.decision is None
     assert result.text is loaders.DataLoader.return_value
     assert loaders.DataLoader.call_args.kwargs['collate_fn'] is getattr(loaders, collator).return_value
     assert loaders.DataLoader.call_args.kwargs['batch_size'] == args.micro_batch_size
@@ -191,14 +191,14 @@ def test_sharding_orders_children_before_root_and_warms_optional_units(monkeypat
     model.visual = torch.nn.Module()
     model.visual.blocks = torch.nn.ModuleList([Unit()])
     model.visual.merger = Unit()
-    model.jev_head = Unit()
+    model.decision_head = Unit()
     args = SimpleNamespace(fsdp_keep_params=True, model_id='toy', fp32_master=False)
     events = []
     monkeypatch.setattr(distributed, 'fully_shard',
                         lambda unit, **kwargs: events.append(('shard', unit, kwargs)))
     monkeypatch.setattr(distributed, 'FSDPModule', Unit)
     distributed.shard_model(model, args)
-    children = [*model.tm.layers, *model.visual.blocks, model.visual.merger, model.jev_head]
+    children = [*model.tm.layers, *model.visual.blocks, model.visual.merger, model.decision_head]
     sharded = [e for e in events if e[0] == 'shard']
     assert [e[1] for e in sharded] == children + [model]
     for event in sharded[:3]:
@@ -215,12 +215,13 @@ def test_build_model_selects_implementation_and_resume_source(monkeypatch, tmp_p
     args = build_parser().parse_args([])
     args.resume = str(tmp_path)
     args.fp32_master = True
-    args.jev_data = 'records.jsonl' if hybrid else ''
+    args.decision_data = 'records.jsonl' if hybrid else ''
     model = torch.nn.Linear(1, 1, dtype=torch.bfloat16)
     model.is_vl = True
-    model.jev_head = torch.nn.Linear(1, 1) if hybrid else None
+    model.decision_head = torch.nn.Linear(1, 1) if hybrid else None
     if hybrid:
-        torch.save({'head_dim': args.jev_head_dim, 'head': model.jev_head.state_dict()},
+        saved_head = {key: torch.full_like(value, 0.25) for key, value in model.decision_head.state_dict().items()}
+        torch.save({'head_dim': args.decision_head_dim, 'head': saved_head},
                    tmp_path / 'jev_head.pt')
     dense, hybrid_ctor = Mock(return_value=model), Mock(return_value=model)
     monkeypatch.setattr(build, 'HFBlockDiffusion', dense)
@@ -234,7 +235,117 @@ def test_build_model_selects_implementation_and_resume_source(monkeypatch, tmp_p
     assert constructor.call_args.kwargs['response_buckets'] == (512, 1024, 2048, 4096)
     assert constructor.call_args.kwargs['dtype'] == torch.bfloat16
     if hybrid:
-        assert constructor.call_args.kwargs['jev_head_dim'] == args.jev_head_dim
+        assert constructor.call_args.kwargs['decision_head_dim'] == args.decision_head_dim
+        assert all(torch.equal(value, saved_head[key]) for key, value in model.decision_head.state_dict().items())
     image_proc.assert_called_once_with(str(tmp_path))
     assert model.image_processor is image_proc.return_value
     assert all(p.dtype == torch.float32 for p in model.parameters())
+
+
+@pytest.mark.parametrize('suffix,value', [
+    ('data', 'records.jsonl'), ('only', None), ('loss_weight', '0.5'),
+    ('micro_per_step', '2'), ('max_tokens', '1024'), ('max_variant_tokens', '2048'),
+    ('max_state', '384'), ('p_none_pair', '0.1'), ('head_dim', '32'), ('head_lr_scale', '5'),
+])
+def test_decision_cli_preserves_legacy_flags_and_namespace(suffix, value):
+    parser = build_parser()
+    extra = [] if value is None else [value]
+    canonical = parser.parse_args([f'--decision_{suffix}', *extra])
+    legacy = parser.parse_args([f'--jev_{suffix}', *extra])
+    assert vars(canonical) == vars(legacy)
+    assert getattr(legacy, f'jev_{suffix}') == getattr(legacy, f'decision_{suffix}')
+    setattr(legacy, f'jev_{suffix}', 'updated')
+    assert getattr(legacy, f'decision_{suffix}') == 'updated'
+
+
+def test_legacy_decision_imports_are_the_same_objects():
+    import importlib
+    from train.data import decision as data
+    from train.models import decision as model
+    from train import decision
+
+    assert importlib.import_module('train.data.jev') is data
+    assert importlib.import_module('train.models.jev') is model
+    with pytest.warns(DeprecationWarning):
+        legacy = importlib.import_module('train.jev')
+    assert legacy is decision
+    assert legacy.JevRowDataset is data.DecisionRowDataset
+    assert data.pack_jev is data.pack_decision
+    assert data.load_jev_records is data.load_decision_records
+    assert model.jev_loss is model.decision_loss
+    assert legacy.PointerHead is model.PointerHead
+
+
+def test_training_loader_legacy_constructor_and_attribute():
+    stream = iter([1])
+    loaders = TrainingLoaders(text=None, jev=stream)
+    assert loaders.decision is loaders.jev is stream
+    loaders.jev = None
+    assert loaders.decision is None
+    with pytest.raises(ValueError):
+        TrainingLoaders(None, decision=stream, jev=stream)
+
+
+def _decision_test_model():
+    from train.models.decision import PointerHead
+    from train.models.hybrid import HFBlockDiffusionHybrid
+
+    model = object.__new__(HFBlockDiffusionHybrid)
+    torch.nn.Module.__init__(model)
+    # Registered under its existing name: no renamed/duplicated state-dict keys.
+    model.jev_head = PointerHead(4, 2)
+    decoder = SimpleNamespace(embed_tokens=torch.nn.Embedding(10, 4),
+                              norm=torch.nn.Identity(), rotary_emb=lambda *a, **kw: None)
+    model.model = SimpleNamespace(get_decoder=lambda: decoder)
+    model.compute_dtype, model.is_vl, model.grad_checkpoint = torch.float32, False, False
+    model._ar_doc_mask = lambda *a, **kw: (None, 'eager')
+    model._set_attn_impl = lambda *a: None
+    model._run_decoder_stack_ar = lambda hidden, *a, **kw: hidden
+    return model
+
+
+def test_decision_forward_preserves_loss_gradients_and_metrics():
+    model = _decision_test_model()
+    batch = {'input_ids': torch.tensor([[1, 2, 3]]), 'seg_id': torch.tensor([[0, 0, 0]]),
+             'decide': torch.tensor([2]), 'opts': torch.tensor([0, 1]), 'owner': torch.tensor([0, 0]),
+             'questions': [{'start': 0, 'k': 2, 'variant': 0, 'label': 1}]}
+    loss, logs = model(None, None, None, decision=batch)
+    loss.backward()
+    grads = [p.grad.clone() for p in model.decision_head.parameters()]
+    model.zero_grad()
+    old_loss, old_logs = model(None, None, None, jev=batch)
+    old_loss.backward()
+    assert torch.equal(loss, old_loss)
+    assert all(torch.equal(p.grad, grad) for p, grad in zip(model.jev_head.parameters(), grads))
+    for suffix in ['loss', 'acc', 'questions', 'tokens']:
+        assert logs[f'decision_{suffix}'] == old_logs[f'jev_{suffix}']
+    assert torch.equal(model.forward_jev(batch)[0], loss)
+    with pytest.raises(ValueError):
+        model(None, None, None, decision=batch, jev=batch)
+
+
+def test_head_parameter_names_and_optimizer_state_stay_compatible():
+    model = _decision_test_model()
+    assert model.decision_head is model.jev_head
+    keys = list(model.state_dict())
+    assert keys == ['jev_head.q.weight', 'jev_head.q.bias', 'jev_head.k.weight', 'jev_head.k.bias']
+    old_groups = model.param_groups(jev_head_lr_scale=5)
+    new_groups = model.param_groups(decision_head_lr_scale=5)
+    assert [g['lr_scale'] for g in old_groups] == [g['lr_scale'] for g in new_groups]
+    assert [[id(p) for p in g['params']] for g in old_groups] == [
+        [id(p) for p in g['params']] for g in new_groups]
+    optim = torch.optim.AdamW(old_groups)
+    sum(p.square().sum() for p in model.parameters()).backward()
+    optim.step()
+    restored = _decision_test_model()
+    restored.load_state_dict(model.state_dict(), strict=True)
+    new_optim = torch.optim.AdamW(restored.param_groups(decision_head_lr_scale=5))
+    new_optim.load_state_dict(optim.state_dict())
+    for old, new in zip(optim.state.values(), new_optim.state.values()):
+        assert all(torch.equal(old[key], new[key]) for key in old)
+
+
+def test_constructor_rejects_conflicting_head_aliases_before_loading_weights():
+    from train.models.hybrid import HFBlockDiffusionHybrid
+    with pytest.raises(ValueError, match='Conflicting'):
+        HFBlockDiffusionHybrid(decision_head_dim=32, jev_head_dim=16)

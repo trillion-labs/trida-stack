@@ -172,27 +172,36 @@ class HFBlockDiffusion(nn.Module):
     def visual(self):  # the vision tower (encoder blocks + merger) of a VL checkpoint, else None
         return self.model.model.visual if self.is_vl else None
 
-    def param_groups(self, projector_lr_scale=1.0, jev_head_lr_scale=1.0):
+    @property
+    def decision_head(self):
+        """Head stored under jev_head to preserve checkpoint and optimizer parameter keys."""
+        return getattr(self, "jev_head", None)
+
+    def param_groups(self, projector_lr_scale=1.0, decision_head_lr_scale=1.0, *, jev_head_lr_scale=None):
         """Trainable parameters as optimizer groups, each tagged with an ``lr_scale`` relative to the
         base LR (the trainer applies ``schedule * lr_scale`` every step): the vision projector
-        (``visual.merger``) at ``projector_lr_scale``, the Jev pointer head at ``jev_head_lr_scale``, the
+        (``visual.merger``) at ``projector_lr_scale``, the decision pointer head at ``decision_head_lr_scale``, the
         language model at 1. The vision encoder is
         frozen, so it appears in neither group."""
-        backbone, projector, jev_head = [], [], []
+        if jev_head_lr_scale is not None:
+            if decision_head_lr_scale != 1.0 and decision_head_lr_scale != jev_head_lr_scale:
+                raise ValueError("Conflicting decision_head_lr_scale and jev_head_lr_scale")
+            decision_head_lr_scale = jev_head_lr_scale
+        backbone, projector, decision_head = [], [], []
         for name, p in self.named_parameters():
             if not p.requires_grad:
                 continue
             if ".visual." in name and ".visual.merger." not in name:
                 raise RuntimeError(f"vision encoder parameter {name} is trainable; expected it frozen")
             if name.startswith("jev_head."):
-                jev_head.append(p)
+                decision_head.append(p)
             else:
                 (projector if ".visual.merger." in name else backbone).append(p)
         groups = [{"params": backbone, "lr_scale": 1.0}]
         if projector:
             groups.append({"params": projector, "lr_scale": projector_lr_scale})
-        if jev_head:
-            groups.append({"params": jev_head, "lr_scale": jev_head_lr_scale})
+        if decision_head:
+            groups.append({"params": decision_head, "lr_scale": decision_head_lr_scale})
         return groups
 
     def _set_text_attn_impl(self, impl):
