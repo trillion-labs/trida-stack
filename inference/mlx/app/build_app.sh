@@ -42,6 +42,8 @@ swift build -c release --arch arm64
 BIN="$(swift build -c release --arch arm64 --show-bin-path)/TridaChat"
 
 APP="build/Zoro-1 Chat.app"
+# The oldest macOS the app runs on (Info.plist, and the wheels bundled for it: see --bundle).
+MIN_MACOS=14.0
 # chmod first: copied runtimes can contain read-only directories that rm -rf cannot empty
 [[ -e "$APP" ]] && chmod -R u+w "$APP" && rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -61,7 +63,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
   <key>LSArchitecturePriority</key><array><string>arm64</string></array>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
@@ -103,9 +105,18 @@ if (( BUNDLE )); then
   grep -vE '^(mlx-cpu|mlx-cuda[-0-9]*)==' "$REQ" > "$REQ.mac" && mv "$REQ.mac" "$REQ"
   "$PY" -m pip --version >/dev/null 2>&1 || "$PY" -m ensurepip --default-pip >/dev/null
   PIP=("$PY" -m pip install -q --progress-bar off --no-cache-dir --disable-pip-version-check --no-warn-script-location)
-  "${PIP[@]}" -r "$REQ"
+  # MLX ships one wheel per macOS release (macosx_14_0, 15_0, 26_0), and pip picks the newest one this build Mac
+  # can run. Bundled from macOS 26, that wheel fails to load on older systems ("Symbol not found … built for
+  # macOS 26.2 which is newer than running OS"). Install the macOS-specific packages for MIN_MACOS instead; the
+  # rest of the export is locked and complete, so it goes in without dependency resolution.
+  PER_OS='^(mlx|mlx-metal)=='
+  grep -E "$PER_OS" "$REQ" > "$REQ.os"
+  grep -vE "$PER_OS" "$REQ" > "$REQ.rest"
+  "${PIP[@]}" --no-deps -r "$REQ.rest"
+  SITE="$("$PY" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+  "${PIP[@]}" --no-deps --only-binary=:all: --platform "macosx_${MIN_MACOS/./_}_arm64" --target "$SITE" -r "$REQ.os"
   "${PIP[@]}" --no-deps "$MLX_DIR"
-  rm -f "$REQ"
+  rm -f "$REQ" "$REQ.os" "$REQ.rest"
 
   echo "==> trimming"
   "$PY" -m pip uninstall -y -q pip >/dev/null 2>&1 || true
@@ -117,6 +128,37 @@ if (( BUNDLE )); then
   find "$PYDIR" -name __pycache__ -type d -prune -exec rm -rf {} +
   # precompile now: at run time the interpreter must not write into the signed bundle
   "$PY" -m compileall -q -j 0 "$PYDIR/lib" >/dev/null || true
+
+  echo "==> checking that every binary loads on macOS $MIN_MACOS"
+  "$PY" - "$APP" "$MIN_MACOS" <<'PYEOF'
+import os, subprocess, sys
+root, floor = sys.argv[1], tuple(int(x) for x in sys.argv[2].split("."))
+MAGIC = {b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca"}   # Mach-O 64-bit, universal
+bad = []
+for d, _, files in os.walk(root):
+    for n in files:
+        p = os.path.join(d, n)
+        if os.path.islink(p):
+            continue
+        with open(p, "rb") as fh:
+            if fh.read(4) not in MAGIC:
+                continue
+        cmd = None
+        for line in subprocess.run(["otool", "-l", p], capture_output=True, text=True).stdout.splitlines():
+            w = line.split()
+            if len(w) >= 2 and w[0] == "cmd":
+                cmd = w[1]
+            elif len(w) >= 2 and ((cmd == "LC_BUILD_VERSION" and w[0] == "minos")
+                                  or (cmd == "LC_VERSION_MIN_MACOSX" and w[0] == "version")):
+                v = tuple(int(x) for x in w[1].split(".") if x.isdigit())
+                if v > floor:
+                    bad.append(f"{os.path.relpath(p, root)} needs macOS {w[1]}")
+for b in sorted(set(bad)):
+    print("    " + b, file=sys.stderr)
+if bad:
+    sys.exit(f"{len(set(bad))} binaries need a newer macOS than {sys.argv[2]} (LSMinimumSystemVersion)")
+print("    all binaries load on macOS", sys.argv[2])
+PYEOF
 
   echo "==> smoke test"
   env -i HOME="$HOME" PATH=/usr/bin:/bin PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 "$PY" -c \
