@@ -592,12 +592,12 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(body.get("stream", False), bool):
             raise BadRequest("stream must be a boolean")
         try:
-            parse_decision(body["request"], allow_paths=False)
+            parse_decision(body["request"])
         except DecisionError as error:
             raise BadRequest(str(error)) from error
         kw = dict(reasoning=body.get("reasoning", False), threshold=body.get("threshold", 0.7),
                   max_reasoning_tokens=body.get("max_reasoning_tokens"),
-                  temperature=body.get("temperature"), mode=body.get("trida_mode"), allow_paths=False)
+                  temperature=body.get("temperature"), mode=body.get("trida_mode"))
         job = _FnJob(lambda emit: DECIDER.decide(body["request"], on_event=emit, **kw))
         WORKER.submit(job)
         if not body.get("stream"):

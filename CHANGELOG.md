@@ -202,6 +202,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Decision requests never name files. `decide_request.parse` (both copies, SGLang and MLX) takes an image only
+  in memory: a PIL image, base64 or a data URL. Reading a file moved to `decide_request.open_image(path)`,
+  which Python callers call themselves, and the `allow_paths` flag every HTTP entry point had to remember to
+  turn off is gone. Before, `/v1/decide` was safe only because both servers passed `allow_paths=False`
+  (CodeQL: uncontrolled data used in a path expression).
+
 - `filelock` floored at `>=4.2.1` and both lock files moved off 4.1.0. Six
   advisories, the worst GHSA-v4x8-3wr5-3wq8 (HIGH). It is transitive, so the floor
   goes in `requirements.txt` as well as the lock: regenerating the lock otherwise

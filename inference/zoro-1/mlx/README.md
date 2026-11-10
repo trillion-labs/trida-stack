@@ -119,9 +119,10 @@ curl -s localhost:8000/v1/decide -H 'Content-Type: application/json' -d '{
   the longest complete cached state that prefixes the new state is reused.
   `--decision-cache-mb` bounds retained state memory (1024 MiB by default; 0 disables reuse).
   This cache is independent of the chat cache and uses image-content keys.
-- Images go inside `request` as data URLs or bare base64. HTTP requests cannot read local
-  paths or fetch remote URLs. `min_image_pixels` / `max_image_pixels` control resolution
-  (448×448 maximum by default); direct Python calls may also use PIL images or local paths.
+- Images go inside `request` as data URLs or bare base64. No request reads local paths or
+  fetches remote URLs. `min_image_pixels` / `max_image_pixels` control resolution
+  (448×448 maximum by default); direct Python calls may also pass a PIL image. Requests never name files:
+  open one with `decide_request.open_image(path)` first.
 - Temperatures come from `temperature.json`, falling back to Zoro-1's fitted model-card
   text temperature (1.52) and 1.0 for images. Server flags `--decision-text-temperature` /
   `--decision-image-temperature` and a per-request `temperature` override them. For CUDA

@@ -5,7 +5,8 @@
     enc = req.encode(tokenizer, image_processor)                 # token rows (+ image tensors)
 
 A request is `{"state": any JSON, "questions": {qid: question}}` plus, optionally:
-- `image`: a PIL image, a path, or a base64 / data-URL string (the `image` argument wins over the key);
+- `image`: a PIL image or a base64 / data-URL string (the `image` argument wins over the key); for an image file,
+  `open_image(path)` first: requests never name files;
 - `min_image_pixels` / `max_image_pixels`: the image's size bounds (default: no minimum, 448x448 maximum).
 
 A question is `{"type": "noul" | "choice" | "score", "instructions"?, "criteria"}`:
@@ -160,32 +161,36 @@ def image_input(image, proc, max_pixels, min_pixels):
     return out["pixel_values"], grid, int(grid.prod(-1)[0]) // proc.merge_size ** 2
 
 
-def _load_image(ref, allow_paths=True):
-    """A PIL image, a path (only when allow_paths) or a base64 string / data URL -> RGB image. Over HTTP allow_paths
-    is False: a client must not make the server open its own files, nor learn which paths exist."""
+def _load_image(ref):
+    """A PIL image, or a base64 string / data URL -> RGB image. Never a path: parsing a request does not touch the
+    filesystem, so no request (over HTTP or not) can make a server open its own files or learn which ones exist.
+    Python callers with an image file open it first: `open_image(path)`."""
     from PIL import Image
     if ref is None:
         return None
     try:
         if isinstance(ref, Image.Image):
             return ref.convert("RGB")
-        if isinstance(ref, (str, os.PathLike)):
-            s = str(ref)
-            path = s[len("file://"):] if s.startswith("file://") else s
-            if allow_paths and not s.startswith("data:") and os.path.exists(path):
-                return Image.open(path).convert("RGB")
+        if isinstance(ref, str):
             try:   # a data URL or bare base64
-                data = base64.b64decode(s.split(",", 1)[-1] if s.startswith("data:") else s, validate=True)
+                data = base64.b64decode(ref.split(",", 1)[-1] if ref.startswith("data:") else ref, validate=True)
             except ValueError:
-                if not allow_paths:
-                    raise RequestError("image: give a base64 string or a data URL") from None
-                raise RequestError(f"image: no file at {path[:200]!r}, and it is not base64 either") from None
+                raise RequestError("image: give a PIL image, a base64 string or a data URL") from None
             return Image.open(io.BytesIO(data)).convert("RGB")
     except RequestError:
         raise
     except Exception as e:   # noqa: BLE001 -- any decode failure is the caller's bad image
         raise RequestError(f"image: could not read it ({type(e).__name__}: {e})") from e
-    raise RequestError(f"image: give a PIL image, a path or a base64 string, not {type(ref).__name__}")
+    raise RequestError(f"image: give a PIL image, a base64 string or a data URL, not {type(ref).__name__}")
+
+
+def open_image(path):
+    """An image file (a path, or a file:// URL) -> RGB PIL image, for Python callers: requests take images in
+    memory only (see `_load_image`)."""
+    from PIL import Image
+    p = os.fspath(path)
+    with Image.open(p[len("file://"):] if p.startswith("file://") else p) as im:
+        return im.convert("RGB")
 
 
 def _question(qid, q):
@@ -227,7 +232,7 @@ def _pixels(req, key, default):
     return v
 
 
-def parse(request, image=None, allow_paths=True):
+def parse(request, image=None):
     """dict -> Request, or RequestError naming the first problem found."""
     if not isinstance(request, dict):
         raise RequestError(f"a request must be an object with 'state' and 'questions', got {type(request).__name__}")
@@ -243,7 +248,7 @@ def parse(request, image=None, allow_paths=True):
     questions = [_question(qid, q) for qid, q in qs.items()]
     max_px = _pixels(request, "max_image_pixels", MAX_IMAGE_PIXELS)
     min_px = _pixels(request, "min_image_pixels", None)
-    img = _load_image(image if image is not None else request.get("image"), allow_paths)
+    img = _load_image(image if image is not None else request.get("image"))
     return Request(render(request["state"]), questions, img, min_px, max_px, request)
 
 

@@ -305,7 +305,6 @@ class Decider:
         threshold=0.7,
         on_event=None,
         mode=None,
-        allow_paths=True,
     ):
         """Decide on the MLX worker; direct callers must hold engine.lock on its owning thread."""
         if self.head is None:
@@ -334,7 +333,7 @@ class Decider:
             or temperature <= 0
         ):
             raise RequestError("temperature must be finite and positive")
-        req = parse(request, allow_paths=allow_paths)
+        req = parse(request)
         start = time.perf_counter()
         existing_images = set(self.engine.rt.images)
         image = self._image(req)
@@ -385,7 +384,7 @@ class Decider:
                 text = self.fit_reasoning(request, thought["text"], image)
                 if text != thought["text"]:
                     result["reasoning_trimmed"] = True
-                reasoned = parse(with_reasoning(request, text), image=req.image, allow_paths=allow_paths)
+                reasoned = parse(with_reasoning(request, text), image=req.image)
                 result["reasoned"] = score(reasoned, self.encode(reasoned, image))
                 result["answers"] = result["reasoned"]["answers"]
             result["timing_ms"] = round((time.perf_counter() - start) * 1000, 1)
