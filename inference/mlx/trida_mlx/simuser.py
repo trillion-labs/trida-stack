@@ -150,14 +150,16 @@ class App:
 
 
 def visible(messages) -> str:
-    """What the person sees after a turn: tool activity, then the final reply."""
+    """What the person sees after a turn: which tools ran and how they ended, then the final reply.
+
+    Tool arguments and results stay on this Mac: the user LLM is a remote endpoint, and a run_shell that ran
+    without asking (a `cat`, `printenv`) must not send local files or the environment to it."""
     parts, final = [], ""
     for m in messages:
         if m.get("role") != "assistant" or m.get("superseded"):
             continue
         for r in m.get("tool_runs") or []:
-            res = (r.get("result") or "").strip().replace("\n", " ")
-            parts.append(f"[the assistant ran: {r['name']}({r['arguments'][:200]}) -> {r.get('status')}: {res[:200]}]")
+            parts.append(f"[the assistant ran: {r['name']} -> {r.get('status')}]")
         if m.get("content"):
             final = m["content"]
         if m.get("error"):

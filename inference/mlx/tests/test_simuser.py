@@ -71,9 +71,10 @@ def test_episode_runs_and_logs():
     assert simuser.main(["--user-base", llm + "/v1", "--app", app, "--episodes", "2", "--max-turns", "4",
                          "--scenario", "translate_paste", "--out", str(tmp / "out"), "--seed", "1"]) == 0
     assert FakeApp.sent == ["translate: hi", "thanks!"] * 2          # [DONE] ends the episode after sending
-    # the user LLM saw the tool activity and the reply, not its own <think>
+    # the user LLM saw which tool ran and the reply, not the tool's output, nor its own <think>
     turn2 = FakeLLM.calls[1]["messages"]
-    assert turn2[-1]["role"] == "user" and "[the assistant ran: now({}) -> done: 10:00]" in turn2[-1]["content"]
+    assert turn2[-1]["role"] == "user" and "[the assistant ran: now -> done]" in turn2[-1]["content"]
+    assert "10:00" not in turn2[-1]["content"]
     assert turn2[-1]["content"].endswith("안녕!") and turn2[-2] == {"role": "assistant", "content": "translate: hi"}
     log = next((tmp / "out").glob("episodes-*.jsonl")).read_text().splitlines()
     rec = json.loads(log[0])
@@ -96,3 +97,13 @@ def test_dotenv_and_missing_url(monkeypatch):
         raise AssertionError("ran without a user LLM URL")
     except SystemExit as e:
         assert e.code == 2
+
+
+def test_visible_hides_tool_output_from_the_user_llm():
+    # The user LLM is a remote endpoint: it sees that a tool ran, never what the tool returned (a `cat` of a
+    # secret, `printenv`), nor the full arguments.
+    seen = simuser.visible([{"role": "assistant", "content": "done", "tool_runs": [
+        {"name": "run_shell", "arguments": '{"command": "cat ~/.aws/credentials"}', "status": "done",
+         "result": "aws_secret_access_key = SECRET123"}]}])
+    assert "SECRET123" not in seen and "credentials" not in seen
+    assert "run_shell" in seen and "done" in seen and seen.endswith("done")
