@@ -39,13 +39,13 @@ def shard_model(model, args):
         for block in model.visual.blocks:
             fully_shard(block, mp_policy=mp, reshard_after_forward=not args.fsdp_keep_params)
         fully_shard(model.visual.merger, mp_policy=mp)
-    if getattr(model, "jev_head", None) is not None:
-        # Own unit: the head only has gradients on the (syncing) Jev micro-step, while the root's other params
+    if getattr(model, "decision_head", None) is not None:
+        # Own unit: the head only has gradients on the (syncing) Decision micro-step, while the root's other params
         # accumulate fp32 grads over the SFT micro-steps; FSDP2 reduce-scatters a unit at one gradient dtype.
-        fully_shard(model.jev_head, mp_policy=mp)
+        fully_shard(model.decision_head, mp_policy=mp)
     fully_shard(model, mp_policy=mp)
     # FSDP2 creates a unit's unsharded params on its first all-gather, and its end-of-backward hook visits every
-    # unit — also one a micro-step never ran (the Jev head on SFT steps, the vision projector on text-only rows),
+    # unit — also one a micro-step never ran (the Decision head on SFT steps, the vision projector on text-only rows),
     # which then fails before that unit's first use. Gather + release each unit once so they all exist.
     for m in model.modules():
         if isinstance(m, FSDPModule) and m is not model:

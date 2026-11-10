@@ -52,7 +52,7 @@ testpaths = [
   "tools/test_check_supply_chain.py",
   "train/test_stream_pack.py",
   "train/test_vlm.py",
-  "train/test_jev.py",
+  "train/test_decision.py",
   "train/test_training.py",
 ]
 

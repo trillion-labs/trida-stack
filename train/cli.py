@@ -6,9 +6,27 @@ installed: importing this module pulls in only argparse.
 import argparse
 
 
+class TrainingArgs(argparse.Namespace):
+    """Legacy jev_* attributes alias the canonical decision_* options."""
+    def __getattr__(self, name):
+        if name.startswith("jev_"):
+            return getattr(self, "decision_" + name[4:])
+        raise AttributeError(name)
+
+    def __setattr__(self, name, value):
+        if name.startswith("jev_"):
+            name = "decision_" + name[4:]
+        super().__setattr__(name, value)
+
+
+class TrainingParser(argparse.ArgumentParser):
+    def parse_known_args(self, args=None, namespace=None):
+        return super().parse_known_args(args, TrainingArgs() if namespace is None else namespace)
+
+
 def build_parser():
     """Torch-free CLI definition, so `train.py --help` works before torch/FSDP are installed."""
-    p = argparse.ArgumentParser()
+    p = TrainingParser()
     p.add_argument("--model_id", default="Qwen/Qwen3.5-4B")
     p.add_argument("--resume", default=None,
                    help="checkpoint dir to resume from (loads HF weights from it; also loads "
@@ -19,7 +37,7 @@ def build_parser():
                         "weights only -> warm-restart via --model_id <ckpt> --start_step N.")
     p.add_argument("--trust_remote_code", action="store_true")
     p.add_argument("--dataset", default="",
-                   help="(required unless --jev_only) HF Hub dataset id or local dir of *.jsonl chat records "
+                   help="(required unless --decision_only) HF Hub dataset id or local dir of *.jsonl chat records "
                         "(each line: {\"messages\": [...], \"tools\": [...]})")
     p.add_argument("--bd_size", type=int, default=32)
     p.add_argument("--max_length", type=int, default=16384)
@@ -91,25 +109,25 @@ def build_parser():
                         "with x0-causal (ar_loss_weight>0) + linear_block_mode=causal the model is "
                         "globally causal (vLLM-servable). Default off = original BD behavior.")
     p.add_argument("--max_segments", type=int, default=0, help="max segments per packed row (0=unlimited)")
-    p.add_argument("--jev_data", default="",
-                   help="comma-separated kev-format JSONL files/dirs: adds Jev decision training (data: "
-                        "train/data/jev.py; pointer head and loss: train/models/jev.py) — a pointer head on the clean "
+    p.add_argument("--decision_data", "--jev_data", default="",
+                   help="comma-separated kev-format JSONL files/dirs: adds typed-decision training (data: "
+                        "train/data/decision.py; pointer head and loss: train/models/decision.py) — a pointer head on the clean "
                         "causal stream, trained jointly with the SFT objective")
-    p.add_argument("--jev_only", action="store_true",
-                   help="train only the Jev decision objective (no SFT data, no diffusion loss): each optimizer "
-                        "step is --jev_micro_per_step Jev micro-batches")
-    p.add_argument("--jev_loss_weight", type=float, default=1.0,
-                   help="weight of the Jev loss relative to the SFT loss (like --ar_loss_weight)")
-    p.add_argument("--jev_micro_per_step", type=int, default=1,
-                   help="Jev micro-batches per optimizer step, after the --grad_accum SFT micro-batches")
-    p.add_argument("--jev_max_tokens", type=int, default=32768, help="row tokens per Jev micro-batch")
-    p.add_argument("--jev_max_variant_tokens", type=int, default=0,
-                   help="a longer record runs as its own micro-batch up to this many tokens (0 = --jev_max_tokens)")
-    p.add_argument("--jev_max_state", type=int, default=7552, help="Jev state tokens kept (kev's joint-stage limit)")
-    p.add_argument("--jev_p_none_pair", type=float, default=0.25, help="share of records also trained as none-pairs")
-    p.add_argument("--jev_head_dim", type=int, default=256)
-    p.add_argument("--jev_head_lr_scale", type=float, default=1.0,
-                   help="the Jev pointer head's LR as a multiple of --lr (it trains from scratch; kev's full fine-tune "
+    p.add_argument("--decision_only", "--jev_only", action="store_true",
+                   help="train only the typed-decision objective (no SFT data, no diffusion loss): each optimizer "
+                        "step is --decision_micro_per_step decision micro-batches")
+    p.add_argument("--decision_loss_weight", "--jev_loss_weight", type=float, default=1.0,
+                   help="weight of the decision loss relative to the SFT loss (like --ar_loss_weight)")
+    p.add_argument("--decision_micro_per_step", "--jev_micro_per_step", type=int, default=1,
+                   help="decision micro-batches per optimizer step, after the --grad_accum SFT micro-batches")
+    p.add_argument("--decision_max_tokens", "--jev_max_tokens", type=int, default=32768, help="row tokens per decision micro-batch")
+    p.add_argument("--decision_max_variant_tokens", "--jev_max_variant_tokens", type=int, default=0,
+                   help="a longer record runs as its own micro-batch up to this many tokens (0 = --decision_max_tokens)")
+    p.add_argument("--decision_max_state", "--jev_max_state", type=int, default=7552, help="decision state tokens kept (kev's joint-stage limit)")
+    p.add_argument("--decision_p_none_pair", "--jev_p_none_pair", type=float, default=0.25, help="share of records also trained as none-pairs")
+    p.add_argument("--decision_head_dim", "--jev_head_dim", type=int, default=256)
+    p.add_argument("--decision_head_lr_scale", "--jev_head_lr_scale", type=float, default=1.0,
+                   help="the decision pointer head's LR as a multiple of --lr (it trains from scratch; kev's full fine-tune "
                         "uses head 1e-4 over backbone 2e-6 = 50)")
     p.add_argument("--projector_lr_scale", type=float, default=0.1,
                    help="VL checkpoints: the vision projector's LR as a multiple of --lr (the vision "

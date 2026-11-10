@@ -1,4 +1,4 @@
-"""Build text and Jev training streams for this rank."""
+"""Build text and Decision training streams for this rank."""
 
 from dataclasses import dataclass
 from collections.abc import Iterator
@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from train.cli import parse_int_list
 from train.distributed import is_master, log, rank, world_size
 from train.models.hybrid import HFBlockDiffusionHybrid
-from train.data.jev import JevRowDataset, load_jev_records
+from train.data.decision import DecisionRowDataset, load_decision_records
 from train.data.text_sft_data import (
     JsonlAgenticDataset, MultiTurnTextSftCollator, PackedMultiTurnRowDataset,
     PackedRowDataset, StreamPackedCollator, StreamPackedMultiTurnCollator,
@@ -15,10 +15,23 @@ from train.data.text_sft_data import (
 )
 
 
-@dataclass
+@dataclass(init=False)
 class TrainingLoaders:
     text: DataLoader | None
-    jev: Iterator | None  # Already started, preserving worker initialization before the optimizer.
+    decision: Iterator | None  # Already started, preserving worker initialization before the optimizer.
+
+    def __init__(self, text, decision=None, *, jev=None):
+        if decision is not None and jev is not None:
+            raise ValueError("Pass decision or jev, not both")
+        self.text, self.decision = text, decision if decision is not None else jev
+
+    @property
+    def jev(self):
+        return self.decision
+
+    @jev.setter
+    def jev(self, value):
+        self.decision = value
 
 
 def _identity(x):
@@ -26,7 +39,7 @@ def _identity(x):
 
 
 def build_data_loaders(args, model):
-    """Build this rank's text loader and optional running Jev iterator."""
+    """Build this rank's text loader and optional running Decision iterator."""
     tokenizer = model.tokenizer
     image_processor = getattr(model, "image_processor", None)
     hybrid = isinstance(model, HFBlockDiffusionHybrid)
@@ -34,13 +47,13 @@ def build_data_loaders(args, model):
     # Every rank resolves its OWN local paths (don't broadcast rank-0's paths — on a multi-node run
     # without a shared filesystem those wouldn't exist on other nodes). rank 0 downloads first so it
     # populates the (shared or per-node) HF cache; other ranks then hit the cache / download locally.
-    if args.jev_only and not args.jev_data:
-        raise ValueError("--jev_only needs --jev_data")
-    if not args.jev_only and not args.dataset:
-        raise ValueError("--dataset is required (unless --jev_only)")
-    if args.jev_data and args.jev_micro_per_step < 1:
-        raise ValueError("--jev_micro_per_step must be >= 1 with --jev_data (its last micro-batch syncs gradients)")
-    if not args.jev_only:
+    if args.decision_only and not args.decision_data:
+        raise ValueError("--decision_only needs --decision_data")
+    if not args.decision_only and not args.dataset:
+        raise ValueError("--dataset is required (unless --decision_only)")
+    if args.decision_data and args.decision_micro_per_step < 1:
+        raise ValueError("--decision_micro_per_step must be >= 1 with --decision_data (its last micro-batch syncs gradients)")
+    if not args.decision_only:
         if is_master():
             paths = download_jsonl_paths(repo_id=args.dataset)
         dist.barrier()
@@ -92,24 +105,24 @@ def build_data_loaders(args, model):
                                       length_buckets=parse_int_list(args.length_buckets),
                                       keep_all_reasoning=args.keep_all_reasoning)
             batch_size = args.micro_batch_size
-    jev_iter = None
-    if args.jev_data:
+    decision_iter = None
+    if args.decision_data:
         if not (hybrid and args.linear_block_mode == "bidirectional"):
-            raise ValueError("--jev_data needs the hybrid FLARE two-stream path (--linear_block_mode bidirectional)")
-        records = load_jev_records(args.jev_data.split(","))
-        jev_ds = JevRowDataset(records, tokenizer, rank=rank(), world=world_size(), seed=args.seed,
-                               max_tokens=args.jev_max_tokens, max_state=args.jev_max_state,
-                               max_variant_tokens=args.jev_max_variant_tokens,
-                               p_none_pair=args.jev_p_none_pair)
-        jev_iter = iter(DataLoader(jev_ds, batch_size=None, num_workers=2, collate_fn=_identity))
-        sched = "Jev only" if args.jev_only else f"after {args.grad_accum} SFT"
-        log(f"[jev] {len(records)} records | weight {args.jev_loss_weight} | {args.jev_micro_per_step} Jev "
-            f"micro-batch(es) per step, {sched} | {args.jev_max_tokens} tokens each")
+            raise ValueError("--decision_data needs the hybrid FLARE two-stream path (--linear_block_mode bidirectional)")
+        records = load_decision_records(args.decision_data.split(","))
+        decision_ds = DecisionRowDataset(records, tokenizer, rank=rank(), world=world_size(), seed=args.seed,
+                               max_tokens=args.decision_max_tokens, max_state=args.decision_max_state,
+                               max_variant_tokens=args.decision_max_variant_tokens,
+                               p_none_pair=args.decision_p_none_pair)
+        decision_iter = iter(DataLoader(decision_ds, batch_size=None, num_workers=2, collate_fn=_identity))
+        sched = "Decision only" if args.decision_only else f"after {args.grad_accum} SFT"
+        log(f"[decision] {len(records)} records | weight {args.decision_loss_weight} | {args.decision_micro_per_step} Decision "
+            f"micro-batch(es) per step, {sched} | {args.decision_max_tokens} tokens each")
     loader = None
-    if not args.jev_only:
+    if not args.decision_only:
         loader = DataLoader(dataset, batch_size=batch_size,
                             num_workers=args.num_workers, collate_fn=collate, drop_last=True)
         log(f"[data] packing={'on' if args.pack else 'off'} multiturn={'on' if args.multiturn else 'off'} "
             f"collator={type(collate).__name__} batch_size={batch_size}")
 
-    return TrainingLoaders(text=loader, jev=jev_iter)
+    return TrainingLoaders(text=loader, decision=decision_iter)

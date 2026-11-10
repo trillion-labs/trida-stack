@@ -10,7 +10,7 @@ from train.models.hybrid import HFBlockDiffusionHybrid, is_hybrid_model_id
 
 
 def build_model(args):
-    """Load the dense/hybrid model, optional Jev head, and image processor."""
+    """Load the dense/hybrid model, optional Decision head, and image processor."""
     # ---- model (always bf16 weights) ----
     # On resume, load weights from the checkpoint dir (a save_pretrained dir with the <|mask|> token
     # already added, so HFBlockDiffusion skips the resize); otherwise from the base model.
@@ -38,16 +38,16 @@ def build_model(args):
         log(f"[model] hybrid linear-attention model detected -> HFBlockDiffusionHybrid "
             f"(linear_block_mode={args.linear_block_mode})")
         model = HFBlockDiffusionHybrid(**common, linear_block_mode=args.linear_block_mode, require_kernels=(not args.allow_slow_linear),
-                                       jev_head_dim=args.jev_head_dim if args.jev_data else 0)
+                                       decision_head_dim=args.decision_head_dim if args.decision_data else 0)
     else:
         model = HFBlockDiffusion(**common)
     head_init = os.path.join(model_source, "jev_head.pt")
-    if getattr(model, "jev_head", None) is not None and os.path.exists(head_init):   # continue from a Jev checkpoint
+    if getattr(model, "decision_head", None) is not None and os.path.exists(head_init):   # continue from a Decision checkpoint
         saved = torch.load(head_init, map_location="cpu")
-        if saved["head_dim"] != args.jev_head_dim:
-            raise ValueError(f"{head_init} has head_dim {saved['head_dim']}, --jev_head_dim is {args.jev_head_dim}")
-        model.jev_head.load_state_dict(saved["head"])
-        log(f"[jev] pointer head initialised from {head_init}")
+        if saved["head_dim"] != args.decision_head_dim:
+            raise ValueError(f"{head_init} has head_dim {saved['head_dim']}, --decision_head_dim is {args.decision_head_dim}")
+        model.decision_head.load_state_dict(saved["head"])
+        log(f"[decision] pointer head initialised from {head_init}")
     image_processor = None
     if model.is_vl:
         image_processor = load_image_processor(model_source)

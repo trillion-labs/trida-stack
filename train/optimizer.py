@@ -16,16 +16,16 @@ def get_lr(it, max_lr, warmup, total, min_ratio):
 
 
 def build_optimizer(args, model):
-    """Create AdamW using the model's projector and Jev learning-rate groups."""
+    """Create AdamW using the model's projector and Decision learning-rate groups."""
     # Discriminative LR: the vision projector trains at --projector_lr_scale x the language-model
     # LR (the vision encoder is frozen and not optimized). Text-only models get one group.
-    groups = model.param_groups(projector_lr_scale=args.projector_lr_scale, jev_head_lr_scale=args.jev_head_lr_scale)
+    groups = model.param_groups(projector_lr_scale=args.projector_lr_scale, decision_head_lr_scale=args.decision_head_lr_scale)
     optim = torch.optim.AdamW(groups, lr=args.lr, betas=(0.9, args.adam_beta2), weight_decay=args.weight_decay)
     if len(groups) > 1:
         log(f"[optim] language model lr {args.lr:g}"
             + "".join(f" | {name} lr {args.lr * scale:g} (x{scale:g})" for name, scale in
-                      (("projector", args.projector_lr_scale), ("jev head", args.jev_head_lr_scale))
-                      if (name != "projector" or model.is_vl) and (name != "jev head" or args.jev_data)))
+                      (("projector", args.projector_lr_scale), ("decision head", args.decision_head_lr_scale))
+                      if (name != "projector" or model.is_vl) and (name != "decision head" or args.decision_data)))
 
     return optim
 
