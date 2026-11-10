@@ -55,7 +55,7 @@ jobs:
       - name: Scan declared dependencies
         run: |
           pip-audit -r requirements.txt -f json -o audit-core.json || true
-          pip-audit -r inference/requirements.txt -f json -o audit-inference.json || true
+          pip-audit -r inference/zoro-1/requirements.txt -f json -o audit-inference.json || true
       - name: Enforce the exception policy
         run: |
           python tools/check_advisories.py --pip-audit audit-core.json

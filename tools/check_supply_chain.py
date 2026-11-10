@@ -7,7 +7,9 @@ dependency scanner can see them. We therefore describe them by hand in
 
 A hand-written SBOM fragment is only trustworthy if something stops it from going stale.
 That is this script. It fails if the pinned upstream commit recorded anywhere in the
-repository disagrees with the one the fetch script actually uses.
+repository disagrees with the one the fetch script actually uses, or if a fetched
+noncommercial kernel file is tracked by git (a `.gitignore` entry only hides it; a
+moved directory or a `git add -f` gets past that silently).
 
 Run: python tools/check_supply_chain.py
 """
@@ -16,6 +18,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -29,8 +32,8 @@ QUOTING_FILES = [
     "train/README.md",
     "train/block_gated_delta_rule/README.md",
     "train/block_gated_delta_rule/VENDORED.md",
-    "inference/sglang/README.md",
-    "inference/vllm/vllm_native_diffusion/KERNELS.md",
+    "inference/zoro-1/sglang/README.md",
+    "inference/zoro-1/vllm/vllm_native_diffusion/KERNELS.md",
     "docs/supply-chain/asset-register.csv",
     "docs/supply-chain/README.md",
     "tools/kernel-checksums.txt",
@@ -40,6 +43,24 @@ QUOTING_FILES = [
 # unrelated hashes; we only look at lines that also mention the upstream or the pin.
 COMMIT_RE = re.compile(r"\b([0-9a-f]{7,40})\b")
 CONTEXT_RE = re.compile(r"HybridDiffusion|HYBRIDDIFFUSION_COMMIT|git checkout", re.I)
+
+
+# Where the fetch recipes put PolyForm-NC code. Matched by name, not by full path, so a
+# copy left behind by a directory move is caught too.
+NONCOMMERCIAL_FILENAMES = {"block_causal_readout.py"}           # KERNELS.md (vLLM readout)
+NONCOMMERCIAL_PY_DIRS = ("train/block_gated_delta_rule/",)       # fetch_kernels.sh copies *.py here
+
+
+def tracked_noncommercial(paths: list[str]) -> list[str]:
+    """The paths in `paths` that are fetched noncommercial kernel code and must never be committed."""
+    return [p for p in paths
+            if p.rsplit("/", 1)[-1] in NONCOMMERCIAL_FILENAMES
+            or (p.startswith(NONCOMMERCIAL_PY_DIRS) and p.endswith(".py"))]
+
+
+def git_tracked() -> list[str]:
+    return subprocess.run(["git", "ls-files"], cwd=ROOT, check=True, capture_output=True,
+                          text=True).stdout.splitlines()
 
 
 def authoritative_commit() -> str:
@@ -54,6 +75,14 @@ def authoritative_commit() -> str:
 def main() -> int:
     pinned = authoritative_commit()
     problems: list[str] = []
+
+    committed = tracked_noncommercial(git_tracked())
+    if committed:
+        print("PolyForm-Noncommercial kernel code is tracked by git; it must stay a fetched recipe:\n")
+        for p in committed:
+            print(f"  {p}")
+        print("\nRemove it from the index (git rm --cached <path>); the fetch recipe recreates it locally.")
+        return 1
 
     for rel in QUOTING_FILES:
         path = ROOT / rel

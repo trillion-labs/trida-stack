@@ -10,7 +10,7 @@ Where to ask what, and what to expect back.
 | 재현 가능한 결함 | [GitHub Issues](https://github.com/trillion-labs/trida-stack/issues/new?template=bug_report.md) |
 | 기능 아이디어 | [GitHub Discussions · Ideas](https://github.com/trillion-labs/trida-stack/discussions/categories/ideas) |
 | 기여할 작업 협의 | Issue를 먼저 열고 PR로 연결 — [CONTRIBUTING.md](CONTRIBUTING.md) |
-| 특정 모델 revision의 가중치·토크나이저·평가 문제 | [trillionlabs/Trida2.0-4B Community](https://huggingface.co/trillionlabs/Trida2.0-4B/discussions) |
+| 특정 모델 revision의 가중치·토크나이저·평가 문제 | [trillionlabs/Zoro-1 Community](https://huggingface.co/trillionlabs/Zoro-1/discussions) |
 | 빠른 도움·교류 | *(채팅 채널 준비 중 — 개설 후 이 자리에 링크가 들어갑니다)* |
 | 보안 취약점 | 공개 채널이 아닌 [SECURITY.md](SECURITY.md)의 비공개 경로 |
 
