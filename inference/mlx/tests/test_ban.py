@@ -95,28 +95,16 @@ def test_ngram_loop_detector():
 
 
 def test_loop_while_thinking_closes_the_thinking_and_answers():
-    import json
-    import socket
-    import threading
-    import time
-    import urllib.request
-    from trida_mlx import server
-    s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
-    threading.Thread(target=server.main, args=(["--model", str(CKPT), "--port", str(port), "--loop-guard"],),
-                     daemon=True).start()
-    base = f"http://127.0.0.1:{port}/v1"
-    for _ in range(300):
-        try:
-            card = json.loads(urllib.request.urlopen(base + "/models", timeout=1).read())["data"][0]
-            break
-        except Exception:
-            time.sleep(0.1)
+    from serve import post, server
     body = {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 600, "temperature": 0,
             "chat_template_kwargs": {"enable_thinking": True}}
-    r = json.loads(urllib.request.urlopen(urllib.request.Request(
-        base + "/chat/completions", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})).read())
+    with server(CKPT, "--loop-guard") as (base, card):
+        r = post(base + "/chat/completions", body)
     assert card["loop_guard"] is True and card["tool_call_gate"] == 0.0
     t = r["usage"]["trida"]
     # the tiny random model emits one token forever: the guard stops the thinking, then the answer
     assert t["finish_reason"] == "repetition" and t.get("loop_stopped_thinking") is True
+    assert r["choices"][0]["finish_reason"] == "length"   # OpenAI clients see it was cut, not a natural end
     assert "going in circles" in (r["choices"][0]["message"].get("reasoning_content") or "")
+    from trida_mlx import decode
+    assert decode._Emitter.loop_guard is False      # the server's flags must not leak into later tests
