@@ -20,12 +20,14 @@ setup and each run reject unexpected changes to the upstream checkout.
 ## Dataset licenses
 
 The invoice dataset is Apache-2.0. The other three have no verified license
-declaration and their runs are blocked until upstream supplies one. See the
+declaration. They require `--allow-unverified-datasets` for local evaluation. This
+opt-in does not verify their licenses or authorize redistribution. Keep downloaded
+data outside Git. See the
 [intake record](../../docs/oss/intake/0009-workflowevals.md).
 
 ## Run
 
-Start a [decision server](../../inference/README.md#decisions) exposing `/v1/decide`, then:
+Start a [decision server](../../inference/zoro-1/README.md#decisions) exposing `/v1/decide`, then:
 
 ```bash
 # Try one case first. Use --dry-run to check data without inference.
@@ -38,6 +40,18 @@ benchmark/workflow_evals/run.sh invoice_processing \
   --model trida:zoro-1-bf16 --base-url http://127.0.0.1:30001 \
   --workers 1 --name zoro-full
 ```
+
+For local evaluation of customer service, security incidents, or agent traces:
+
+```bash
+benchmark/workflow_evals/run.sh customer_service \
+  --allow-unverified-datasets \
+  --model trida:zoro-1-bf16 --base-url http://127.0.0.1:30001 \
+  --limit 1 --workers 1 --name zoro-local
+```
+
+The flag is required on each invocation, including dry runs and resumes. Dataset
+pins and license metadata stay unchanged; setup and CI do not download these datasets.
 
 Pass the server root URL, without `/v1/decide`. Use the actual model and precision
 in the model name. Direct decisions and grouped questions are the defaults.

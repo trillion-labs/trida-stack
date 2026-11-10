@@ -109,5 +109,5 @@ WorkflowEvals — TypeSafe AI
   Apache License 2.0; pinned 0ac3b8ad845429f0d8e064ecfb2430a47c5a25cb.
   Fetched at setup time; our patch adds Trida transport and CLI configuration.
   Invoice dataset: typesafe/evalsafe-invoice-processing, Apache-2.0.
-  Three other evalsafe datasets lack verified licenses; use is blocked pending
-  an upstream declaration. See docs/oss/intake/0009-workflowevals.md.
+  Three other evalsafe datasets have unverified licenses. Local evaluation
+  requires explicit opt-in; no dataset contents are distributed here. See docs/oss/intake/0009-workflowevals.md.

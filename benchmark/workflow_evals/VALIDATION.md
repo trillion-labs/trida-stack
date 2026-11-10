@@ -1,9 +1,16 @@
 # Review validation
 
+## Rebase validation (2026-11-11)
+
+Rebased onto `origin/main` (`dcd5163`), preserving the `inference/zoro-1/` layout.
+Full CPU suite: **144 passed, 2 skipped**. Adapter/setup suite: **18 passed**.
+Lint, shell syntax, action pins, and supply-chain checks passed. No GPU inference
+was rerun for this rebase.
+
 ## Tests rerun on 2026-11-10
 
 - Full CPU suite: **119 passed, 2 skipped** (transformers 5.x).
-- Offline adapter/setup suite: **16 passed**.
+- Offline adapter/setup suite: **18 passed**.
 - Ruff, shell syntax, action pins, and supply-chain pin checks passed.
 
 The CPU tests exercise the actual `DecideEngine.adecide` and HTTP handler with a fake
@@ -33,8 +40,8 @@ These are the audit values recorded during the run, not a fresh replay. The full
 pilot payload is no longer available in the temporary checkout. The terminal token
 was not retained, so these values establish a reported normal stop, not independent
 proof of a literal `</think>` token. This pilot did not validate CUDA truncation;
-the fake-backend tests above now cover that missing path. Customer-service replay
-is blocked pending a verified dataset license.
+the fake-backend tests above now cover that missing path. Customer-service replay now requires explicit `--allow-unverified-datasets`
+consent for local evaluation; its license remains unverified.
 
 ## Invoice failures
 
