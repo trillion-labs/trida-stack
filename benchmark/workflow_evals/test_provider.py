@@ -176,6 +176,38 @@ class TridaProviderTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("License not verified", result.stderr)
 
+    def _run_with_fake_uv(self, workflow, *options):
+        # Exercise the real wrapper and setup guards, but never run upstream or download data.
+        with tempfile.TemporaryDirectory() as directory:
+            uv = Path(directory) / "uv"
+            uv.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+            uv.chmod(0o755)
+            return subprocess.run([str(HERE / "run.sh"), workflow, *options,
+                "--model", "trida:zoro-1", "--base-url", "http://unused", "--dry-run"],
+                env={**os.environ, "PATH": directory + os.pathsep + os.environ["PATH"]},
+                capture_output=True, text=True)
+
+    def test_local_evaluation_optin_for_unverified_datasets(self):
+        before = (HERE / "dataset-revisions.json").read_bytes()
+        pins = json.loads(before)
+        for workflow in ["customer_service", "security_incidents", "agent_trace_observability"]:
+            with self.subTest(workflow=workflow):
+                result = self._run_with_fake_uv(workflow, "--allow-unverified-datasets")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("license unverified", result.stderr)
+                self.assertIn(pins[workflow]["repo"], result.stderr)
+                args = result.stdout.splitlines()
+                self.assertNotIn("--allow-unverified-datasets", args)
+                self.assertIn(pins[workflow]["revision"], args)
+                self.assertIn("--dry-run", args)
+                self.assertIsNone(pins[workflow]["license"])
+        self.assertEqual((HERE / "dataset-revisions.json").read_bytes(), before)
+
+    def test_verified_dataset_needs_no_optin(self):
+        result = self._run_with_fake_uv("invoice_processing")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("license unverified", result.stderr)
+
     def test_patch_only_changes_connectivity(self):
         paths = [line.split()[2][2:] for line in (HERE / "patches/trida-provider.patch").read_text().splitlines()
                  if line.startswith("diff --git ")]
