@@ -48,6 +48,8 @@ enum ReplyReview {
 extension AppState {
     /// Reviews the reply `replyID`; when a criterion fails, rewrites it once. `specs`: the turn's tool schemas
     /// (kept in the rewrite request so the prompt cache still matches; calls are banned with tool_choice none).
+    /// The draft stays the answer unless the rewrite finishes, is not empty and fails no more checks than it:
+    /// a failed, stopped, empty or worse rewrite is removed and the draft is back in the model's view.
     func reviewAndRevise(_ chatID: Chat.ID, replyID: UUID, specs: [[String: Any]]?) async {
         guard reviewReplies, supportsDecision, let failed = await review(chatID, replyID: replyID) else { return }
         guard !failed.isEmpty, !Task.isCancelled,
@@ -65,6 +67,13 @@ extension AppState {
         var reply = ChatMessage(role: .assistant, content: "")
         reply.route = "Rewritten after review: " + failed.map(\.label).joined(separator: ", ")
         append(chatID, reply)
+        // Undo the rewrite: the draft is the turn's answer again.
+        func keepDraft() {
+            update(chatID, replyID) { $0.superseded = nil }
+            if let ci = chats.firstIndex(where: { $0.id == chatID }) {
+                chats[ci].messages.removeAll { $0.id == reply.id }
+            }
+        }
         do {
             for try await event in client.stream(body: body) {
                 switch event {
@@ -76,11 +85,17 @@ extension AppState {
                 }
             }
         } catch {
-            let cancelled = Task.isCancelled || (error as? URLError)?.code == .cancelled
-            update(chatID, reply.id) { $0.error = cancelled ? "Stopped." : error.localizedDescription }
+            keepDraft()   // stopped or failed mid-way: a partial rewrite must not replace a complete draft
             return
         }
-        if !Task.isCancelled { _ = await review(chatID, replyID: reply.id) }   // show its checks; no second rewrite
+        let rewritten = chats.first(where: { $0.id == chatID })?.messages.first(where: { $0.id == reply.id })
+        guard !Task.isCancelled, let rewritten,
+              !rewritten.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            keepDraft()
+            return
+        }
+        // show its checks; no second rewrite. Worse than the draft: keep the draft.
+        if let after = await review(chatID, replyID: reply.id), after.count > failed.count { keepDraft() }
     }
 
     /// The agent tools of this turn (only for the system prompt of a rewrite request).
