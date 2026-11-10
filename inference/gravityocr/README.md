@@ -209,7 +209,8 @@ runs on Linux with an L40 or H100 (`serve.sh`) or on an Apple Silicon Mac (`serv
 | `GRAVITYOCR_MODEL` | `trillionlabs/GravityOCR` | Hub id or local checkpoint |
 | `GRAVITY_APP` | `/Applications/Gravity.app` | the Gravity app, for `BACKEND=mac` |
 | `PORT`, `CAUSAL_PORT` | `30000`, `30001` | the two servers' ports |
-| `CUDA_HOME`, `API_KEY` | as for `serve.sh` | |
+| `CUDA_HOME` | `$CUDA_HOME`, else `/usr/local/cuda-12.8` or `/usr/local/cuda`, whichever has `nvcc` | a CUDA 12.x toolkit |
+| `API_KEY` | as for `serve.sh` | |
 
 The first code cell checks the kernel: Python 3.10 or newer, with Pillow and matplotlib. It installs
 whichever is missing into that kernel, with uv if there is one, so any Python ≥ 3.10 kernel works,
