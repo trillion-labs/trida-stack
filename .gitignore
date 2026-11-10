@@ -39,6 +39,8 @@ output_models/
 checkpoints/
 evals_results/
 results/
+# serve.py --log / LOG= server logs that eval.py --server-log reads
+inference/*/server*.log
 *.tar.gz
 benchmarking/swe_bench/predictions*.jsonl
 # build cache / eval outputs / stray logs (added during qwen3.5 bd work)
@@ -60,7 +62,7 @@ scripts/diffusion_eval/*.jsonl
 *.sbatch
 # ...except the job scripts published as worked examples (see the READMEs in those dirs).
 !train/tools/**/*.sbatch
-!inference/vllm/tools/**/*.sbatch
+!inference/zoro-1/vllm/tools/**/*.sbatch
 
 # benchmark/ run artifacts (results, scores, logs) — outputs, not source
 benchmark/bfcl_v4/result/
@@ -73,10 +75,11 @@ benchmark/ko_agentbench/logs/
 benchmark/functionchat/output/
 benchmark/**/predictions*.jsonl
 
-# PolyForm-NC-derived kernel port — obtained via recipe, not committed
-inference/vllm/vllm_native_diffusion/block_causal_readout.py
+# PolyForm-NC-derived kernel port — obtained via recipe, not committed. A glob, not a path, so a copy fetched
+# before a directory move stays hidden too; tools/check_supply_chain.py fails CI if one is ever tracked.
+**/vllm_native_diffusion/block_causal_readout.py
 build/
 dist/
 
-# inference/mlx/filesearch/eval.py output
+# inference/zoro-1/mlx/filesearch/eval.py output
 filesearch_results/

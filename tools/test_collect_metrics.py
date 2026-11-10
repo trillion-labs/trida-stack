@@ -93,11 +93,21 @@ def test_period_is_the_iso_week():
     assert cm.default_period(d) == "2026-W42"
 
 
-def test_period_rolls_over_on_monday_not_sunday():
-    sun = dt.datetime(2026, 10, 18, 23, 0, tzinfo=UTC)
-    mon = dt.datetime(2026, 10, 19, 1, 0, tzinfo=UTC)
-    assert cm.default_period(sun) == "2026-W42"
-    assert cm.default_period(mon) == "2026-W43"
+def test_period_rolls_over_at_monday_midnight_kst():
+    # Monday 00:00 KST is Sunday 15:00 UTC.
+    before = dt.datetime(2026, 10, 18, 14, 59, tzinfo=UTC)
+    after = dt.datetime(2026, 10, 18, 15, 0, tzinfo=UTC)
+    assert cm.default_period(before) == "2026-W42"
+    assert cm.default_period(after) == "2026-W43"
+
+
+def test_scheduled_runs_keep_their_labels_across_the_schedule_change():
+    # Before #54 the run fired Monday 01:20 UTC; after it, Monday 07:17 KST = Sunday 22:17 UTC.
+    # Labelled in UTC, the first post-change run (Sunday 2026-11-01 UTC) repeated 2026-W44.
+    assert cm.default_period(dt.datetime(2026, 10, 13, 7, 26, tzinfo=UTC)) == "2026-W42"   # recorded W42
+    assert cm.default_period(dt.datetime(2026, 10, 26, 8, 35, tzinfo=UTC)) == "2026-W44"   # recorded W44
+    assert cm.default_period(dt.datetime(2026, 11, 1, 22, 19, tzinfo=UTC)) == "2026-W45"   # Monday 11-02 KST
+    assert cm.default_period(dt.datetime(2026, 11, 8, 22, 17, tzinfo=UTC)) == "2026-W46"   # the next run
 
 
 def test_period_week_is_zero_padded():

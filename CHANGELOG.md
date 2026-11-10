@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Zoro-1 Chat 0.6.0: **a personal knowledge graph** learned from chats (`inference/mlx/app/Knowledge`,
+- Zoro-1 Chat 0.6.0: **a personal knowledge graph** learned from chats (`inference/zoro-1/mlx/app/Knowledge`,
   a standalone Swift package with its own `kg-selftest`).
   - **Learning:** after each reply, Zoro-1 decides whether there is something lasting to remember and
     proposes `subject —relation→ object` facts from your messages, grounded web answers and the documents
@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Zoro-1 Chat renders replies from Markdown natively: headings, nested and task lists, quotes,
   aligned tables, rules, code blocks with a language label and a copy button, and display math shown as
   LaTeX source. The parser is `Markdown.parse` in TridaChatCore.
-- `inference/mlx/filesearch/`: an offline eval of file search with the decision model
+- `inference/zoro-1/mlx/filesearch/`: an offline eval of file search with the decision model
   (DecisionRAG-style, arXiv:2610.35868): 35 questions with known answer files over a pinned snapshot of
   this repository, comparing BM25, per-file yes/no, per-batch choice and tree navigation.
 - Zoro-1 Chat: a `locate_files` decision tool that finds files by meaning in any language. It ranks
@@ -83,7 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/v1/models` reports both. Also `--log-requests` (old logs pruned at start, `--log-requests-keep-days`,
   default 7), `--mlx-cache-limit-mb`, and `memory_mb` in `/v1/models`. A reply the loop guard cuts short
   ends with `finish_reason: "length"`.
-- Zoro-1 Chat, a native macOS app for the MLX server (`inference/mlx/app`): streaming chat with decode
+- Zoro-1 Chat, a native macOS app for the MLX server (`inference/zoro-1/mlx/app`): streaming chat with decode
   stats, images, agent tools (files, a per-chat terminal, screenshots, UI control), decision-model tool
   routing, reply checks with one rewrite, `/decide`, compaction near the context limit, saved chats, and a
   self-contained bundle / DMG build.
@@ -91,6 +91,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pairs, feedback, tool use, decisions, failures, trajectories) and `trida-mlx-simuser` (an LLM plays the
   user of the app to collect more trajectories, through a local, token-protected automation API).
 
+- `README.ko.md`: a Korean README, linked from the English one (#57).
+- README: a Models table with Hugging Face links for Zoro-1 and Zoro (formerly Trida2.0-4B), and
+  sections on typed-decision joint training, image training, `--mode decide` serving, the backends
+  (SGLang, vLLM, MLX) and the two getting-started notebooks (#57).
 - Image+text training for Qwen3.5 vision-language checkpoints. Conversations under
   `--pack --multiturn` may carry image parts. The vision encoder is frozen and the
   projector trains at `--projector_lr_scale` × `--lr`. Images above
@@ -123,6 +127,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MLX `POST /v1/decide` now defaults to `reasoning: false` instead of `"auto"`.
   Send `reasoning: "auto"` explicitly to retain confidence-based escalation. Both
   `true` and `"auto"` default to self-spec reasoning; `trida_mode: "causal"` overrides it.
+- **nano-inference is now one stack per model.** `inference/` moved to `inference/zoro-1/` and serves
+  only `trillionlabs/Zoro-1`:
+  - the default model is `trillionlabs/Zoro-1` (gated) instead of `trillionlabs/Trida2.0-4B`
+  - `self-spec` uses the model card's setting, `configs/zoro1_self_spec_b15_g8.yaml` (generation
+    block 8, top-k 20), and `eval.py` defaults to top-k 20 to match
+  - `--mode decide` defaults to the same checkpoint, since Zoro-1 carries `jev_head.pt`
+  - `inference/` is no longer a Python package (`pyproject.toml` packages `train` only); the scripts
+    keep their sibling imports, and paths across docs, CI and tooling point at `inference/zoro-1/`
 
 - Vulnerability reports have a second private channel: GitHub private vulnerability
   reporting is enabled, so the Security tab's **Report a vulnerability** button now
@@ -156,6 +168,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   snapshot now runs last, so it sees that morning's results rather than last
   week's.
 
+### Removed
+
+- `serve.py --mode diffusion` (Zoro-1 does not support pure diffusion decoding) and the third-party
+  `sdar`, `llada2-0`, `llada2-1-speed` and `llada2-1-quality` modes with their configs.
+
 ### Fixed
 
 - Zoro-1 Chat:
@@ -170,7 +187,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Tool-call gate:** when the gate held back a call the model meant to make and the reply degenerated
     into `|` until the loop guard, the step is retried once with the gate relaxed. Saving to the knowledge
     graph now routes to the memory tools.
-- `inference/mlx`: tool calls written without the `<tool_call>` wrapper (bare `<function=…>` blocks after a first wrapped call) are now parsed instead of dropped. A stray `</tool_call>` no longer shows up in the reply.
+- `inference/zoro-1/mlx`: tool calls written without the `<tool_call>` wrapper (bare `<function=…>` blocks after a first wrapped call) are now parsed instead of dropped. A stray `</tool_call>` no longer shows up in the reply.
+- Metrics snapshots are labelled with the ISO week in KST. The weekly run moved to Monday 07:17 KST
+  (#54), which is still Sunday in UTC, so labelling by the UTC date named the first post-change run
+  2026-W44 again and its PR (#71) would have overwritten the reviewed W44 snapshot. Every existing
+  label is unchanged; that run is 2026-W45.
 - The metrics population split is read from `docs/metrics/first-party.txt` instead
   of an API lookup. Organisation membership here is private, so neither
   `/collaborators` nor `author_association` can answer it from a workflow: both

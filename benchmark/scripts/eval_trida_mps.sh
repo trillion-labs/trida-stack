@@ -1,7 +1,7 @@
 #!/bin/bash
 # NOTE: not runnable from a clean checkout. This script drives lm-eval through eval_dinfer.py,
 # part of the vendored dInfer harness that is not published in this repository. Kept as a record of
-# how the single-turn numbers were produced; serve from inference/ and use lm-evaluation-harness
+# how the single-turn numbers were produced; serve from inference/zoro-1/ and use lm-evaluation-harness
 # directly for a runnable path.
 # Run Trida eval on a single device: MPS (Mac) or CPU. No vLLM, no multi-GPU.
 # Updated for the trida-stack layout: first-party `trida/` + vendored `dinfer` under vendor/.
