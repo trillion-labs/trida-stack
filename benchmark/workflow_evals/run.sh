@@ -31,12 +31,19 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 [[ "$MODEL" == trida:?* ]] || { echo "Specify --model trida:<checkpoint-name>." >&2; exit 1; }
-REVISION="$("$UPSTREAM/.venv/bin/python" - "$HERE/dataset-revisions.json" "$WORKFLOW" <<'PY'
+REVISION="$("$UPSTREAM/.venv/bin/python" - "$HERE/dataset-revisions.json" "$WORKFLOW" "$UPSTREAM" <<'PY'
 import json, sys
 pins = json.load(open(sys.argv[1]))
 if sys.argv[2] not in pins:
     raise SystemExit(f"Unknown workflow: {sys.argv[2]}")
-print(pins[sys.argv[2]]["revision"])
+sys.path.insert(0, sys.argv[3])
+from core.dataset import DATASETS
+pin = pins[sys.argv[2]]
+if pin["repo"] != DATASETS[sys.argv[2]]:
+    raise SystemExit("Pinned dataset repository differs from upstream")
+if pin.get("license") != "Apache-2.0":
+    raise SystemExit(f"License not verified for {pin['repo']}; see docs/oss/intake/0009-workflowevals.md")
+print(pin["revision"])
 PY
 )"
 cd "$UPSTREAM"

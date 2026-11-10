@@ -26,3 +26,8 @@
 외부유입,nltk,unpinned,Apache-2.0,eval_ifeval.py,PyPI,pip,research team,2026-10-01,양호,punkt 토크나이저 별도 다운로드.
 외부유입,vLLM,">=0.27,<0.28",Apache-2.0,inference/zoro-1/vllm/ (선택),https://github.com/vllm-project/vllm,pip,research team,2026-10-01,양호,stock wheel.
 외부유입,setuptools,">=83",MIT,빌드 백엔드,https://github.com/pypa/setuptools,build,research team,2026-10-01,양호,PYSEC-2026-3447 대응으로 하한 상향.
+수정포함,WorkflowEvals,0ac3b8ad845429f0d8e064ecfb2430a47c5a25cb,Apache-2.0,benchmark/workflow_evals/,https://github.com/typesafe-ai/WorkflowEvals,pinned setup-time clone + patch,research team,,라이선스 확인,코드와 환경은 미커밋; intake/0009-workflowevals.md
+외부유입,typesafe/evalsafe-invoice-processing,6beeb2d2acd65c086c835022f5f4d7434114cafc,Apache-2.0,benchmark/workflow_evals/,https://huggingface.co/datasets/typesafe/evalsafe-invoice-processing,HF download,research team,,라이선스 확인,데이터 미커밋; docs/oss/intake/0009-workflowevals.md
+외부유입,typesafe/evalsafe-customer-service,b1342f5a704587dbc465867c38c2694348ff86e4,미확인,benchmark/workflow_evals/,https://huggingface.co/datasets/typesafe/evalsafe-customer-service,HF cache (과거 파일럿); 추가 사용 보류,research team,,라이선스 확인 대기,데이터 미커밋; docs/oss/intake/0009-workflowevals.md
+외부유입,typesafe/evalsafe-security-incidents,fbe1ea5c69cf494157fd23f2002a0d9d9a418443,미확인,benchmark/workflow_evals/,https://huggingface.co/datasets/typesafe/evalsafe-security-incidents,HF cache (과거 파일럿); 추가 사용 보류,research team,,라이선스 확인 대기,데이터 미커밋; docs/oss/intake/0009-workflowevals.md
+외부유입,typesafe/evalsafe-agent-trace-observability,8635540973910a92465fe2bc53e195375aa6e1a8,미확인,benchmark/workflow_evals/,https://huggingface.co/datasets/typesafe/evalsafe-agent-trace-observability,HF cache (과거 파일럿); 추가 사용 보류,research team,,라이선스 확인 대기,데이터 미커밋; docs/oss/intake/0009-workflowevals.md

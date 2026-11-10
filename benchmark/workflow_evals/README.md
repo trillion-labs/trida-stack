@@ -17,29 +17,35 @@ This creates an isolated environment in the ignored `.upstream/` directory.
 Upstream code and datasets are pinned. The patch only adds our model connection;
 setup and each run reject unexpected changes to the upstream checkout.
 
+## Dataset licenses
+
+The invoice dataset is Apache-2.0. The other three have no verified license
+declaration and their runs are blocked until upstream supplies one. See the
+[intake record](../../docs/oss/intake/0009-workflowevals.md).
+
 ## Run
 
 Start a [decision server](../../inference/README.md#decisions) exposing `/v1/decide`, then:
 
 ```bash
 # Try one case first. Use --dry-run to check data without inference.
-benchmark/workflow_evals/run.sh customer_service \
+benchmark/workflow_evals/run.sh invoice_processing \
   --model trida:zoro-1-bf16 --base-url http://127.0.0.1:30001 \
   --limit 1 --workers 1 --name zoro-smoke
 
-# Run all four workflows.
-for workflow in invoice_processing customer_service agent_trace_observability security_incidents; do
-  benchmark/workflow_evals/run.sh "$workflow" \
-    --model trida:zoro-1-bf16 --base-url http://127.0.0.1:30001 \
-    --workers 1 --name zoro-full
-done
+# Full invoice workflow.
+benchmark/workflow_evals/run.sh invoice_processing \
+  --model trida:zoro-1-bf16 --base-url http://127.0.0.1:30001 \
+  --workers 1 --name zoro-full
 ```
 
 Pass the server root URL, without `/v1/decide`. Use the actual model and precision
 in the model name. Direct decisions and grouped questions are the defaults.
 To reason before deciding, add `--reasoning --max-output-tokens 2048` and use a
 separate run name, such as `zoro-reasoning`. The token limit caps reasoning generation;
-without it, upstream defaults to 64,000. Increase `--timeout` for slower runs.
+the Trida default is 2,048 tokens, with a 4,096-token ceiling. The server also checks
+prompt + budget against its context length. Increase `--timeout` for slower runs.
+Unfinished reasoning is recorded as a failure, not scored as completed reasoning.
 
 Repeat a command to resume; use a new run name when changing settings.
 Set `TRIDA_API_KEY` only if your server requires authentication.
@@ -75,7 +81,13 @@ alone does not remove them. Two invoice cases failed on this limit in the BF16 p
 Full-length evaluation requires a separate encoder/context change and
 validation with the model.
 
+See [validation notes](VALIDATION.md) for the pilot evidence and review test results.
+
 ## Maintenance
+
+CI runs the adapter tests in a separate Python 3.13 job, with the pinned upstream
+checkout and locked dependencies. Tests require no model, dataset download, or API key.
+
 
 ```bash
 # Offline adapter tests, after setup.

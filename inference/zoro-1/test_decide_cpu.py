@@ -339,3 +339,76 @@ def test_decide_forwards_reasoning_budget():
     for budget in [0, -1, 1.5, True]:
         assert client.post("/v1/decide", json={"request": REQ,
                            "max_reasoning_tokens": budget}).status_code == 400
+
+
+def _reasoning_engine(finish="stop", context_length=16384):
+    from decide_engine import DecideEngine
+
+    class Tok(CharTok):
+        def apply_chat_template(self, *args, **kwargs):
+            return "prompt"
+
+    class Backend:
+        calls = 0
+
+        async def async_generate(self, **kwargs):
+            self.calls += 1
+
+            async def chunks():
+                yield {"text": "Check it.", "meta_info": {}}
+                yield {"text": "Check it.</think>" if finish == "stop" else "Check it.",
+                       "meta_info": {"finish_reason": {"type": finish}, "completion_tokens": 3}}
+            return chunks()
+
+    engine = object.__new__(DecideEngine)
+    engine.ckpt, engine.tok, engine.proc = "zoro-1", Tok(), None
+    engine.context_length, engine.reasoning_temperature, engine._stops = context_length, 0.6, []
+    engine.text_T, engine.image_T, engine.engine = 1.0, 1.0, Backend()
+
+    async def logits(enc, image):
+        return [torch.tensor([0.0, 1.0]) for row in enc.rows]
+
+    engine.alogits = logits
+    return engine
+
+
+@pytest.mark.parametrize("finish", ["stop", "length"])
+def test_decide_exposes_real_reasoning_finish_status(finish):
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+
+    engine = _reasoning_engine(finish)
+    response = TestClient(create_app(engine)).post("/v1/decide", json={
+        "request": REQ, "reasoning": True, "max_reasoning_tokens": 100})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reasoning"] == "Check it."
+    assert body["reasoning_stats"]["finish_reason"] == finish
+    if finish == "length":
+        assert body["cut"] == "length" and body["answers"] == {}
+    else:
+        assert "cut" not in body and set(body["answers"]) == set(REQ["questions"])
+
+
+@pytest.mark.parametrize("budget", [0, -1, 4097, 64000])
+def test_decide_rejects_excessive_reasoning_before_generation(budget):
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+
+    engine = _reasoning_engine()
+    response = TestClient(create_app(engine)).post("/v1/decide", json={
+        "request": REQ, "reasoning": True, "max_reasoning_tokens": budget})
+    assert response.status_code == 400 and engine.engine.calls == 0
+
+
+def test_reasoning_budget_reserves_prompt_space():
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+
+    engine = _reasoning_engine(context_length=10)
+    client = TestClient(create_app(engine))
+    assert client.post("/v1/decide", json={"request": REQ, "reasoning": True,
+                                        "max_reasoning_tokens": 5}).status_code == 400
+    assert engine.engine.calls == 0
+    assert client.post("/v1/decide", json={"request": REQ, "reasoning": True,
+                                        "max_reasoning_tokens": 4}).status_code == 200

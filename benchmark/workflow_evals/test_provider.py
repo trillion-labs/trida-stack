@@ -2,6 +2,9 @@
 import json
 from pathlib import Path
 import sys
+import os
+import subprocess
+import tempfile
 import unittest
 
 HERE = Path(__file__).resolve().parent
@@ -121,15 +124,57 @@ class TridaProviderTest(unittest.TestCase):
 
     def test_reasoning_fallback_is_not_scored_as_reasoned(self):
         self.client.reasoning = True
-        for extra in ({}, {"reasoning": "Unfinished", "cut": "using the direct answer"}):
+        for extra in ({}, {"reasoning": "Unverified"},
+                      {"reasoning": "Unfinished", "cut": "length",
+                            "reasoning_stats": {"finish_reason": "length"}},
+                      {"reasoning": "Unfinished", "reasoning_stats": {"finish_reason": "length"}}):
             with self.subTest(extra=extra):
                 self.respond(payload={"answers": self.answers, **extra})
                 with self.assertRaisesRegex(ValueError, "Reasoning did not complete"):
                     self.ask()
 
+    def test_reasoning_budget_defaults_and_ceiling(self):
+        config = configuration("trida:zoro-1", base_url=self.config.base_url, trida_reasoning=True)
+        self.assertEqual(config.max_output_tokens, 2048)
+        self.assertEqual(configuration("openai:model").max_output_tokens, 64000)
+        with self.assertRaisesRegex(ValueError, "4096"):
+            configuration("trida:zoro-1", base_url=self.config.base_url,
+                          trida_reasoning=True, max_output_tokens=64000)
+
     def test_reasoning_rejected_for_other_providers(self):
         with self.assertRaisesRegex(ValueError, "Trida only"):
             configuration("typesafe:jev-1.13.0", trida_reasoning=True)
+
+    def test_setup_ignores_git_diff_display_settings(self):
+        settings = {"diff.noprefix": "true", "diff.mnemonicPrefix": "true",
+                    "core.abbrev": "5", "diff.external": "false"}
+        env = {**os.environ, "GIT_CONFIG_COUNT": str(len(settings))}
+        for i, (key, value) in enumerate(settings.items()):
+            env[f"GIT_CONFIG_KEY_{i}"], env[f"GIT_CONFIG_VALUE_{i}"] = key, value
+        result = subprocess.run([str(HERE / "setup.sh"), "--check"], env=env,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_setup_rejects_untracked_files(self):
+        with tempfile.NamedTemporaryFile(dir=HERE / ".upstream", prefix="unexpected-"):
+            result = subprocess.run([str(HERE / "setup.sh"), "--check"],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("untracked files", result.stderr)
+
+    def test_pinned_repositories_match_upstream(self):
+        from core.dataset import DATASETS
+        pins = json.loads((HERE / "dataset-revisions.json").read_text())
+        self.assertEqual({key: value["repo"] for key, value in pins.items()}, DATASETS)
+
+    def test_unlicensed_datasets_are_blocked_before_download(self):
+        for workflow in ["customer_service", "security_incidents", "agent_trace_observability"]:
+            with self.subTest(workflow=workflow):
+                result = subprocess.run([str(HERE / "run.sh"), workflow,
+                    "--model", "trida:zoro-1", "--base-url", "http://unused", "--dry-run"],
+                    capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("License not verified", result.stderr)
 
     def test_patch_only_changes_connectivity(self):
         paths = [line.split()[2][2:] for line in (HERE / "patches/trida-provider.patch").read_text().splitlines()
