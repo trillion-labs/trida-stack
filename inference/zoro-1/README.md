@@ -159,6 +159,10 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
   - `choice`: `{key: description}`.
   - `score`: a list of levels, lowest first; the answer is the expected level.
 - **`"reasoning": true`:** the model first writes its reasoning (returned as `reasoning`), then decides with that reasoning added to the state.
+  `max_reasoning_tokens` defaults to 768 and must be between 1 and 4,096. The prompt
+  plus this budget must fit the configured context; invalid budgets return HTTP 400.
+  Responses include `reasoning_stats.finish_reason`. If generation hits its budget,
+  the response has `cut: "length"` and empty `answers`; partial reasoning is not scored.
 - **Images:** add an `image` (path, base64 or data URL) to the request.
 - **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
   - It takes `tools`; tool calls come back as `tool_calls`.

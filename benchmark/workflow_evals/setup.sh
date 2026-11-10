@@ -18,17 +18,23 @@ fi
     echo "Unexpected upstream revision; preserve any work and remove .upstream before setup." >&2
     exit 1
 }
-git -C "$UPSTREAM" diff --quiet || {
+git -C "$UPSTREAM" diff --no-ext-diff --quiet || {
     echo "Upstream has unstaged edits; refusing to overwrite them." >&2
     exit 1
 }
-if git -C "$UPSTREAM" diff --cached --quiet; then
+if [[ -n "$(git -C "$UPSTREAM" ls-files --others --exclude-standard)" ]]; then
+    echo "Upstream has untracked files; refusing to continue." >&2
+    exit 1
+fi
+if git -C "$UPSTREAM" diff --cached --no-ext-diff --quiet; then
     [[ "${1:-}" != "--check" ]] || { echo "Provider patch is missing; run setup.sh." >&2; exit 1; }
     git -C "$UPSTREAM" apply --check --index "$PATCH"
     git -C "$UPSTREAM" apply --index "$PATCH"
 else
     # --index records added files too, allowing an exact check on subsequent setup runs.
-    git -C "$UPSTREAM" diff --cached --binary | cmp -s "$PATCH" - || {
+    EXPECTED="$(git patch-id --stable < "$PATCH" | cut -d' ' -f1)"
+    ACTUAL="$(git -C "$UPSTREAM" -c diff.noprefix=false -c diff.mnemonicPrefix=false -c core.abbrev=40 diff --cached --no-ext-diff --no-textconv --binary --src-prefix=a/ --dst-prefix=b/ | git patch-id --stable | cut -d' ' -f1)"
+    [[ -n "$EXPECTED" && "$ACTUAL" == "$EXPECTED" ]] || {
         echo "Upstream differs from the expected provider patch; refusing to continue." >&2
         exit 1
     }

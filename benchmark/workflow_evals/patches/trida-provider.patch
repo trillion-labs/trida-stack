@@ -1,5 +1,5 @@
 diff --git a/core/providers.py b/core/providers.py
-index 8ac4b8f..0042889 100644
+index 8ac4b8f..6b86ddd 100644
 --- a/core/providers.py
 +++ b/core/providers.py
 @@ -8,8 +8,8 @@ from typesafe_sdk.constants import DEFAULT_BASE_URL
@@ -13,14 +13,21 @@ index 8ac4b8f..0042889 100644
  # Hosts serving models from multiple labs.
  OPEN_MODEL_HOSTS: frozenset[Provider] = frozenset({"fireworks", "groq", "cerebras"})
  # Reject unsupported effort levels rather than letting PydanticAI remap them.
-@@ -27,15 +27,23 @@ class ModelConfig(Record):
+@@ -25,17 +25,29 @@ class ModelConfig(Record):
+     question_mode: Literal["all", "one"] = "all"
+     base_url: str | None = None
      timeout_s: float = Field(default=600, gt=0)
-     max_output_tokens: int = Field(default=64000, gt=0)
+-    max_output_tokens: int = Field(default=64000, gt=0)
++    max_output_tokens: int | None = Field(default=None, gt=0)
      malformed_retries: int = Field(default=1, ge=0)
 +    trida_reasoning: bool = False
  
      @model_validator(mode="after")
      def applicable_settings(self):
++        if self.max_output_tokens is None:
++            self.max_output_tokens = 2048 if self.provider == "trida" else 64000
++        if self.provider == "trida" and self.trida_reasoning and self.max_output_tokens > 4096:
++            raise ValueError("Trida reasoning budget must not exceed 4096 tokens")
 +        if self.trida_reasoning and self.provider != "trida":
 +            raise ValueError("--reasoning applies to Trida only")
          if self.provider == "typesafe" and self.model != "jev-1.13.0":
@@ -39,7 +46,7 @@ index 8ac4b8f..0042889 100644
          if self.provider in ("groq", "cerebras") and self.thinking not in GRADED_EFFORTS:
              raise ValueError(
                  f"{self.provider} grades reasoning effort as low, medium, or high; "
-@@ -47,8 +55,9 @@ class ModelConfig(Record):
+@@ -47,8 +59,9 @@ class ModelConfig(Record):
      def identity(self) -> ModelIdentity:
          return ModelIdentity(
              name=f"{self.provider}:{self.model}",
@@ -51,7 +58,7 @@ index 8ac4b8f..0042889 100644
          )
  
  
-@@ -65,18 +74,18 @@ def configuration(model: str, thinking: str | None = None, **kwargs) -> ModelCon
+@@ -65,18 +78,18 @@ def configuration(model: str, thinking: str | None = None, **kwargs) -> ModelCon
              or DEFAULT_BASE_URL
          )
      # Default to joint questions for TypeSafe and independent questions for LLMs.
@@ -73,7 +80,7 @@ index 8ac4b8f..0042889 100644
          return config.model
      settings = {"timeout": config.timeout_s, "max_tokens": config.max_output_tokens}
      explicit = config.thinking != "default"
-@@ -124,6 +133,10 @@ def _chat_model(config: ModelConfig, provider, settings: dict):
+@@ -124,6 +137,10 @@ def _chat_model(config: ModelConfig, provider, settings: dict):
  
  
  def make_client(config: ModelConfig):
@@ -86,10 +93,10 @@ index 8ac4b8f..0042889 100644
      return QuestionClient(config)
 diff --git a/core/trida_client.py b/core/trida_client.py
 new file mode 100644
-index 0000000..4959168
+index 0000000..ec5c80c
 --- /dev/null
 +++ b/core/trida_client.py
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,82 @@
 +"""Transport adapter only; workflow questions, policies and scoring stay upstream."""
 +import math
 +import os
@@ -131,8 +138,10 @@ index 0000000..4959168
 +                f"{exc}: {response.text[:2000]}", request=exc.request, response=exc.response
 +            ) from exc
 +        raw = response.json()
-+        if self.reasoning and (not raw.get("reasoning") or raw.get("cut")):
-+            raise ValueError(f"Reasoning did not complete: {raw.get('cut') or 'missing reasoning'}")
++        finish = (raw.get("reasoning_stats") or {}).get("finish_reason")
++        if self.reasoning and (not raw.get("reasoning") or raw.get("cut") or finish != "stop"):
++            reason = raw.get("cut") or finish or "missing completion metadata"
++            raise ValueError(f"Reasoning did not complete: {reason}")
 +        answers = raw["answers"]
 +        if set(answers) != set(wire):
 +            raise ValueError("Response question IDs differ from the requested question IDs")
@@ -171,7 +180,7 @@ index 0000000..4959168
 +    def close(self):
 +        self.client.close()
 diff --git a/run.py b/run.py
-index b33e218..a72fe33 100644
+index b33e218..7407501 100644
 --- a/run.py
 +++ b/run.py
 @@ -23,6 +23,7 @@ def main(argv: list[str] | None = None) -> int:
@@ -182,6 +191,15 @@ index b33e218..a72fe33 100644
      parser.add_argument("--limit", type=int, help="Run the first N cases in case-ID order")
      parser.add_argument("--workers", type=int, default=4, help="Concurrent cases (default: 4)")
      parser.add_argument(
+@@ -38,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
+     )
+     parser.add_argument("--base-url", help="TypeSafe endpoint override")
+     parser.add_argument("--timeout", type=float, default=600, help="Request timeout in seconds")
+-    parser.add_argument("--max-output-tokens", type=int, default=64000)
++    parser.add_argument("--max-output-tokens", type=int, help="Trida reasoning budget (default 2048, maximum 4096); other providers default 64000")
+     parser.add_argument("--retry-errors", action="store_true", help="Rerun failed cases")
+     parser.add_argument(
+         "--dry-run", action="store_true", help="Download and check inputs without model calls or run outputs"
 @@ -55,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
              timeout_s=args.timeout,
              max_output_tokens=args.max_output_tokens,

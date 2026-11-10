@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Serve a Trida decision checkpoint: typed decisions and chat from one engine, one copy of the weights.
 
-  POST /v1/decide            {"request": {"state": ..., "questions": {...}}, "reasoning": false, "temperature": null}
+  POST /v1/decide            {"request": {"state": ..., "questions": {...}}, "reasoning": false, "temperature": null, "max_reasoning_tokens": 768}
+                             max_reasoning_tokens: 1..4096 (default 768), also limited by prompt + context.
                              -> {"answers": {qid: answer}, "timing_ms": ...} (+ "reasoning" when reasoning=true)
   POST /v1/chat/completions  OpenAI-compatible, streaming or not; `tools` supported (tool calls parsed from the
                              model's <tool_call> blocks); the thinking is returned as reasoning_content; honours
@@ -150,7 +151,7 @@ def create_app(engine):
     from fastapi import Body, FastAPI, HTTPException
     from fastapi.responses import StreamingResponse
 
-    from decide_request import RequestError
+    from decide_request import MAX_REASONING_TOKENS, RequestError
 
     name = os.path.basename(os.path.normpath(engine.ckpt))
     app = FastAPI(title="Trida decisions")
@@ -166,11 +167,11 @@ def create_app(engine):
     @app.post("/v1/decide")
     async def decide(body: dict = Body(...)):
         if "request" not in body:
-            raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float}")
+            raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float, \"max_reasoning_tokens\"?: int (1..4096; default 768)}")
         try:
             budget = _num(body, "max_reasoning_tokens", 768, int)
-            if budget <= 0:
-                raise HTTPException(400, "max_reasoning_tokens must be positive")
+            if not 1 <= budget <= MAX_REASONING_TOKENS:
+                raise HTTPException(400, f"max_reasoning_tokens must be between 1 and {MAX_REASONING_TOKENS}")
             # Images use the shared request contract; server file paths are not accepted.
             return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
                                         max_reasoning_tokens=budget)

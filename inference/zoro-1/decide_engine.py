@@ -35,7 +35,7 @@ import time
 import torch
 import torch.nn as nn
 
-from decide_request import MAX_IMAGE_PIXELS, VISION, image_input, parse, prompt, with_reasoning, to_answer
+from decide_request import RequestError, MAX_IMAGE_PIXELS, VISION, image_input, parse, prompt, with_reasoning, to_answer
 
 END_THINK = "</think>"
 # Serving temperatures: logits are divided by T before the softmax. Fit T per checkpoint on held-out calibration
@@ -113,6 +113,7 @@ class DecideEngine:
         import sglang as sgl
         from transformers import AutoTokenizer
         self.ckpt, self.reasoning_temperature = ckpt, reasoning_temperature
+        self.context_length = context_length
         self.tok = AutoTokenizer.from_pretrained(ckpt)
         self.proc = load_image_processor(ckpt)
         saved = torch.load(os.path.join(ckpt, "jev_head.pt"), map_location="cpu")
@@ -165,8 +166,18 @@ class DecideEngine:
         extra = {}
         if reasoning:
             img = parse(request, image).image   # fail fast on a bad request, before generating
-            text = "".join([p async for p in self.athink_stream(request, max_reasoning_tokens, image=img)]).strip()
-            extra = {"reasoning": text, "reasoning_ms": round((time.perf_counter() - t0) * 1000, 1)}
+            pieces, stats = [], {}
+            async for part in self._athink_events(request, max_reasoning_tokens, image=img):
+                if isinstance(part, dict):
+                    stats = part
+                else:
+                    pieces.append(part)
+            text = "".join(pieces).strip()
+            extra = {"reasoning": text, "reasoning_stats": stats,
+                     "reasoning_ms": round((time.perf_counter() - t0) * 1000, 1)}
+            if stats.get("finish_reason") == "length":
+                return {"answers": {}, "cut": "length",
+                        "timing_ms": round((time.perf_counter() - t0) * 1000, 1), **extra}
             request = with_reasoning(request, text)
         req = parse(request, image)
         enc = req.encode(self.tok, self.proc)
@@ -211,7 +222,17 @@ class DecideEngine:
             yield piece, chunk.get("meta_info", {})
 
     async def athink_stream(self, request, max_new_tokens=768, image=None):
-        """The model's reasoning about a request, streamed; stops at </think>."""
+        """The model's reasoning text, streamed; stops at </think>."""
+        async for part in self._athink_events(request, max_new_tokens, image):
+            if isinstance(part, str):
+                yield part
+
+    async def _athink_events(self, request, max_new_tokens=768, image=None):
+        """Reasoning text followed by finish metadata; no shared per-request state."""
+        from decide_request import MAX_REASONING_TOKENS
+        if type(max_new_tokens) is not int or not 1 <= max_new_tokens <= MAX_REASONING_TOKENS:
+            raise RequestError(f"max_reasoning_tokens must be between 1 and {MAX_REASONING_TOKENS}")
+        image_tokens = 0
         if image is None:
             text = self.tok.apply_chat_template([{"role": "user", "content": prompt(request)}], tokenize=False,
                                                 add_generation_prompt=True)
@@ -219,14 +240,22 @@ class DecideEngine:
         else:   # the image first, one placeholder, which the engine expands
             messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt(request)}]}]
             text = self.tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            _, grid, _ = image_input(image, self.proc, MAX_IMAGE_PIXELS, None)
+            _, grid, image_tokens = image_input(image, self.proc, MAX_IMAGE_PIXELS, None)
             kw = {"image_data": self._sized(image, grid)}
         params = {"max_new_tokens": max_new_tokens, "temperature": self.reasoning_temperature, "top_p": 0.95,
                   "top_k": 20, "stop_token_ids": self._stops}
-        async for piece, _ in self._astream(self.tok(text).input_ids, params, **kw):
+        ids = self.tok(text).input_ids
+        prompt_tokens = len(ids) + max(0, image_tokens - 1)
+        if prompt_tokens + max_new_tokens > self.context_length:
+            raise RequestError(f"reasoning prompt ({prompt_tokens} tokens) plus max_reasoning_tokens "
+                               f"({max_new_tokens}) exceeds context length {self.context_length}")
+        meta = {}
+        async for piece, meta in self._astream(ids, params, **kw):
             piece = piece.replace(END_THINK, "")
             if piece:
                 yield piece
+        yield {"finish_reason": self._finish(meta), "prompt_tokens": prompt_tokens,
+               "completion_tokens": meta.get("completion_tokens", 0)}
 
     def _chat_request(self, messages, tools, max_new_tokens, temperature, top_p, top_k, presence_penalty,
                       enable_thinking):

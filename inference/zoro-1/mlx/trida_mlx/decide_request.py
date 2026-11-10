@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 
 SPECIAL = ["<|fim_prefix|>", "<|fim_middle|>", "<|box_start|>", "<|box_end|>", "<|fim_suffix|>"]  # state q opt /opt decide
 VISION = ["<|vision_start|>", "<|image_pad|>", "<|vision_end|>"]
+MAX_REASONING_TOKENS = 4096
 MAX_STATE, MAX_BRANCH = 7552, 8192   # state tokens, and state + one question, as in training
 MAX_IMAGE_PIXELS = 448 * 448
 MAX_OPTIONS = 255
