@@ -67,7 +67,7 @@ struct SettingsView: View {
                     .keyboardShortcut(.defaultAction)
             }
             Toggle("Log requests and raw model output", isOn: $state.logRequests)
-            Text("One JSON file per request in ~/Library/Logs/Zoro-1 Chat/requests (Server → Open Request Logs): the messages sent, the model's raw text before tool-call parsing, and the parsed result.")
+            Text("One JSON file per request in ~/Library/Logs/Zoro-1 Chat/requests (Server → Open Request Logs): the messages sent, the model's raw text before tool-call parsing, and the parsed result. They hold whole chats, file contents and tool output in plain text; logs older than 7 days are deleted when the server starts.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("Port, block size, context length, logging and the server's sampling defaults apply when the server restarts.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -121,7 +121,7 @@ struct SettingsView: View {
             Toggle("Run read-only commands without asking (ls, cat, grep, git status/log/diff, …)",
                    isOn: $state.autoApproveReadOnlyShell)
                 .disabled(!state.settings.allowShell)
-            Text("Each chat has its own terminal: the working directory and exported variables carry over between commands (it starts in the workspace). Commands run with your user's permissions; anything that is not clearly read-only asks first. Timeout 300 s by default, up to 30 min; long output keeps its start and end.")
+            Text("Each chat has its own terminal: the working directory and exported variables carry over between commands (it starts in the workspace). Read-only commands that run without asking are sandboxed (no network, no writes, nothing in your home folder outside the workspace); anything that is not clearly read-only asks first and then runs with your user's permissions. Timeout 300 s by default, up to 30 min; long output keeps its start and end.")
                 .font(.caption).foregroundStyle(.secondary)
             Picker("Approvals", selection: $state.autoMode) {
                 Text("Manual: ask before every write, command and screenshot").tag(false)

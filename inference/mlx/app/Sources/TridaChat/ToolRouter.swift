@@ -102,7 +102,7 @@ extension AppState {
         if top.key == "answer" {
             return ToolRoute(allowed: [], note: "Tools: none (answer \(f(top.p))\(how))")
         }
-        // the top kind, plus any other tool kind at 0.2 or more ("answer" adds nothing)
+        // the top kind, plus any other tool kind at 0.15 or more ("answer" adds nothing)
         let picked = ranked.enumerated().filter { $0.offset == 0 || ($0.element.p >= 0.15 && $0.element.key != "answer") }
             .map(\.element)
         var allowed = Set<String>()

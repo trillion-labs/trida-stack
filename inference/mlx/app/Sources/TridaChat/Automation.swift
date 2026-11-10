@@ -45,6 +45,14 @@ final class AutomationServer: @unchecked Sendable {
         params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: Self.port)!)
         let l = try NWListener(using: params)
         l.newConnectionHandler = { [weak self] c in self?.accept(c) }
+        // start() returns before the port is bound: report a failure (port in use) in Settings
+        l.stateUpdateHandler = { [weak self] st in
+            guard case let .failed(error) = st else { return }
+            Task { @MainActor [weak self] in
+                self?.state?.automationError = "Could not listen on 127.0.0.1:\(Self.port): \(error.localizedDescription)"
+                self?.stop()
+            }
+        }
         l.start(queue: queue)
         listener = l
     }
@@ -66,12 +74,17 @@ final class AutomationServer: @unchecked Sendable {
             guard let self else { return }
             var b = buf
             if let data { b.append(data) }
-            if let req = Request(b) {
+            switch HTTPRequest.parse(b) {
+            case let .ok(req):
                 self.handle(req) { status, obj in self.respond(c, status, obj) }
-            } else if done || err != nil || b.count > 32 << 20 {
-                c.cancel()
-            } else {
-                self.read(c, b)
+            case .bad:
+                self.respond(c, 400, ["error": "bad request"])
+            case .needMore:
+                if done || err != nil || b.count > HTTPRequest.maxBody + (64 << 10) {
+                    c.cancel()
+                } else {
+                    self.read(c, b)
+                }
             }
         }
     }
@@ -85,39 +98,8 @@ final class AutomationServer: @unchecked Sendable {
         c.send(content: Data(head.utf8) + body, completion: .contentProcessed { _ in c.cancel() })
     }
 
-    struct Request {
-        var method: String
-        var path: String
-        var headers: [String: String]
-        var body: Data
-
-        /// Parses a complete request, or nil while bytes are still missing.
-        init?(_ d: Data) {
-            guard let end = d.range(of: Data("\r\n\r\n".utf8)) else { return nil }
-            let head = String(decoding: d[..<end.lowerBound], as: UTF8.self).split(separator: "\r\n").map(String.init)
-            guard let first = head.first else { return nil }
-            let parts = first.split(separator: " ").map(String.init)
-            guard parts.count >= 2 else { return nil }
-            method = parts[0]
-            path = parts[1]
-            var h: [String: String] = [:]
-            for line in head.dropFirst() {
-                if let i = line.firstIndex(of: ":") {
-                    h[line[..<i].lowercased()] = line[line.index(after: i)...].trimmingCharacters(in: .whitespaces)
-                }
-            }
-            headers = h
-            let n = Int(h["content-length"] ?? "0") ?? 0
-            let start = end.upperBound
-            guard d.count - start >= n else { return nil }
-            body = d[start..<(start + n)]
-        }
-
-        var json: [String: Any] { (try? JSONSerialization.jsonObject(with: body) as? [String: Any]) ?? [:] }
-    }
-
-    private func handle(_ r: Request, _ reply: @escaping @Sendable (Int, Any) -> Void) {
-        guard r.headers["authorization"] == "Bearer \(token)" else {
+    private func handle(_ r: HTTPRequest, _ reply: @escaping @Sendable (Int, Any) -> Void) {
+        guard r.hasBearer(token) else {
             return reply(401, ["error": "missing or wrong token (\(Self.tokenFile.path))"])
         }
         let parts = r.path.split(separator: "/").map(String.init)

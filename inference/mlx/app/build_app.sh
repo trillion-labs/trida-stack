@@ -20,6 +20,7 @@ HERE="$PWD"
 MLX_DIR="$(cd .. && pwd)"
 VERSION=0.6.0
 PYVER=3.12
+PYPATCH=3.12.16   # the exact CPython bundled; bump on purpose (uv python list 3.12)
 
 BUNDLE=0; ZIP=0; DMG=0; INSTALL=0
 for a in "$@"; do
@@ -49,6 +50,9 @@ MIN_MACOS=14.0
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/TridaChat"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# the app redistributes this repo's code (and, with --bundle, CPython and the PyPI packages, whose own
+# licence files ship inside their dist-info directories): carry the repo's licence and notices
+cp "$MLX_DIR/../../LICENSE" "$MLX_DIR/../../NOTICE" "$APP/Contents/Resources/"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -79,18 +83,16 @@ if (( BUNDLE )); then
   PYDIR="$APP/Contents/Resources/python"
   PY="$PYDIR/bin/python3"
 
-  echo "==> bundling a relocatable CPython $PYVER (python-build-standalone, via uv)"
+  echo "==> bundling a relocatable CPython $PYPATCH (python-build-standalone, via uv)"
   # Ignore any active conda / virtualenv: only uv's own standalone CPython is relocatable.
   unset CONDA_PREFIX CONDA_DEFAULT_ENV VIRTUAL_ENV PYTHONHOME PYTHONPATH
   export UV_PYTHON_PREFERENCE=only-managed
-  uv python install "$PYVER"
+  uv python install "$PYPATCH"
   UV_PY_DIR="$(uv python dir)"
-  PREFIX=""
-  for d in "$UV_PY_DIR"/cpython-"$PYVER".*-macos-aarch64-none; do
-    [[ -x "$d/bin/python$PYVER" ]] && PREFIX="$d"   # glob is sorted, so the newest patch wins
-  done
-  if [[ -z "$PREFIX" || -e "$PREFIX/conda-meta" ]]; then
-    echo "could not find uv's standalone CPython $PYVER under $UV_PY_DIR" >&2
+  # one exact build: a glob over 3.12.* sorts lexically (3.12.9 after 3.12.10) and can pick another one
+  PREFIX="$UV_PY_DIR/cpython-$PYPATCH-macos-aarch64-none"
+  if [[ ! -x "$PREFIX/bin/python$PYVER" || -e "$PREFIX/conda-meta" ]]; then
+    echo "could not find uv's standalone CPython $PYPATCH under $UV_PY_DIR" >&2
     exit 1
   fi
   echo "    using $PREFIX"
@@ -99,22 +101,28 @@ if (( BUNDLE )); then
 
   echo "==> installing trida_mlx and its locked dependencies"
   REQ="$(mktemp -t zoro-requirements)"
-  (cd "$MLX_DIR" && uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt -o "$REQ" >/dev/null)
+  # with uv.lock's hashes: pip then installs exactly the locked files (--require-hashes)
+  (cd "$MLX_DIR" && uv export --frozen --no-dev --no-emit-project --format requirements-txt -o "$REQ" >/dev/null)
   # uv.lock also resolves Linux (CI) packages; drop the Linux-only MLX backends even if an older uv
-  # wrote them without their platform marker (they have no macOS wheels).
-  grep -vE '^(mlx-cpu|mlx-cuda[-0-9]*)==' "$REQ" > "$REQ.mac" && mv "$REQ.mac" "$REQ"
+  # wrote them without their platform marker (they have no macOS wheels). Each entry spans its
+  # `name==version` line and the indented `--hash` lines under it.
+  awk '/^[^ #]/ { skip = ($0 ~ /^(mlx-cpu|mlx-cuda[-0-9]*)==/) } !skip' "$REQ" > "$REQ.mac" && mv "$REQ.mac" "$REQ"
   "$PY" -m pip --version >/dev/null 2>&1 || "$PY" -m ensurepip --default-pip >/dev/null
-  PIP=("$PY" -m pip install -q --progress-bar off --no-cache-dir --disable-pip-version-check --no-warn-script-location)
+  # --isolated: ignore this machine's pip config and PIP_* variables (an extra index could swap a package)
+  PIP=("$PY" -m pip install --isolated -q --progress-bar off --no-cache-dir --disable-pip-version-check
+       --no-warn-script-location)
   # MLX ships one wheel per macOS release (macosx_14_0, 15_0, 26_0), and pip picks the newest one this build Mac
   # can run. Bundled from macOS 26, that wheel fails to load on older systems ("Symbol not found … built for
   # macOS 26.2 which is newer than running OS"). Install the macOS-specific packages for MIN_MACOS instead; the
-  # rest of the export is locked and complete, so it goes in without dependency resolution.
+  # rest of the export is locked and complete, so it goes in without dependency resolution. Each entry spans its
+  # `name==version` line and the indented `--hash` lines under it, so the split goes by entry, not by line.
   PER_OS='^(mlx|mlx-metal)=='
-  grep -E "$PER_OS" "$REQ" > "$REQ.os"
-  grep -vE "$PER_OS" "$REQ" > "$REQ.rest"
-  "${PIP[@]}" --no-deps -r "$REQ.rest"
+  awk -v re="$PER_OS" '/^[^ #]/ { os = ($0 ~ re) } os' "$REQ" > "$REQ.os"
+  awk -v re="$PER_OS" '/^[^ #]/ { os = ($0 ~ re) } !os' "$REQ" > "$REQ.rest"
+  "${PIP[@]}" --require-hashes --no-deps -r "$REQ.rest"
   SITE="$("$PY" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
-  "${PIP[@]}" --no-deps --only-binary=:all: --platform "macosx_${MIN_MACOS/./_}_arm64" --target "$SITE" -r "$REQ.os"
+  "${PIP[@]}" --require-hashes --no-deps --only-binary=:all: --platform "macosx_${MIN_MACOS/./_}_arm64" \
+    --target "$SITE" -r "$REQ.os"
   "${PIP[@]}" --no-deps "$MLX_DIR"
   rm -f "$REQ" "$REQ.os" "$REQ.rest"
 

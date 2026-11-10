@@ -207,7 +207,8 @@ final class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(toolRouting.rawValue, forKey: "TridaChat.toolRouting") }
     }
 
-    /// run_shell: run read-only commands (ls, cat, git status, …) without asking.
+    /// run_shell: run read-only commands (ls, cat, git status, …) without asking, in the sandbox (no network, no
+    /// writes, nothing of the home directory outside the workspace; `ShellSession.sandboxProfile`).
     @Published var autoApproveReadOnlyShell = UserDefaults.standard.object(forKey: "TridaChat.autoReadOnlyShell") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoApproveReadOnlyShell, forKey: "TridaChat.autoReadOnlyShell") }
     }
@@ -218,7 +219,9 @@ final class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(reviewReplies, forKey: "TridaChat.reviewReplies") }
     }
 
-    @Published var logRequests = UserDefaults.standard.object(forKey: "TridaChat.logRequests") as? Bool ?? true {
+    /// Off unless asked for: the logs hold whole chats, file contents and tool output in plain text (the server
+    /// deletes ones older than 7 days at start).
+    @Published var logRequests = UserDefaults.standard.object(forKey: "TridaChat.logRequests") as? Bool ?? false {
         didSet { UserDefaults.standard.set(logRequests, forKey: "TridaChat.logRequests") }
     }
 
@@ -241,12 +244,8 @@ final class AppState: ObservableObject {
         // One-time move to the tool-use sampling defaults (temperature 0.6, top-k 20) for
         // settings saved by earlier builds with temperature 1.0.
         // One-time move to a 64K reply budget (thinking + answer) for settings saved with the old 4,096.
-        // One-time: run_shell is on by default (read-only commands run without asking, the rest ask).
-        if !UserDefaults.standard.bool(forKey: "TridaChat.shellDefaultOn") {
-            settings.allowShell = true
-            settings.save()
-            UserDefaults.standard.set(true, forKey: "TridaChat.shellDefaultOn")
-        }
+        // run_shell is on by default for new settings (AppSettings.allowShell); saved settings keep the user's
+        // choice, since an earlier default and a deliberate "off" look the same.
         // One-time move to a 128K context for settings saved with an earlier default.
         if !UserDefaults.standard.bool(forKey: "TridaChat.context128k") {
             if settings.contextLength < 131072 { settings.contextLength = 131072 }
@@ -372,6 +371,8 @@ final class AppState: ObservableObject {
             // locate_files keeps a folder's file list cached between searches: ~150 MB per 40 files on q8,
             // so 1.5 GB holds a ~400-file folder (plus the chat-history prefixes the app's decisions share)
             extra += ["--decision-cache-mb", "1536"]
+            // keep MLX's pool of freed buffers small (its default is close to the memory limit)
+            extra += ["--mlx-cache-limit-mb", "1024"]
             if cfg.genBlock > 0 { extra += ["--gen-block", String(cfg.genBlock)] }
             do {
                 try server.start(.init(runtime: runtime, model: model.url, port: cfg.port,
@@ -889,7 +890,7 @@ final class AppState: ObservableObject {
                 if call.name == "write_file", let p = call.argumentDict["path"] as? String, let url = try? tools.path(p) {
                     undo = try? FileUndo.snapshot(url)
                 }
-                let output = await tools.run(call)
+                let output = await tools.run(call, sandboxed: readOnlyShell)
                 result = output.text
                 // Many web lookups without an answer: say so, so the model stops searching and reports.
                 // A search for none of the user's words: usually a name romanized or translated wrong. Say so.

@@ -25,9 +25,8 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import mlx.core as mx
-
-from .decision import Decider, DecisionError, StateCache
+from .decision import Decider
+from .decide_request import RequestError as DecisionError, parse as parse_decision
 from .decode import DecodeStats, SamplingParams
 from .engine import Engine, IncrementalDetokenizer
 from .parsing import StreamSplitter, parse_tool_calls, split_reasoning, to_openai_tool_calls
@@ -310,9 +309,9 @@ class _Worker(threading.Thread):
             ENGINE = Engine(**self.engine_kwargs)
             ENGINE.warmup()
             DECIDER = Decider.load(ENGINE, DEFAULTS.get("decision_text_temperature"),
-                                   DEFAULTS.get("decision_image_temperature"))
-            if DECIDER is not None and DEFAULTS.get("decision_cache_mb", 0) > 0:
-                DECIDER.state_cache = StateCache(DEFAULTS["decision_cache_mb"])
+                                   DEFAULTS.get("decision_image_temperature"),
+                                   context_length=DEFAULTS["context_length"],
+                                   cache_mb=DEFAULTS.get("decision_cache_mb", 1024))
         except BaseException as e:  # noqa: BLE001
             self.error = e
             self.ready.set()
@@ -321,7 +320,7 @@ class _Worker(threading.Thread):
         while True:
             job = self.jobs.get()
             if job.cancelled:
-                job.out.put(("done", DecodeStats(finish_reason="cancelled")))
+                job.out.put(("done", None if isinstance(job, _FnJob) else DecodeStats(finish_reason="cancelled")))
                 continue
             try:
                 job.run()
@@ -381,11 +380,10 @@ class Handler(BaseHTTPRequestHandler):
                 "decision": DECIDER is not None,
                 # generation guards this server runs with (record them with eval / speedrun results)
                 "loop_guard": bool(DEFAULTS.get("loop_guard")), "tool_call_gate": DEFAULTS.get("tool_call_gate", 0.0),
-                "decision_temperatures": ({k: DECIDER.temps[k] for k in ("text", "image")} if DECIDER else None),
-                "decision_cache": (DECIDER.state_cache.stats() if DECIDER and DECIDER.state_cache else None),
-                "memory_mb": {k: round(f() / 2**20) for k, f in (("active", mx.get_active_memory),
-                                                                  ("pool", mx.get_cache_memory),
-                                                                  ("peak", mx.get_peak_memory))}}
+                "decision_cache": {"max_bytes": DECIDER.cache_bytes} if DECIDER else None,
+                "mlx_cache_limit_mb": DEFAULTS.get("mlx_cache_limit_mb"),
+                "memory_mb": _memory_mb(),
+                "decision_temperatures": ({k: DECIDER.temps[k] for k in ("text", "image")} if DECIDER else None)}
 
     def do_GET(self):
         path = self.path.split("?")[0].rstrip("/")
@@ -405,14 +403,21 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n) or b"{}")
         except Exception as e:
             return self._json(400, {"error": {"message": f"bad json: {e}"}})
+        if isinstance(body, dict):
+            # _banned_ids, _gate, _in_think: set by the handlers below, never by a client
+            body = {k: v for k, v in body.items() if not str(k).startswith("_")}
         route = self.path.split("?")[0].rstrip("/")
         self._log_record = None
         if DEFAULTS.get("log_requests"):
             import pathlib
-            d = pathlib.Path(DEFAULTS["log_requests"]); d.mkdir(parents=True, exist_ok=True)
+            d = pathlib.Path(DEFAULTS["log_requests"])
             self._log_path = d / f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}.json"
             self._log_record = {"path": route, "body": _strip_data_urls(body)}
-            self._log_path.write_text(json.dumps(self._log_record, ensure_ascii=False, indent=1))
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+            self._write_log()
         try:
             if route in ("/v1/chat/completions", "/chat/completions"):
                 return self._chat(body)
@@ -470,17 +475,20 @@ class Handler(BaseHTTPRequestHandler):
             job.cancelled = True
             raise
 
+    def _write_log(self):
+        try:
+            self._log_path.write_text(json.dumps(self._log_record, ensure_ascii=False, indent=1))
+        except Exception:  # noqa: BLE001 - logging must never break a request
+            pass
+
     def _log_response(self, raw: str, content: str, reasoning: str, calls: list, stats: DecodeStats):
         """With --log-requests: add the model's raw output (before tool-call parsing) and what
         it was parsed into to the request's log file, so format failures can be inspected."""
         if getattr(self, "_log_record", None) is None:
             return
-        try:
-            self._log_record["response"] = {"raw": raw, "content": content, "reasoning": reasoning,
-                                            "tool_calls": calls, "stats": stats.as_dict()}
-            self._log_path.write_text(json.dumps(self._log_record, ensure_ascii=False, indent=1))
-        except Exception:  # noqa: BLE001 - logging must never break a request
-            pass
+        self._log_record["response"] = {"raw": raw, "content": content, "reasoning": reasoning,
+                                        "tool_calls": calls, "stats": stats.as_dict()}
+        self._write_log()
 
     def _usage(self, stats: DecodeStats):
         return {"prompt_tokens": stats.prompt_tokens, "completion_tokens": stats.new_tokens,
@@ -501,8 +509,12 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 # a tool call only where the model is reasonably sure of it (see SamplingParams.gate)
                 thr = body.get("tool_call_min_prob", DEFAULTS.get("tool_call_gate", 0.0))
-                if thr and float(thr) > 0:
-                    body["_gate"] = [(tc, float(thr))]
+                try:
+                    thr = _probability(thr)
+                except (TypeError, ValueError) as e:
+                    raise BadRequest(f"tool_call_min_prob: {e}")
+                if thr > 0:
+                    body["_gate"] = [(tc, thr)]
         kw = {k: v for k, v in (body.get("chat_template_kwargs") or {}).items() if k != "enable_thinking"}
         prompt_text = ENGINE.render(messages, tools=tools, enable_thinking=_thinking(body), **kw)
         try:
@@ -526,7 +538,8 @@ class Handler(BaseHTTPRequestHandler):
             msg = {"role": "assistant", "content": content or (None if calls else "")}
             if reasoning:
                 msg["reasoning_content"] = reasoning
-            finish = "stop" if stats.finish_reason == "repetition" else stats.finish_reason
+            # the loop guard cut the reply short: report it as cut ("length"), not as a natural end
+            finish = "length" if stats.finish_reason == "repetition" else stats.finish_reason
             if calls:
                 msg["tool_calls"] = to_openai_tool_calls(calls)
                 finish = "tool_calls"
@@ -558,7 +571,8 @@ class Handler(BaseHTTPRequestHandler):
         if getattr(self, "_log_record", None) is not None:
             r, c = split_reasoning(raw, started_in_think)
             self._log_response(raw, parse_tool_calls(c, tools)[0] if tools else c, r, calls, stats)
-        finish = "stop" if stats.finish_reason == "repetition" else stats.finish_reason
+        # the loop guard cut the reply short: report it as cut ("length"), not as a natural end
+        finish = "length" if stats.finish_reason == "repetition" else stats.finish_reason
         if calls:
             tcs = to_openai_tool_calls(calls)
             chunk({"tool_calls": [dict(tc, index=i) for i, tc in enumerate(tcs)]})
@@ -570,19 +584,21 @@ class Handler(BaseHTTPRequestHandler):
         self._sse("[DONE]")
 
     def _decide(self, body: dict):
-        """POST /v1/decide: {"state", "questions", "image"? (data URL / http(s) URL / path),
-        "max_image_pixels"?, "reasoning": "auto" | "always" | "never" (default "auto"),
-        "threshold"? (0.7), "max_reasoning_tokens"? (8192), "temperature"? (decision temperature),
-        "trida_mode"? (reasoning decode mode), "stream"? (SSE events "direct", "reasoning", "result")}."""
+        """The SGLang envelope plus optional auto reasoning and SSE progress."""
         if DECIDER is None:
-            raise BadRequest("this checkpoint has no decision head (jev_head.pt next to the weights); "
-                             "download it from the model's Hugging Face repo into the model folder")
-        request = {k: body[k] for k in ("state", "questions", "max_image_pixels") if k in body}
-        image = body.get("image")
-        kw = dict(reasoning=body.get("reasoning", "auto"), threshold=float(body.get("threshold", 0.7)),
-                  max_reasoning_tokens=int(body.get("max_reasoning_tokens", 8192)),
-                  temperature=body.get("temperature"), mode=body.get("trida_mode"))
-        job = _FnJob(lambda emit: DECIDER.decide_or_reason(request, image, on_event=emit, **kw))
+            raise BadRequest("this checkpoint has no decision head (jev_head.pt or jev_head.safetensors)")
+        if not isinstance(body, dict) or "request" not in body:
+            raise BadRequest('body must be {"request": {...}, "reasoning"?: bool | "auto"}')
+        if not isinstance(body.get("stream", False), bool):
+            raise BadRequest("stream must be a boolean")
+        try:
+            parse_decision(body["request"], allow_paths=False)
+        except DecisionError as error:
+            raise BadRequest(str(error)) from error
+        kw = dict(reasoning=body.get("reasoning", False), threshold=body.get("threshold", 0.7),
+                  max_reasoning_tokens=body.get("max_reasoning_tokens"),
+                  temperature=body.get("temperature"), mode=body.get("trida_mode"), allow_paths=False)
+        job = _FnJob(lambda emit: DECIDER.decide(body["request"], on_event=emit, **kw))
         WORKER.submit(job)
         if not body.get("stream"):
             while True:
@@ -592,7 +608,7 @@ class Handler(BaseHTTPRequestHandler):
                 if kind == "done":
                     if getattr(self, "_log_record", None) is not None:
                         self._log_record["response"] = val[0]
-                        self._log_path.write_text(json.dumps(self._log_record, ensure_ascii=False, indent=1))
+                        self._write_log()
                     return self._json(200, val[0])
         self._sse_start()
         try:
@@ -604,7 +620,7 @@ class Handler(BaseHTTPRequestHandler):
                 if kind == "done":
                     if val[0] is not None and getattr(self, "_log_record", None) is not None:
                         self._log_record["response"] = val[0]
-                        self._log_path.write_text(json.dumps(self._log_record, ensure_ascii=False, indent=1))
+                        self._write_log()
                     break
                 ev, payload = val
                 if ev == "piece":
@@ -639,6 +655,36 @@ class Handler(BaseHTTPRequestHandler):
         self._sse("[DONE]")
 
 
+def _probability(x):
+    """A probability in [0, 1] (argparse type and per-request check)."""
+    p = float(x)
+    if not 0.0 <= p <= 1.0:          # also rejects nan
+        raise ValueError(f"must be a probability in [0, 1], got {x!r}")
+    return p
+
+
+_probability.__name__ = "probability"   # argparse names the type in its error message
+
+
+def _memory_mb():
+    import mlx.core as mx
+    mb = lambda b: round(b / 2**20, 1)   # noqa: E731
+    return {"active": mb(mx.get_active_memory()), "cache": mb(mx.get_cache_memory()), "peak": mb(mx.get_peak_memory())}
+
+
+def _prune_logs(directory, keep_days):
+    """Delete request logs (the <date>-<time>-<id>.json files this server writes) older than keep_days."""
+    import pathlib
+    import re
+    cutoff = time.time() - keep_days * 86400
+    for f in pathlib.Path(directory).glob("*.json"):
+        try:
+            if re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{6}\.json", f.name) and f.stat().st_mtime < cutoff:
+                f.unlink()
+        except OSError:
+            pass
+
+
 def main(argv=None):
     global WORKER
     ap = argparse.ArgumentParser(description="OpenAI-compatible on-device Trida server (MLX)")
@@ -654,49 +700,55 @@ def main(argv=None):
     ap.add_argument("--top-k", type=int, default=50)
     ap.add_argument("--top-p", type=float, default=0.95)
     ap.add_argument("--max-tokens", type=int, default=8192, help="default output budget (capped by context)")
-    ap.add_argument("--context-length", type=int, default=131072,
-                    help="advertised + enforced context window (Hermes needs >= 64000)")
+    ap.add_argument("--context-length", type=int, default=65536,
+                    help="advertised + enforced context window (Hermes needs >= 64000; Zoro-1 Chat passes its own)")
     ap.add_argument("--served-model-name", default=None,
                     help="model id in /v1/models and responses (default: the model folder or repo name, lowercased)")
-    ap.add_argument("--tool-call-gate", type=float, default=0.0, metavar="P",
+    ap.add_argument("--tool-call-gate", type=_probability, default=0.0, metavar="P",
                     help="allow <tool_call> only where its raw (temperature-1) probability is >= P; off by default "
                          "(Zoro-1 Chat starts the server with 0.7); per request: tool_call_min_prob")
     ap.add_argument("--loop-guard", action="store_true",
                     help="stop replies that loop (one block repeated 6+ times, or mostly repeated 16-token phrases); "
                          "a loop while thinking closes the thinking and answers. Off by default so evals and "
                          "speedrun runs decode unguarded; Zoro-1 Chat turns it on")
-    ap.add_argument("--log-requests", default=None, metavar="DIR", help="dump every POST body as JSON (debugging)")
+    ap.add_argument("--log-requests", default=None, metavar="DIR",
+                    help="dump every POST body and reply as JSON (debugging). Holds whole chats, file contents and "
+                         "tool output in plain text")
+    ap.add_argument("--log-requests-keep-days", type=float, default=7, metavar="D",
+                    help="at start, delete request logs older than D days (0 keeps them all)")
+    ap.add_argument("--mlx-cache-limit-mb", type=float, default=None, metavar="MB",
+                    help="cap MLX's buffer cache (freed buffers kept for reuse); default: MLX's own limit")
     ap.add_argument("--max-image-pixels", type=int, default=1024 * 1024,
                     help="resize budget per image (every 32x32 px = 1 LM token; 1024*1024 -> <=1024 tokens)")
     ap.add_argument("--cache-slots", type=int, default=3,
                     help="conversations whose prompt cache is kept (main loop + side requests)")
     ap.add_argument("--no-think", action="store_true", help="default enable_thinking=false")
     ap.add_argument("--no-fused-gdn", action="store_true")
+    ap.add_argument("--decision-cache-mb", type=float, default=1024,
+                    help="decision state cache budget in MiB; 0 disables cross-request reuse")
     ap.add_argument("--decision-text-temperature", type=float, default=None,
                     help="divide the pointer head's logits by this for text decisions (default: the checkpoint's "
                          "temperature.json, else 1.52 from the Zoro-1 card)")
     ap.add_argument("--decision-image-temperature", type=float, default=None,
                     help="the same for requests with an image (default: temperature.json, else 1.0 = uncalibrated)")
-    ap.add_argument("--decision-cache-mb", type=float, default=1024,
-                    help="memory for reusing decision-state prefixes across requests (a file list or chat history "
-                         "many decisions share is prefilled once); 0 = off")
-    ap.add_argument("--mlx-cache-limit-mb", type=float, default=1024,
-                    help="cap on freed GPU buffers MLX keeps for reuse (its default is close to the memory limit, "
-                         "so the process can hold far more than it uses); 0 = MLX's default")
     a = ap.parse_args(argv)
     if not a.served_model_name:
         a.served_model_name = pathlib.Path(a.model.rstrip("/")).name.lower() or "trida-mlx"
+    if a.mlx_cache_limit_mb is not None:
+        import mlx.core as mx
+        mx.set_cache_limit(int(a.mlx_cache_limit_mb * 1024 * 1024))
+    if a.log_requests and a.log_requests_keep_days > 0:
+        _prune_logs(a.log_requests, a.log_requests_keep_days)
     from . import decode as _decode
     _decode._Emitter.loop_guard = a.loop_guard
     DEFAULTS.update(temperature=a.temperature, top_k=a.top_k, top_p=a.top_p, max_tokens=a.max_tokens,
                     enable_thinking=not a.no_think, context_length=a.context_length,
                     served_name=a.served_model_name, log_requests=a.log_requests,
+                    decision_cache_mb=a.decision_cache_mb,
                     decision_text_temperature=a.decision_text_temperature,
                     decision_image_temperature=a.decision_image_temperature,
-                    decision_cache_mb=a.decision_cache_mb,
-                    tool_call_gate=a.tool_call_gate, loop_guard=a.loop_guard)
-    if a.mlx_cache_limit_mb > 0:
-        mx.set_cache_limit(int(a.mlx_cache_limit_mb * 2**20))
+                    tool_call_gate=a.tool_call_gate, loop_guard=a.loop_guard,
+                    mlx_cache_limit_mb=a.mlx_cache_limit_mb)
     print(f"[trida-mlx] loading {a.model} ...", flush=True)
     WORKER = _Worker(dict(model=a.model, mode=a.mode, gen_block=a.gen_block, prefill_chunk=a.prefill_chunk,
                           prompt_cache=not a.no_prompt_cache, fused_gdn=not a.no_fused_gdn,

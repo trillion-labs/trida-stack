@@ -316,3 +316,12 @@ def test_chat_sampling_values():
         r = client.post("/v1/chat/completions", json={**MSG, **bad})
         assert r.status_code == 400 and next(iter(bad)) in r.text
     assert client.post("/v1/chat/completions", json={"messages": []}).status_code == 400
+
+
+def test_mlx_copy_of_the_request_contract_is_identical():
+    # inference/mlx ships its own copy (it installs without this repo's torch stack); the MLX suite also pins
+    # it, but CI runs only this job, so an edit to one copy alone fails here.
+    from pathlib import Path
+    here = Path(__file__).resolve().parent
+    assert (here / "mlx/trida_mlx/decide_request.py").read_bytes() == (here / "decide_request.py").read_bytes(), \
+        "copy inference/decide_request.py to inference/mlx/trida_mlx/decide_request.py"

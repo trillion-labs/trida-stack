@@ -42,15 +42,28 @@ DEFAULT_LOGS = HOME / "Library/Logs/Zoro-1 Chat/requests"
 # ---- scrubbing ---------------------------------------------------------------------------------------------
 
 _SCRUB = [
-    (re.compile(r"(?<![\w])/?Users/[^/\s\"'\\]+"), "/Users/USER"),
-    (re.compile(r"(?<![\w])/?home/[^/\s\"'\\]+"), "/home/USER"),
+    # secrets first, so a key inside a path or an email-like string is gone before the rest runs
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S), "<SECRET>"),
+    # NAME=value / "name": "value" for anything named like a key, token, secret or password (.env files,
+    # ~/.aws/credentials, JSON configs); the name stays so the text still reads as what it was
+    (re.compile(r"""(?i)\b([a-z_][a-z0-9_]*?(?:key|token|secret|password|passwd|credentials?))(["']?\s*[=:]\s*["']?)"""
+                r"""([^\s"',}]{8,})"""), r"\1\2<SECRET>"),
+    (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}"), "Bearer <SECRET>"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"), "<SECRET>"),
+    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"), "<SECRET>"),
+    (re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}"), "<SECRET>"),
+    (re.compile(r"\bAIza[0-9A-Za-z_-]{35}"), "<SECRET>"),
+    # account names in paths; not inside URLs (x.io/home/index)
+    (re.compile(r"(?<![\w.:/-])/?Users/[^/\s\"'\\]+"), "/Users/USER"),
+    (re.compile(r"(?<![\w.:/-])/?home/[^/\s\"'\\]+"), "/home/USER"),
     (re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), "<EMAIL>"),
     (re.compile(r"\bhf_[A-Za-z0-9]{20,}"), "<SECRET>"),
     (re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"), "<SECRET>"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"), "<SECRET>"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "<SECRET>"),
-    (re.compile(r"data:image/[a-z]+;base64,[A-Za-z0-9+/=]+"), "[image]"),
+
 ]
+_IMAGE = re.compile(r"data:image/[a-z]+;base64,[A-Za-z0-9+/=]+")
 
 
 _NAMES: list = []   # account names found in paths (/Users/<name>, /home/<name>, /mnt/.../<name>/): scrubbed everywhere
@@ -65,25 +78,28 @@ def collect_names(rows, extra=()) -> None:
     except Exception:  # noqa: BLE001
         pass
     text = json.dumps(rows, ensure_ascii=False)
-    found |= set(re.findall(r"(?:Users|home)/([A-Za-z][A-Za-z0-9._-]{2,})", text))
+    # only from paths that start a string or a word (/Users/<name>, "Users/<name>"), never from URLs
+    found |= set(re.findall(r"""(?<![\w.:/-])/?(?:Users|home)/([A-Za-z][A-Za-z0-9._-]{2,})""", text))
     common = {"user", "users", "shared", "guest", "runner", "ubuntu", "root", "admin", "home", "test", "default"}
     found = {n for n in found if n.lower() not in common and len(n) >= 3}
     _NAMES[:] = sorted(found, key=len, reverse=True)
 
 
-def scrub(x, on: bool = True):
+def scrub(x, on: bool = True, keep_images: bool = False):
     if not on:
         return x
     if isinstance(x, str):
         for pat, rep in _SCRUB:
             x = pat.sub(rep, x)
+        if not keep_images:
+            x = _IMAGE.sub("[image]", x)
         for n in _NAMES:
             x = re.sub(r"(?<![A-Za-z0-9])" + re.escape(n) + r"(?![a-z0-9])", "USER", x)
         return x
     if isinstance(x, list):
-        return [scrub(v, on) for v in x]
+        return [scrub(v, on, keep_images) for v in x]
     if isinstance(x, dict):
-        return {k: scrub(v, on) for k, v in x.items()}
+        return {k: scrub(v, on, keep_images) for k, v in x.items()}
     return x
 
 
@@ -273,13 +289,14 @@ def mine_logs(d: Path):
             continue
         path, body, resp = rec.get("path", ""), rec.get("body") or {}, rec.get("response")
         if path.endswith("/decide"):
-            qs = body.get("questions") or {}
+            request = body.get("request", body)
+            qs = request.get("questions") or {}
             keys = set(qs)
             kind = ("tool_routing" if keys in ({"need"}, {"needs_tool", "kind"}) else
                     "reply_check" if keys & {"language", "request", "complete"} else
                     "ui_click" if keys & {"click", "field"} else "other")
-            decisions.append({"log": f.name, "kind": kind, "state": body.get("state"), "questions": qs,
-                              "image": bool(body.get("image")), "answers": (resp or {}).get("answers"),
+            decisions.append({"log": f.name, "kind": kind, "state": request.get("state"), "questions": qs,
+                              "image": bool(request.get("image")), "answers": (resp or {}).get("answers"),
                               "direct": ((resp or {}).get("direct") or {}).get("answers"),
                               "escalated": (resp or {}).get("escalated"), "reasoning": (resp or {}).get("reasoning"),
                               "cut": (resp or {}).get("cut")})
@@ -345,7 +362,7 @@ def main(argv=None):
     for name, rows in files.items():
         with open(out / f"{name}.jsonl", "w", encoding="utf-8") as fh:
             for r in rows:
-                fh.write(json.dumps(scrub(r, on), ensure_ascii=False) + "\n")
+                fh.write(json.dumps(scrub(r, on, a.keep_images), ensure_ascii=False) + "\n")
         counts[name] = len(rows)
     labels = {}
     for r in tool_use:
