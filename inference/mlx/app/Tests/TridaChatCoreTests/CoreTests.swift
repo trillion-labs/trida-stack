@@ -474,7 +474,8 @@ final class FileLocatorTests: XCTestCase {
         let entries = (0..<30).map { FileLocator.Entry(path: "f\($0).txt", summary: "s", text: $0 == 7 ? "needle" : "hay") }
         var loc = FileLocator()
         loc.maxFiles = 10
-        let r = try await loc.locate("needle", in: entries, decide: Self.fakeDecide(Counter()))
+        // top: 30 returns every finalist: the fake model sees only the summaries (all "s"), so their order is a tie
+        let r = try await loc.locate("needle", in: entries, top: 30, decide: Self.fakeDecide(Counter()))
         XCTAssertEqual(r.searched, 10)
         XCTAssertTrue(FileLocator.report("needle", r, folder: ".").contains("The folder has 30 files"))
         XCTAssertTrue(r.hits.contains { $0.path == "f7.txt" })
