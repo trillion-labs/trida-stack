@@ -20,6 +20,7 @@ HERE="$PWD"
 MLX_DIR="$(cd .. && pwd)"
 VERSION=0.3.0
 PYVER=3.12
+PYPATCH=3.12.16   # the exact CPython bundled; bump on purpose (uv python list 3.12)
 
 BUNDLE=0; ZIP=0; DMG=0; INSTALL=0
 for a in "$@"; do
@@ -46,6 +47,9 @@ APP="build/Zoro-1 Chat.app"
 [[ -e "$APP" ]] && chmod -R u+w "$APP" && rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/TridaChat"
+# the app redistributes this repo's code (and, with --bundle, CPython and the PyPI packages, whose own
+# licence files ship inside their dist-info directories): carry the repo's licence and notices
+cp "$MLX_DIR/../../LICENSE" "$MLX_DIR/../../NOTICE" "$APP/Contents/Resources/"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -75,18 +79,16 @@ if (( BUNDLE )); then
   PYDIR="$APP/Contents/Resources/python"
   PY="$PYDIR/bin/python3"
 
-  echo "==> bundling a relocatable CPython $PYVER (python-build-standalone, via uv)"
+  echo "==> bundling a relocatable CPython $PYPATCH (python-build-standalone, via uv)"
   # Ignore any active conda / virtualenv: only uv's own standalone CPython is relocatable.
   unset CONDA_PREFIX CONDA_DEFAULT_ENV VIRTUAL_ENV PYTHONHOME PYTHONPATH
   export UV_PYTHON_PREFERENCE=only-managed
-  uv python install "$PYVER"
+  uv python install "$PYPATCH"
   UV_PY_DIR="$(uv python dir)"
-  PREFIX=""
-  for d in "$UV_PY_DIR"/cpython-"$PYVER".*-macos-aarch64-none; do
-    [[ -x "$d/bin/python$PYVER" ]] && PREFIX="$d"   # glob is sorted, so the newest patch wins
-  done
-  if [[ -z "$PREFIX" || -e "$PREFIX/conda-meta" ]]; then
-    echo "could not find uv's standalone CPython $PYVER under $UV_PY_DIR" >&2
+  # one exact build: a glob over 3.12.* sorts lexically (3.12.9 after 3.12.10) and can pick another one
+  PREFIX="$UV_PY_DIR/cpython-$PYPATCH-macos-aarch64-none"
+  if [[ ! -x "$PREFIX/bin/python$PYVER" || -e "$PREFIX/conda-meta" ]]; then
+    echo "could not find uv's standalone CPython $PYPATCH under $UV_PY_DIR" >&2
     exit 1
   fi
   echo "    using $PREFIX"
@@ -95,13 +97,17 @@ if (( BUNDLE )); then
 
   echo "==> installing trida_mlx and its locked dependencies"
   REQ="$(mktemp -t zoro-requirements)"
-  (cd "$MLX_DIR" && uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt -o "$REQ" >/dev/null)
+  # with uv.lock's hashes: pip then installs exactly the locked files (--require-hashes)
+  (cd "$MLX_DIR" && uv export --frozen --no-dev --no-emit-project --format requirements-txt -o "$REQ" >/dev/null)
   # uv.lock also resolves Linux (CI) packages; drop the Linux-only MLX backends even if an older uv
-  # wrote them without their platform marker (they have no macOS wheels).
-  grep -vE '^(mlx-cpu|mlx-cuda[-0-9]*)==' "$REQ" > "$REQ.mac" && mv "$REQ.mac" "$REQ"
+  # wrote them without their platform marker (they have no macOS wheels). Each entry spans its
+  # `name==version` line and the indented `--hash` lines under it.
+  awk '/^[^ #]/ { skip = ($0 ~ /^(mlx-cpu|mlx-cuda[-0-9]*)==/) } !skip' "$REQ" > "$REQ.mac" && mv "$REQ.mac" "$REQ"
   "$PY" -m pip --version >/dev/null 2>&1 || "$PY" -m ensurepip --default-pip >/dev/null
-  PIP=("$PY" -m pip install -q --progress-bar off --no-cache-dir --disable-pip-version-check --no-warn-script-location)
-  "${PIP[@]}" -r "$REQ"
+  # --isolated: ignore this machine's pip config and PIP_* variables (an extra index could swap a package)
+  PIP=("$PY" -m pip install --isolated -q --progress-bar off --no-cache-dir --disable-pip-version-check
+       --no-warn-script-location)
+  "${PIP[@]}" --require-hashes -r "$REQ"
   "${PIP[@]}" --no-deps "$MLX_DIR"
   rm -f "$REQ"
 

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- MLX server: `tool_choice: "none"` now keeps the tool schemas in the prompt and bans `<tool_call>`
+  (before, the tools were dropped from the prompt), so clients sending it (evals, Hermes) get a different
+  prompt than earlier baselines.
+
 ### Added
 
 - Shared SGLang/MLX decision requests and answer formatting, torch-free pointer-head
@@ -19,7 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   opt-in generation guards, off by default so evals and speedrun runs decode unguarded: a tool-call gate
   (`--tool-call-gate P`, a call only where its raw probability is at least P) and a loop guard
   (`--loop-guard`: exact and n-gram repeats; a loop while thinking closes the thinking and answers).
-  `/v1/models` reports both. Also `--log-requests`.
+  `/v1/models` reports both. Also `--log-requests` (old logs pruned at start, `--log-requests-keep-days`,
+  default 7), `--mlx-cache-limit-mb`, and `memory_mb` in `/v1/models`. A reply the loop guard cuts short
+  ends with `finish_reason: "length"`.
 - Zoro-1 Chat, a native macOS app for the MLX server (`inference/mlx/app`): streaming chat with decode
   stats, images, agent tools (files, a per-chat terminal, screenshots, UI control), decision-model tool
   routing, reply checks with one rewrite, `/decide`, compaction near the context limit, saved chats, and a
