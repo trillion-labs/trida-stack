@@ -80,3 +80,40 @@ def test_shared_decision_envelope_logs(tmp_path):
     assert decisions[0]["kind"] == "tool_routing"
     assert decisions[0]["state"] == request["state"] and decisions[0]["questions"] == request["questions"]
     assert decisions[0]["image"]
+
+
+# split so the repo's detect-private-key hook does not take the fake key below for a real one
+PEM = "-----{} OPENSSH " + "PRIVATE KEY-----"
+
+
+def test_scrub_catches_common_secrets():
+    # a `cat .env` / credentials dump in tool output must not reach shared training data
+    dump = ("WANDB_API_KEY=0123456789abcdef0123456789abcdef01234567\n"
+            "SIMUSER_API_KEY='my-provider-key-123'\n"
+            "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n"
+            '{"api_key": "abcdefgh12345678"}\n'
+            "Authorization: Bearer abc.DEF-123_456789\n"
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U\n"
+            "github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuvwxyz\n"
+            "xoxb-1234567890-abcdefghij\n"
+            + PEM.format("BEGIN") + "\nb3BlbnNzaC1rZXktdjEAAAAA\n" + PEM.format("END") + "\n")
+    out = datamine.scrub(dump)
+    for secret in ("0123456789abcdef", "my-provider-key", "wJalrXUtnFEMI", "abcdefgh1234", "DEF-123_456789",
+                   "eyJhbGci", "github_pat_11", "xoxb-12", "b3BlbnNzaC1rZXktdjEAAAAA"):
+        assert secret not in out, secret
+    assert "WANDB_API_KEY=" in out          # the name stays, so the example still reads as a .env file
+    # ordinary words in token counts survive
+    assert datamine.scrub('{"max_tokens": 600, "prompt_tokens": 12}') == '{"max_tokens": 600, "prompt_tokens": 12}'
+
+
+def test_names_come_from_absolute_paths_only():
+    rows = [{"text": "see https://x.io/home/index and /Users/jdoe/code"}]
+    datamine.collect_names(rows)
+    out = datamine.scrub("the index of /Users/jdoe/code, https://x.io/home/index")
+    assert "jdoe" not in out and "the index of" in out and "x.io/home/index" in out
+
+
+def test_keep_images_keeps_them_through_the_scrub():
+    url = "data:image/png;base64,iVBORw0KGgo="
+    assert datamine.scrub({"images": [url]}, keep_images=True) == {"images": [url]}
+    assert datamine.scrub({"images": [url]}) == {"images": ["[image]"]}

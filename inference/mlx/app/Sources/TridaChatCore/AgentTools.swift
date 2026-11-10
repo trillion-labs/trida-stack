@@ -17,7 +17,8 @@ public struct ToolOutput: Equatable, Sendable {
 
 /// The agent's tools, scoped to one workspace folder. Same tool set and schemas as
 /// trida_mlx/agent.py: list_dir, read_file, search_files, calculator, now, and opt-in
-/// run_shell / write_file, which always ask the user first. With a vision model: view_image
+/// run_shell / write_file, which ask the user first (except read-only run_shell commands when the user
+/// allows that; they run sandboxed, see `ShellSession.sandboxProfile`). With a vision model: view_image
 /// (an image file from the workspace) and opt-in screenshot (asks first).
 public struct AgentTools: Sendable {
     public var root: URL
@@ -191,8 +192,9 @@ public struct AgentTools: Sendable {
         return url
     }
 
-    /// Runs a tool: image tools return pictures, everything else text (see `call`).
-    public func run(_ call: ToolCall) async -> ToolOutput {
+    /// Runs a tool: image tools return pictures, everything else text (see `call`). `sandboxed`: the call runs
+    /// without the user's approval, so run_shell runs in the sandbox.
+    public func run(_ call: ToolCall, sandboxed: Bool = false) async -> ToolOutput {
         let a = call.argumentDict
         switch call.name {
         case "view_image":
@@ -221,7 +223,7 @@ public struct AgentTools: Sendable {
                 return ToolOutput(text: "error: \(error.localizedDescription)")
             }
         default:
-            return ToolOutput(text: await self.call(call))
+            return ToolOutput(text: await self.call(call, sandboxed: sandboxed))
         }
     }
 
@@ -269,7 +271,7 @@ public struct AgentTools: Sendable {
     }
 
     /// Runs a text tool and returns its result (errors are returned as text, like agent.py).
-    public func call(_ call: ToolCall) async -> String {
+    public func call(_ call: ToolCall, sandboxed: Bool = false) async -> String {
         let a = call.argumentDict
         do {
             switch call.name {
@@ -305,7 +307,8 @@ public struct AgentTools: Sendable {
                 guard allowShell else { throw ToolError.disabled("run_shell") }
                 guard let c = a["command"] as? String else { throw ToolError.missingArgument("command") }
                 let t = (a["timeout"] as? Double) ?? (a["timeout"] as? Int).map(Double.init) ?? ShellSession.defaultTimeout
-                return try await ShellSession.session(shellSession, root: root).run(c, timeout: t)
+                return try await ShellSession.session(shellSession, root: root)
+                    .run(c, timeout: t, sandboxIn: sandboxed ? root : nil)
             case "write_file":
                 guard allowWrite else { throw ToolError.disabled("write_file") }
                 guard let p = a["path"] as? String else { throw ToolError.missingArgument("path") }
@@ -372,38 +375,6 @@ public struct AgentTools: Sendable {
             }
         }
         return hits.isEmpty ? "(no matches)" : hits.joined(separator: "\n")
-    }
-
-    /// `zsh -lc command` in the workspace, 60 s timeout, last 8000 characters of output.
-    static func shell(_ command: String, cwd: URL, timeout: TimeInterval = 60) async throws -> String {
-        let outURL = FileManager.default.temporaryDirectory.appendingPathComponent("trida-shell-\(UUID().uuidString).log")
-        FileManager.default.createFile(atPath: outURL.path, contents: nil)
-        defer { try? FileManager.default.removeItem(at: outURL) }
-        let handle = try FileHandle(forWritingTo: outURL)
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        p.arguments = ["-lc", command]
-        p.currentDirectoryURL = cwd
-        p.standardOutput = handle
-        p.standardError = handle
-        p.standardInput = FileHandle.nullDevice
-        let status: Int32 = try await withCheckedThrowingContinuation { cont in
-            p.terminationHandler = { proc in cont.resume(returning: proc.terminationStatus) }
-            do {
-                try p.run()
-            } catch {
-                p.terminationHandler = nil
-                cont.resume(throwing: error)
-                return
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                if p.isRunning { p.terminate() }
-            }
-        }
-        try? handle.close()
-        let text = (try? String(contentsOf: outURL, encoding: .utf8)) ?? ""
-        let tail = String(text.suffix(8000))
-        return tail.isEmpty ? "(exit \(status))" : tail + (status == 0 ? "" : "\n(exit \(status))")
     }
 }
 

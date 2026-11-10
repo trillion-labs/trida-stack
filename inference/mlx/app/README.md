@@ -22,7 +22,10 @@ of the prompt came from the cache.
     for the model: each chat has its own, whose working directory and exported variables carry over
     between commands (it starts in the workspace). Read-only commands (`ls`, `cat`, `grep`, `find`
     without `-exec`/`-delete`, `git status`/`log`/`diff`, …, also piped or chained, with no redirection to
-    files) run without asking (Settings → Agent; on by default); everything else asks. Timeout 300 s by
+    files) run without asking (Settings → Agent; on by default), inside the macOS sandbox: no network, no
+    writes, no scripting other apps or screenshots, and of your home folder only the workspace can be read
+    (never `~/.ssh`, `~/.aws`, keychains). Everything else asks, and an approved command runs as you, outside
+    the sandbox (so it is not confined to the workspace). Timeout 300 s by
     default, up to 1,800 s per call; long output keeps its first 4,000 and last 8,000 characters;
   - with a vision model (Zoro-1, Trida-2.0-4B-1006): `view_image` (an image file in the
     workspace) and `screenshot` (main display; on by default, asks every time, and macOS asks once for
@@ -77,7 +80,9 @@ of the prompt came from the cache.
   only) lets a program use the app like a person: new chat, send a message, wait for the whole turn, read what
   happened. `trida-mlx-simuser` uses it with an LLM playing the user (persona + goal per scenario, pushing
   back on wrong replies, `[DONE]` when finished) to collect more trajectories through the real harness.
-  Approvals still show the normal sheet. Episode logs go to `~/Library/Logs/Zoro-1 Chat/simuser`.
+  Approvals still show the normal sheet. The user LLM gets your messages and the app's replies, which leave
+  this Mac for `SIMUSER_BASE_URL`; tool arguments and results do not (it sees only which tool ran and how it
+  ended). Episode logs go to `~/Library/Logs/Zoro-1 Chat/simuser`.
 - **Decision tools.** With a checkpoint that has the decision head, agent mode also offers tools
   answered by the decision model rather than by generated text, each reasoning first when its top
   probability is below 0.7: `decide_choice(question, options, context)`, `decide_yes_no(question,

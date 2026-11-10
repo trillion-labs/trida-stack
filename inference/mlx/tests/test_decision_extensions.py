@@ -53,6 +53,24 @@ def test_state_extension_and_cache_budget(decider):
     assert decider.cache_reused_tokens == 0 and not decider.state_cache
 
 
+def test_a_cycle_of_more_states_than_fit_still_hits(decider):
+    # Plain LRU evicts exactly the state needed next in a cycle (a file list searched again batch by batch), so
+    # every request is cold. Entries that were never reused go first, newest first, so most of the cycle stays.
+    states = [f"ticket {c}" for c in "ABCD"]
+    decider.clear_cache()
+    decider.decide({**REQ, "state": states[0]})
+    one = sum(c.nbytes() for c in decider.state_cache.values())
+    decider.clear_cache()
+    decider.cache_bytes = int(3.5 * one)                       # room for 3 of the 4
+    hits = []
+    for _ in range(3):
+        for s in states:
+            decider.decide({**REQ, "state": s})
+            hits.append(decider.cache_reused_tokens > 0)
+    assert sum(hits[4:]) >= 4, hits                            # passes 2 and 3: at least 2 of 4 hit each
+    assert sum(c.nbytes() for c in decider.state_cache.values()) <= decider.cache_bytes
+
+
 def test_auto_reasoning_threshold_and_cutoff(decider, monkeypatch):
     events, calls = [], []
     monkeypatch.setattr(decider, "think", lambda *a, **k: calls.append(k) or {
@@ -179,3 +197,14 @@ def test_reasoning_mode_and_progress_reason(decider, monkeypatch, reasoning, mod
         assert "below 1" in result["reason"] and result["lowest"]["question"] in result["reason"]
     else:
         assert result["reason"] == "reasoning requested"
+
+
+def test_loader_refuses_oversized_views_and_odd_zips(tmp_path):
+    import zipfile
+    # a zero stride passes the bounds check but would .copy() into a huge array (a hostile jev_head.pt)
+    with pytest.raises(ValueError, match="larger than its storage"):
+        decision._rebuild_tensor(np.zeros(2), 0, (1 << 20, 1 << 20), (0, 0))
+    with zipfile.ZipFile(tmp_path / "empty.pt", "w") as z:
+        z.writestr("archive/version", "3")
+    with pytest.raises(ValueError, match="data.pkl"):
+        decision.load_torch_file(tmp_path / "empty.pt")

@@ -228,7 +228,7 @@ class NgramLoop:
 class _Emitter:
     """Applies max_new_tokens / EOS / the loop guard to emitted chunks and records stats."""
 
-    loop_guard = False  # the server turns it on (see server.py --no-loop-guard); off for verify/bench/tests
+    loop_guard = False  # the server turns it on (server.py --loop-guard); off for verify/bench/tests
 
     def __init__(self, stats: DecodeStats, max_new: int, eos: set):
         self.stats, self.max_new, self.eos, self.done = stats, max_new, eos, False

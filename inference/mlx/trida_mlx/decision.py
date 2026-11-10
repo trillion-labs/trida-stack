@@ -37,6 +37,8 @@ def _rebuild_tensor(storage, offset, size, stride, *_):
     end = offset + sum((n - 1) * s for n, s in zip(size, stride)) if all(size) else offset - 1
     if end >= storage.size:
         raise ValueError("tensor layout exceeds its storage")
+    if math.prod(size) > storage.size:   # zero strides: a small storage viewed as a huge tensor
+        raise ValueError("tensor is larger than its storage")
     if not size:
         return storage[offset].copy()
     return np.lib.stride_tricks.as_strided(storage[offset:], shape=tuple(size),
@@ -47,7 +49,9 @@ def load_torch_file(path) -> dict:
     """Read a ``torch.save`` zip file (tensors, dicts, numbers) into numpy arrays, without torch.
     Only the plain objects a state dict holds are accepted; anything else raises."""
     with zipfile.ZipFile(path) as z:
-        pkl = next(n for n in z.namelist() if n.endswith("/data.pkl") or n == "data.pkl")
+        pkl = next((n for n in z.namelist() if n.endswith("/data.pkl") or n == "data.pkl"), None)
+        if pkl is None:
+            raise ValueError(f"{path}: not a torch.save file (no data.pkl)")
         root = pkl[: -len("data.pkl")]
 
         class _Unpickler(pickle.Unpickler):
@@ -135,6 +139,7 @@ class Decider:
             raise ValueError("decision cache size must be finite and non-negative")
         self.cache_bytes = int(cache_mb * 1024 * 1024)
         self.cache_reused_tokens = 0
+        self.reused_keys, self._hit = set(), False   # keys of cached states built on a cache hit
         if any(not math.isfinite(t) or t <= 0 for t in self.temperatures.values()):
             raise ValueError("decision temperatures must be finite and positive")
 
@@ -182,22 +187,35 @@ class Decider:
                 if found is None or len(key) > len(found):
                     found = key
         self.cache_reused_tokens = len(found) if found else 0
+        self._hit = found is not None
         cache = self.state_cache.pop(found) if found else rt.make_cache()
+        self.reused_keys.discard(found)
         if len(tokens) > cache.length:
             tail = tokens[cache.length:]
             rt.prefill(cache, tail, hidden_positions=[len(tail) - 1])
         return cache
 
     def _remember_state(self, cache):
+        """Cache `cache` under its tokens, then evict down to the budget. Entries never reused go first, newest
+        first (keeping the one just added while others are left), then reused ones, least recently used first.
+        Plain LRU would evict exactly the state a cycle needs next and never hit once the cycle outgrows the
+        budget; this keeps all but one of the cycle's states, and the chat-like case (each state extends a
+        reused one) still behaves as LRU."""
         if not self.cache_bytes:
             return
         key = tuple(cache.tokens)
         self.state_cache[key] = cache
+        if self._hit:
+            self.reused_keys.add(key)
         while sum(c.nbytes() for c in self.state_cache.values()) > self.cache_bytes:
-            self.state_cache.popitem(last=False)
+            cold = [k for k in self.state_cache if k not in self.reused_keys and k != key]
+            victim = cold[-1] if cold else next(k for k in self.state_cache if k != key or len(self.state_cache) == 1)
+            del self.state_cache[victim]
+            self.reused_keys.discard(victim)
 
     def clear_cache(self):
         self.state_cache.clear()
+        self.reused_keys.clear()
 
     def logits(self, rows):
         rt = self.engine.rt
