@@ -31,15 +31,15 @@ public struct DecisionRecord: Identifiable, Equatable, Sendable, Codable {
 
     /// The questions as asked, in order.
     var questions: [Q] {
-        guard let r = Self.object(request), let qs = r["questions"] as? [String: Any] else { return [] }
-        let order = Self.keyOrder(request, path: ["questions"])
+        guard let r = decision, let qs = r["questions"] as? [String: Any] else { return [] }
+        let order = Self.keyOrder(request, path: decisionPath + ["questions"])
         return (order.isEmpty ? Array(qs.keys).sorted() : order).compactMap { id in
             guard let q = qs[id] as? [String: Any], let t = q["type"] as? String else { return nil }
             let ins = q["instructions"] as? String ?? ""
             switch t {
             case "noul": return Q(id: id, type: t, instructions: ins, keys: ["true", "false"], labels: ["yes", "no"])
             case "choice":
-                let order = Self.keyOrder(request, path: ["questions", id, "criteria"])
+                let order = Self.keyOrder(request, path: decisionPath + ["questions", id, "criteria"])
                 let c = q["criteria"] as? [String: Any] ?? [:]
                 let keys = order.isEmpty ? Array(c.keys).sorted() : order.filter { c[$0] != nil }
                 return Q(id: id, type: t, instructions: ins, keys: keys, labels: keys.map { k in
@@ -90,7 +90,7 @@ public struct DecisionRecord: Identifiable, Equatable, Sendable, Codable {
     /// kev's labelled request for the questions the user answered: {"state", "questions": {id: {type,
     /// instructions, criteria, label}}}; a yes/no label is 1 / 0, a score label the level index. nil if none.
     public func kevRecord() -> [String: Any]? {
-        guard let labels, !labels.isEmpty, let r = Self.object(request), let qs = r["questions"] as? [String: Any]
+        guard let labels, !labels.isEmpty, let r = decision, let qs = r["questions"] as? [String: Any]
         else { return nil }
         var out: [String: Any] = [:]
         for (id, key) in labels {
@@ -105,6 +105,16 @@ public struct DecisionRecord: Identifiable, Equatable, Sendable, Codable {
         guard !out.isEmpty, let state = r["state"] else { return nil }
         return ["state": state, "questions": out]
     }
+
+    /// The decision itself ({"state", "questions"}): request bodies nest it under "request" (the shared
+    /// request format); records saved by older builds have it at the top level.
+    var decision: [String: Any]? {
+        let r = Self.object(request)
+        return (r?["request"] as? [String: Any]) ?? r
+    }
+
+    /// Where `decision` sits in the request body, for reading key order from the JSON text.
+    var decisionPath: [String] { Self.object(request)?["request"] is [String: Any] ? ["request"] : [] }
 
     static func object(_ s: String) -> [String: Any]? {
         (try? JSONSerialization.jsonObject(with: Data(s.utf8))) as? [String: Any]

@@ -91,7 +91,8 @@ final class ToolTests: XCTestCase {
         XCTAssertTrue(shell.contains("not enabled"), shell)
         let w = await t.call(ToolCall(id: "5", name: "write_file", arguments: #"{"path":"sub/b.txt","content":"x"}"#))
         XCTAssertTrue(w.hasPrefix("wrote"), w)
-        XCTAssertEqual(t.specs.count, 11)
+        // list_dir read_file read_pdf find_files search_files calculator now, 4 web tools, write_file
+        XCTAssertEqual(t.specs.count, 12)
 
         // find_files by name; absolute paths inside the workspace work, outside ones are refused
         let found = await t.call(ToolCall(id: "6", name: "find_files", arguments: #"{"pattern":"*.txt"}"#))
@@ -431,7 +432,8 @@ final class FileLocatorTests: XCTestCase {
     static func fakeDecide(_ calls: Counter) -> FileLocator.Decide {
         { body, qs in
             calls.add()
-            guard case let .object(kv) = body, case let .object(st)? = kv.first(where: { $0.0 == "state" })?.1,
+            guard case let .object(outer) = body, case let .object(kv)? = outer.first(where: { $0.0 == "request" })?.1,
+                  case let .object(st)? = kv.first(where: { $0.0 == "state" })?.1,
                   case let .string(list)? = st.first(where: { $0.0 == "candidates" })?.1,
                   case let .string(query)? = st.first(where: { $0.0 == "question" })?.1 else { throw ChatClientError.badURL }
             XCTAssertEqual(st.first?.0, "candidates")                     // the list comes first: a cacheable prefix
@@ -559,6 +561,18 @@ final class DecisionRecordTests: XCTestCase {
         XCTAssertEqual((qs["need"] as? [String: Any])?["label"] as? String, "files")
         r.labels = ["ok": "false"]
         XCTAssertEqual(((r.kevRecord()?["questions"] as? [String: Any])?["ok"] as? [String: Any])?["label"] as? Int, 0)
+    }
+
+    /// The app's bodies now nest the decision under "request" (the shared request format).
+    func testNestedRequestBodiesStillGiveRowsAndRecords() throws {
+        let nested = #"{"request":{"state":{"conversation":["user: hi"]},"questions":{"need":{"type":"choice","instructions":"What does replying need?","criteria":{"files":"the user's files","answer":"answer directly"}}}},"reasoning":false}"#
+        var r = DecisionRecord(kind: "Tool routing", request: nested, response: response)
+        XCTAssertEqual(r.rows.map(\.id), ["need"])
+        XCTAssertEqual(r.rows[0].options.map(\.key), ["files", "answer"])      // the body's order, not sorted
+        r.labels = ["need": "answer"]
+        let k = try XCTUnwrap(r.kevRecord())
+        XCTAssertEqual((k["state"] as? [String: Any])?["conversation"] as? [String], ["user: hi"])
+        XCTAssertEqual(((k["questions"] as? [String: Any])?["need"] as? [String: Any])?["label"] as? String, "answer")
     }
 }
 
