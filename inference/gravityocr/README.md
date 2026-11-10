@@ -196,13 +196,13 @@ MODE=causal GPU=1 PORT=30001 bash inference/gravityocr/serve.sh &   # causal on 
 
 [`getting_started.ipynb`](getting_started.ipynb) serves GravityOCR, reads a text, a table and a formula
 crop, and compares self-spec with causal decoding, in about 5–10 minutes after a one-time setup. It
-runs on Linux with an L40 or H100 (`serve.sh`) or on an Apple Silicon Mac (`serve_mac.py`, see
+runs on Linux with an L40S, L40 or H100 (`serve.sh`) or on an Apple Silicon Mac (`serve_mac.py`, see
 [On a Mac](#on-a-mac)), and is driven by environment variables:
 
 | variable | default | meaning |
 |---|---|---|
 | `BACKEND` | `auto` | `sglang` (Linux) or `mac`; `auto` picks `mac` on an Apple Silicon Mac |
-| `GPU`, `CAUSAL_GPU` | `auto` | the least-loaded L40 / H100, and a second one for the causal server if there is one (else they take turns) |
+| `GPU`, `CAUSAL_GPU` | `auto` | the least-loaded L40S / L40 / H100, and a second one for the causal server if there is one (else they take turns) |
 | `PAGE_LAYOUT` | `1` | `0` skips section 5 (a whole page with PP-DocLayoutV3; installs `torch` CPU, `transformers` ≥ 5.1 and OpenCV into the kernel) |
 | `COMPARE_CAUSAL` | `1` | `0` skips section 6 |
 | `SGLANG_SRC`, `VBIN` | `~/src/sglang-gravityocr` | where `sglang/setup.sh` built the server environment |
@@ -216,10 +216,13 @@ The first code cell checks the kernel: Python 3.10 or newer, with Pillow and mat
 whichever is missing into that kernel, with uv if there is one, so any Python ≥ 3.10 kernel works,
 including an environment that has no `pip`.
 
-**On an L40.** `serve.sh` accepts only compute capability 9.0 (H100), and the L40 is 8.9. For an L40 the
-notebook runs `serve.sh`'s other startup checks itself (a CUDA 12.x `nvcc`, `ninja` in `VBIN`) and
-passes `SKIP_PREFLIGHT=1`. The patch's vision-encoder CUDA graphs need FA3, which is Hopper-only, so
-they switch themselves off; the other `FAST=1` paths run. The recipe itself was validated on H100 only.
+**On an L40S or L40.** `serve.sh` accepts only compute capability 9.0 (H100); the L40S and the L40
+are 8.9. For them the notebook runs `serve.sh`'s other startup checks itself (a CUDA 12.x `nvcc`,
+`ninja` in `VBIN`) and passes `SKIP_PREFLIGHT=1`. The patch's vision-encoder CUDA graphs need FA3, which
+is Hopper-only, so they switch themselves off; the other `FAST=1` paths run. On an L40S (Brev
+`l40s-48gb.1x`, CUDA 12.6 at `/usr/local/cuda`) the whole notebook ran in 2.7 minutes, the first server
+start took 90 s, and self-spec was 3.5–5.7× faster than causal with identical text on all four crops.
+The L40 was not tested; it has the same compute capability and memory.
 
 ### With a coding agent
 
@@ -270,7 +273,7 @@ inference/gravityocr/
   serve.sh                   launcher: MODE=self-spec | causal, env-driven
   ocr_request.py             one-crop OpenAI-compatible client (stdlib; Pillow for --synthetic)
   serve_mac.py               Mac option: the same API on the Gravity app's MLX engine (see below)
-  getting_started.ipynb      5-10 minute tutorial; runs on an L40 / H100 or on a Mac
+  getting_started.ipynb      5-10 minute tutorial; runs on an L40S / L40 / H100 or on a Mac
   test_gravityocr_*.py       CPU tests
   sglang/
     BASE_COMMIT.txt            upstream sgl-project/sglang pin (tag v0.5.10)

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Serve GravityOCR on an Apple Silicon Mac, with the MLX engine of the installed Gravity app.
 
-serve.sh is the real server: upstream SGLang plus the GravityOCR patch, on an NVIDIA L40 or H100.
+serve.sh is the real server: upstream SGLang plus the GravityOCR patch, on an NVIDIA L40S, L40 or H100.
 This script is the Mac option for trying the model locally and for running getting_started.ipynb
 without an NVIDIA GPU. It answers the same OpenAI chat-completions requests as serve.sh (one crop, one task
 prompt, a data: image URL), so ocr_request.py and the notebook work against either.
@@ -16,7 +16,7 @@ it with Gravity's bundled Python, so run it with that interpreter:
     .../runtime/bin/python -I -B serve_mac.py --mode causal --port 30001
     .../runtime/bin/python -I -B serve_mac.py --model /path/to/checkpoint
 
-How it differs from serve.sh, so its outputs and timings are not the L40 / H100 numbers:
+How it differs from serve.sh, so its outputs and timings are not the L40S / H100 numbers:
   * MLX on the Mac GPU instead of SGLang on CUDA; text-decoder layers quantized to 6 bits (Gravity's
     setting), the vision encoder in bf16;
   * self-spec drafts blocks of 16 tokens (Gravity's setting) instead of 32;
