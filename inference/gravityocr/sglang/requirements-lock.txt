@@ -4,11 +4,11 @@
 # setup.sh installs exactly these pins, with --no-deps --no-build and nothing re-resolved, in two
 # steps, then installs SGLang itself, editable, from upstream sgl-project/sglang at BASE_COMMIT.txt
 # with gravityocr_selfspec.patch applied:
-#   1. every pin except sglang and the four +cu129 builds, from https://pypi.org/simple only;
-#   2. the four +cu129 builds, from https://download.pytorch.org/whl/cu129 only.
+#   1. every pin except sglang and the four +cu128 builds, from https://pypi.org/simple only;
+#   2. the four +cu128 builds, from https://download.pytorch.org/whl/cu128 only.
 # setup.sh enforces the two sources: it passes the index explicitly and ignores uv config files and
 # uv's index environment variables. The pins carry no hashes, so a source is trusted by its URL.
-# A single install across both indexes would pick torch 2.9.1+cu129 for "torch==2.9.1". This lock,
+# A single install across both indexes would pick torch 2.9.1+cu128 for "torch==2.9.1". This lock,
 # like the GPU-validated env it starts from (below), uses the PyPI torch 2.9.1 build. The lock itself
 # raises 11 pins above that env. A fresh setup.sh run with it on H100 (2026-10-30) gave the same greedy
 # outputs as that env on 100 OCR crops, in self-spec and causal mode.
@@ -27,7 +27,7 @@
 #     -c validated-freeze.txt \
 #     --python-version 3.12 \
 #     --python-platform x86_64-manylinux_2_28 \
-#     --extra-index-url https://download.pytorch.org/whl/cu129 \
+#     --extra-index-url https://download.pytorch.org/whl/cu128 \
 #     --index-strategy unsafe-best-match \
 #     --no-build \
 #     --no-emit-index-url \
@@ -41,8 +41,14 @@
 # requirements.in and overrides.txt unchanged it reproduces these pins.
 #
 # Python 3.12 (not trida's 3.10): filelock 4.2.4, pillow 13 and multidict 7.2 need >= 3.11.
-# Resolution needs the cu129 index (with unsafe-best-match) only for torchao, torchaudio, torchcodec
-# and torchvision. torch itself is the PyPI 2.9.1 build (CUDA 12.8 runtime).
+# Resolution needs the cu128 index (with unsafe-best-match) only for torchao, torchaudio, torchcodec
+# and torchvision. torch itself is the PyPI 2.9.1 build (CUDA 12.8 runtime), and the four builds must
+# match it: torchaudio refuses to import when its CUDA differs from torch's.
+#
+# 2026-11-11: those four moved from +cu129 to +cu128 builds of the same versions. With +cu129,
+# `import torchaudio` failed (CUDA 12.9 vs torch's 12.8) and SGLang dropped every model that imports
+# it (MiDashengLM) at startup. Checked in an x86_64 container: setup.sh installs and verifies the lock,
+# and torchaudio imports. Not yet re-run on a GPU; the H100 check above used the +cu129 builds.
 aiohappyeyeballs==2.6.2
     # via
     #   -c validated-freeze.txt
@@ -789,21 +795,21 @@ torch-memory-saver==0.0.9
     # via
     #   -c validated-freeze.txt
     #   sglang
-torchao==0.17.0+cu129
+torchao==0.17.0+cu128
     # via
     #   -c validated-freeze.txt
     #   --override overrides.txt
     #   sglang
-torchaudio==2.9.1+cu129
+torchaudio==2.9.1+cu128
     # via
     #   -c validated-freeze.txt
     #   sglang
-torchcodec==0.11.1+cu129
+torchcodec==0.11.1+cu128
     # via
     #   -c validated-freeze.txt
     #   --override overrides.txt
     #   sglang
-torchvision==0.24.1+cu129
+torchvision==0.24.1+cu128
     # via
     #   -c validated-freeze.txt
     #   sglang

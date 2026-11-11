@@ -246,10 +246,12 @@ def test_lock_and_setup_sh_name_the_base_tag():
 
 def test_lock_has_what_setup_sh_relies_on():
     pins = _pins(LOCK)
-    # setup.sh installs exactly these from the PyTorch cu129 index, everything else from PyPI
-    cu129 = sorted(n for n, v in pins.items() if v.endswith("+cu129"))
-    assert cu129 == ["torchao", "torchaudio", "torchcodec", "torchvision"]
-    assert not [n for n, v in pins.items() if "+" in v and not v.endswith("+cu129")]
+    # setup.sh installs exactly these from the PyTorch cu128 index, everything else from PyPI. They must
+    # match torch's CUDA: the PyPI torch 2.9.1 is built for CUDA 12.8, and torchaudio refuses to import
+    # when its CUDA differs ("PyTorch and TorchAudio were compiled with different CUDA versions").
+    cu128 = sorted(n for n, v in pins.items() if v.endswith("+cu128"))
+    assert cu128 == ["torchao", "torchaudio", "torchcodec", "torchvision"]
+    assert not [n for n, v in pins.items() if "+" in v and not v.endswith("+cu128")]
     # the versions setup.sh's final check asserts after the install
     checked = dict(re.findall(r'\("([a-z][a-z-]*)", "([0-9][^"]*)"\)', SETUP.read_text(encoding="utf-8")))
     assert checked == {"torch": "2.9.1", "flashinfer-python": "0.6.7.post2", "transformers": "5.3.0"}
@@ -262,7 +264,7 @@ def test_lock_has_what_setup_sh_relies_on():
 
 def test_setup_sh_installs_the_lock_without_resolving_and_from_fixed_indexes():
     installs = _setup_commands("uv pip install")
-    assert len(installs) == 3, installs  # PyPI pins, +cu129 pins, the patched SGLang
+    assert len(installs) == 3, installs  # PyPI pins, +cu128 pins, the patched SGLang
     for cmd in installs:
         for flag in ("--no-deps", "--no-config", "--default-index"):
             assert flag in cmd, f"{flag} missing from: {cmd}"

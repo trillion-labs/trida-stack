@@ -183,7 +183,7 @@ Apache-2.0 patch.
   the declared ranges for the first two; the lockfiles exist so the release SBOM describes
   something real. The GravityOCR lock is scanned as pinned (`pip-audit --no-deps
   --disable-pip`), since it targets Python 3.12 and CI runs 3.10; that mode skips the
-  four `+cu129` builds (torchvision, torchaudio, torchao, torchcodec), which PyPI does not
+  four `+cu128` builds (torchvision, torchaudio, torchao, torchcodec), which PyPI does not
   carry.
 - **GravityOCR's SGLang environment is not built in CI.** The weekly fetch-recipe job
   (`tools/verify_fetch.sh`) checks that the pinned SGLang commit resolves, that the patch

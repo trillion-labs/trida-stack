@@ -317,7 +317,7 @@ finding into a decision that comes back around.
     2.10.0, so the root and zoro-1 environments (2.11.0) are not affected. The
     inference/gravityocr/ server environment cannot take the fix: SGLang v0.5.10 pins
     torch==2.9.1 (python/pyproject.toml:66), and sglang-kernel 0.4.1, flashinfer-python
-    0.6.7.post2 and the +cu129 torchvision and torchaudio wheels are built against it.
+    0.6.7.post2 and the +cu128 torchvision and torchaudio wheels are built against it.
   mitigation: >-
     SGLang does not unpickle a checkpoint that ships safetensors. With the default load
     format it globs *.safetensors before *.bin and stops at the first pattern that matches

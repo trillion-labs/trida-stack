@@ -15,7 +15,7 @@
 #   3. Apply gravityocr_selfspec.patch (skipped when already applied) and copy the new files in python/.
 #   4. Create $SGLANG_SRC/.venv-sglang (Python $PY) and install requirements-lock.txt as is: --no-deps,
 #      --no-build, nothing re-resolved. PyPI pins first, from https://pypi.org/simple only, then the four
-#      +cu129 builds from the PyTorch cu129 index only (the lock header says why it is two steps). uv
+#      +cu128 builds from the PyTorch cu128 index only (the lock header says why it is two steps). uv
 #      config files and index variables (UV_INDEX, UV_EXTRA_INDEX_URL, UV_FIND_LINKS, ...) are ignored.
 #   5. Install the patched SGLang editable, with version 0.5.10. Upstream derives its version from git
 #      tags, which a shallow fetch does not have.
@@ -58,7 +58,7 @@ done
 PY=${PY:-3.12}
 CUDA_HOME=${CUDA_HOME:-/usr/local/cuda-12.8}
 SGLANG_REPO=${SGLANG_REPO:-https://github.com/sgl-project/sglang.git}
-CU129_INDEX=https://download.pytorch.org/whl/cu129
+CU128_INDEX=https://download.pytorch.org/whl/cu128   # torch 2.9.1 from PyPI is CUDA 12.8; its family must match
 LOCK=$HERE/requirements-lock.txt
 PATCH=$HERE/gravityocr_selfspec.patch
 SGLANG_VERSION=0.5.10
@@ -160,15 +160,15 @@ else
   log "created $VENV"
 fi
 pins=$(grep -E '^[A-Za-z0-9][A-Za-z0-9._-]*==' "$LOCK" | grep -v '^sglang==')
-pypi_pins=$(grep -v '+cu129$' <<<"$pins")
-cu129_pins=$(grep '+cu129$' <<<"$pins" || true)
+pypi_pins=$(grep -v '+cu128$' <<<"$pins")
+cu128_pins=$(grep '+cu128$' <<<"$pins" || true)
 log "installing $(wc -l <<<"$pypi_pins") locked pins from $PYPI_INDEX"
 uv pip install --no-config --python "$VENV/bin/python" --no-deps --no-build \
   --default-index "$PYPI_INDEX" -r - <<<"$pypi_pins"
-if [ -n "$cu129_pins" ]; then
-  log "installing $(wc -l <<<"$cu129_pins") locked +cu129 pins from $CU129_INDEX"
+if [ -n "$cu128_pins" ]; then
+  log "installing $(wc -l <<<"$cu128_pins") locked +cu128 pins from $CU128_INDEX"
   uv pip install --no-config --python "$VENV/bin/python" --no-deps --no-build \
-    --default-index "$CU129_INDEX" -r - <<<"$cu129_pins"
+    --default-index "$CU128_INDEX" -r - <<<"$cu128_pins"
 fi
 
 # ── 5. the patched SGLang, editable ───────────────────────────────────────────────────────────────
