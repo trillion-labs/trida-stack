@@ -188,5 +188,4 @@ Apache-2.0 patch.
 - **GravityOCR's SGLang recipe is not exercised in CI.** No job applies its patch or
   builds its environment, and the pin-drift and fetch-recipe checks cover only the
   HybridDiffusion pin, so a change to `inference/gravityocr/sglang/` needs a manual run on
-  a GPU host. `tools/check_model_card.py` reads only the Trida row of `COMPLIANCE.md` §4b,
-  so the GravityOCR and GLM-OCR rows are not re-checked against Hugging Face.
+  a GPU host.
