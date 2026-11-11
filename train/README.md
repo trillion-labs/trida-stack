@@ -177,8 +177,8 @@ remain available for existing tools. Training flags and launch commands are unch
 ### Compatibility names
 
 Use `train.data.decision`, `train.models.decision`, and `--decision_*` in new code.
-The old `train.jev`, `train.data.jev`, `train.models.jev`, and `--jev_*` names still
-work. Existing `JevRowDataset`, `pack_jev`, `load_jev_records`, `jev_loss`,
+The CLI accepts only `--decision_*`; update launch scripts that use `--jev_*`.
+The old `train.jev`, `train.data.jev`, and `train.models.jev` imports still work. Existing `JevRowDataset`, `pack_jev`, `load_jev_records`, `jev_loss`,
 `forward_jev`, and `model(..., jev=batch)` calls remain aliases.
 
 The registered head parameter prefix `jev_head.*`, checkpoint file `jev_head.pt`,

@@ -141,8 +141,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   above `main()` in `train/train.py`; `main()` shows the stages directly. Model implementations live in `train/models/`;
   existing model import paths remain available.
 
-- Typed-decision training now uses `decision` names, with legacy Jev imports, CLI
-  aliases, model calls and checkpoint/optimizer keys preserved. It is split in two: data mapping, augmentation and encoding
+- Typed-decision training now uses `decision` names and accepts only `--decision_*`
+  CLI flags. Legacy imports, model calls and checkpoint/optimizer keys remain compatible.
+  It is split in two: data mapping, augmentation and encoding
   in `train/data/decision.py`, and the pointer head and loss in `train/models/decision.py`.
   `train/decision.py` re-exports both; legacy Jev imports remain compatibility aliases.
 

@@ -242,20 +242,22 @@ def test_build_model_selects_implementation_and_resume_source(monkeypatch, tmp_p
     assert all(p.dtype == torch.float32 for p in model.parameters())
 
 
-@pytest.mark.parametrize('suffix,value', [
-    ('data', 'records.jsonl'), ('only', None), ('loss_weight', '0.5'),
-    ('micro_per_step', '2'), ('max_tokens', '1024'), ('max_variant_tokens', '2048'),
-    ('max_state', '384'), ('p_none_pair', '0.1'), ('head_dim', '32'), ('head_lr_scale', '5'),
+@pytest.mark.parametrize('suffix,value,expected', [
+    ('data', 'records.jsonl', 'records.jsonl'), ('only', None, True),
+    ('loss_weight', '0.5', 0.5), ('micro_per_step', '2', 2),
+    ('max_tokens', '1024', 1024), ('max_variant_tokens', '2048', 2048),
+    ('max_state', '384', 384), ('p_none_pair', '0.1', 0.1),
+    ('head_dim', '32', 32), ('head_lr_scale', '5', 5.0),
 ])
-def test_decision_cli_preserves_legacy_flags_and_namespace(suffix, value):
+def test_decision_cli_accepts_new_flags_and_rejects_legacy(suffix, value, expected):
     parser = build_parser()
     extra = [] if value is None else [value]
-    canonical = parser.parse_args([f'--decision_{suffix}', *extra])
-    legacy = parser.parse_args([f'--jev_{suffix}', *extra])
-    assert vars(canonical) == vars(legacy)
-    assert getattr(legacy, f'jev_{suffix}') == getattr(legacy, f'decision_{suffix}')
-    setattr(legacy, f'jev_{suffix}', 'updated')
-    assert getattr(legacy, f'decision_{suffix}') == 'updated'
+    args = parser.parse_args([f'--decision_{suffix}', *extra])
+    assert getattr(args, f'decision_{suffix}') == expected
+    assert not hasattr(args, f'jev_{suffix}')
+    with pytest.raises(SystemExit) as error:
+        parser.parse_args([f'--jev_{suffix}', *extra])
+    assert error.value.code == 2
 
 
 def test_legacy_decision_imports_are_the_same_objects():
