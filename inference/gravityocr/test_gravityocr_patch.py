@@ -171,6 +171,17 @@ def test_server_info_never_returns_the_keys():
     assert "+        **server_args," in hunk and "-        **dataclasses.asdict(" in hunk
 
 
+def test_a_vit_graph_capture_failure_falls_back_to_eager():
+    # Capture runs inside load_weights, on by default with FAST=1: an OOM in any capture used to stop the
+    # server from starting. The eager forward is always correct, so a failure must only switch graphs off.
+    text = PATCH.read_text(encoding="utf-8")
+    start = text.index("diff --git a/python/sglang/srt/models/glm_ocr.py")
+    hunk = text[start:text.index("\ndiff --git ", start + 1)]
+    body = hunk[hunk.index("+        runner = GlmVitGraphRunner("):]
+    assert "+        try:\n+            runner.capture()\n+        except Exception" in body
+    assert "capture failed" in body and "+            return" in body
+
+
 # ---------------------------------------------------------------- the four new SGLang files
 @pytest.mark.parametrize("rel", sorted(NEW_FILES))
 def test_new_file_parses_on_py310_and_carries_the_header(rel):

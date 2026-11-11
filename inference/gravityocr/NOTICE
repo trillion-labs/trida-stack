@@ -25,9 +25,12 @@ Patch — sglang/gravityocr_selfspec.patch
   the scheduler, cache and CUDA-graph support it needs, and add optional runtime
   optimizations. The modified files keep their upstream copyright headers.
   Pure code; no model weights.
-  Differs from the patch in the GravityOCR release in one hunk only:
-  entrypoints/http_server.py, where /server_info no longer returns the API and
-  admin keys (added in this repository; to be upstreamed to GravityOCR).
+  Differs from the GravityOCR release in three places, all added in this
+  repository and to be upstreamed to GravityOCR: entrypoints/http_server.py
+  (/server_info no longer returns the API and admin keys), models/glm_ocr.py (a
+  failed ViT CUDA-graph capture falls back to the eager forward instead of
+  stopping the server), and the module docstring of
+  multimodal/glm_vit_graph_runner.py (states that serve.sh turns graphs on).
 ------------------------------------------------------------------------------
 New files — sglang/python/sglang/srt/
   speculative/selfspec_diffusion_worker.py

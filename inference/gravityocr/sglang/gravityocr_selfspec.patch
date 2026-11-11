@@ -1488,7 +1488,7 @@ index 9bb5a92b2cdc30b5add2420bc3e38eed03cdd95f..76542bd198521af028fe9b0f01c8f8b6
              forward_batch.forward_mode.is_decode()
              or not forward_batch.contains_image_inputs()
 diff --git a/python/sglang/srt/models/glm_ocr.py b/python/sglang/srt/models/glm_ocr.py
-index bb74461d56ba71a388ded342cf8d6561a50507d8..13575658780ca457fde8b39fdb2b04262a3d48bb 100644
+index bb74461d56ba71a388ded342cf8d6561a50507d8..9814b091a25a609080e9a81b258cccc1699d03c0 100644
 --- a/python/sglang/srt/models/glm_ocr.py
 +++ b/python/sglang/srt/models/glm_ocr.py
 @@ -222,7 +222,16 @@ class GlmOcrVisionModel(Glm4vVisionModel):
@@ -1517,7 +1517,7 @@ index bb74461d56ba71a388ded342cf8d6561a50507d8..13575658780ca457fde8b39fdb2b0426
          self.pooler = Pooler(pooling_type=PoolingType.LAST, normalize=True)
  
          # For EAGLE3 support
-@@ -434,5 +443,26 @@ class GlmOcrForConditionalGeneration(Glm4vForConditionalGeneration):
+@@ -434,5 +443,32 @@ class GlmOcrForConditionalGeneration(Glm4vForConditionalGeneration):
                      )
                  weight_loader(param, loaded_weight)
  
@@ -1538,7 +1538,13 @@ index bb74461d56ba71a388ded342cf8d6561a50507d8..13575658780ca457fde8b39fdb2b0426
 +            print(f"[ss-vit-graph] OFF: dp_encoder={self.use_data_parallel} device={self.visual.device}", flush=True)
 +            return
 +        runner = GlmVitGraphRunner(self.visual, maxm)
-+        runner.capture()
++        try:
++            runner.capture()
++        except Exception as e:  # graphs are an optimization; the eager forward is always correct
++            print(f"[ss-vit-graph] OFF: capture failed ({type(e).__name__}: {e}); using the eager forward", flush=True)
++            del runner
++            torch.cuda.empty_cache()
++            return
 +        if runner.graphs or runner.eager_list_ok:
 +            self.visual._ss_vit = runner
 +

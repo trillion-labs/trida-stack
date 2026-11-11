@@ -4,7 +4,8 @@
 # New file in the GravityOCR self-speculative decoding patch for SGLang
 # (sgl-project/sglang @ 1519acf37c23f2189adb93f57ca9cd2db1bebf18, tag v0.5.10; Apache-2.0).
 # Design notes: https://github.com/trillion-labs/GravityOCR
-"""Exact-M CUDA graphs for the GLM-OCR ViT (GlmOcrVisionModel), default OFF.
+"""Exact-M CUDA graphs for the GLM-OCR ViT (GlmOcrVisionModel). Off unless SS_GLM_VIT_GRAPH_MAXM > 0;
+inference/gravityocr/serve.sh sets it to 2048 under FAST=1 (the default).
 
 Flag: SS_GLM_VIT_GRAPH_MAXM=<max patches per image> (unset/0 = off; e.g. 2048 covers typical document crops).
 
