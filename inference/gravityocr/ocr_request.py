@@ -101,6 +101,14 @@ def render_text_png(text: str, font_size: int = 32, margin: int = 24) -> bytes:
     return buf.getvalue()
 
 
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect: urllib would resend the Authorization header to whatever host the
+    Location names, and turn the POST into a GET. A 3xx is reported as an HTTP error instead."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, f"redirect to {newurl} refused", headers, fp)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(
         description="Send one image crop to a GravityOCR server and print the recognised text.",
@@ -162,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     url = request.full_url
     try:
-        with urllib.request.urlopen(request, timeout=args.timeout) as resp:
+        with urllib.request.build_opener(_RefuseRedirects).open(request, timeout=args.timeout) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")

@@ -54,6 +54,7 @@ class FakeServer:
 def server(monkeypatch):
     fake = FakeServer()
     monkeypatch.setattr(urllib.request, "urlopen", fake)
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: type("Opener", (), {"open": staticmethod(fake)})())
     monkeypatch.delenv("API_KEY", raising=False)
     return fake
 
@@ -243,3 +244,53 @@ def test_synthetic_renders_a_png(ocr_request, server):
     assert ocr_request.main(["--synthetic", "Hello GravityOCR"]) == 0
     mime, data = _decode_data_url(server.body["messages"][0]["content"][0]["image_url"]["url"])
     assert mime == "image/png" and data.startswith(PNG_SIGNATURE)
+
+
+def test_redirects_are_refused_and_the_key_never_follows(ocr_request, tmp_path, monkeypatch, capsys):
+    # urllib follows a 3xx and copies Authorization to whatever host Location names (turning the POST into
+    # a GET), so a hostile or misconfigured server could collect the key. Real loopback servers, no fakes.
+    import http.server
+    import threading
+
+    seen = []
+
+    class Collector(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.headers.get("Authorization"))
+            body = json.dumps({"choices": [{"message": {"content": "leaked"}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_POST = do_GET
+
+        def log_message(self, *args):
+            pass
+
+    collector = http.server.HTTPServer(("127.0.0.1", 0), Collector)
+
+    class Redirector(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{collector.server_port}/v1/chat/completions")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    redirector = http.server.HTTPServer(("127.0.0.1", 0), Redirector)
+    for srv in (collector, redirector):
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.delenv("API_KEY", raising=False)
+    try:
+        image = tmp_path / "crop.png"
+        image.write_bytes(PNG_SIGNATURE)
+        rc = ocr_request.main([str(image), "--url", f"http://127.0.0.1:{redirector.server_port}",
+                               "--api-key", "SECRET", "--timeout", "5"])
+    finally:
+        for srv in (collector, redirector):
+            srv.shutdown()
+    assert seen == [], "the request (and the key) followed the redirect"
+    assert rc == 1 and "302" in capsys.readouterr().err
