@@ -294,3 +294,17 @@ def test_redirects_are_refused_and_the_key_never_follows(ocr_request, tmp_path, 
             srv.shutdown()
     assert seen == [], "the request (and the key) followed the redirect"
     assert rc == 1 and "302" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("task", ["text", "table", "formula"])
+def test_task_selects_its_prompt(ocr_request, server, tmp_path, task):
+    image = tmp_path / "crop.png"
+    image.write_bytes(PNG_SIGNATURE)
+    assert ocr_request.main([str(image), "--task", task]) == 0
+    assert server.body["messages"][0]["content"][1]["text"] == ocr_request.TASK_PROMPTS[task]
+
+
+def test_task_and_prompt_are_exclusive(ocr_request, server, tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        ocr_request.parse_args([str(tmp_path / "x.png"), "--task", "table", "--prompt", "Text Recognition:"])
+    assert exc.value.code == 2

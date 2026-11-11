@@ -102,10 +102,10 @@ Self-spec mode also exports these, each overridable from the environment: `SELFS
 ```bash
 curl -s http://127.0.0.1:30000/v1/models                                     # lists "glm-ocr" once ready
 "$VBIN/python" inference/gravityocr/ocr_request.py --synthetic 'Hello GravityOCR'
-"$VBIN/python" inference/gravityocr/ocr_request.py table.png --prompt 'Table Recognition:'
+"$VBIN/python" inference/gravityocr/ocr_request.py table.png --task table
 ```
 
-`ocr_request.py` takes either an image file or `--synthetic TEXT`, which renders `TEXT` into a small PNG with Pillow, so the first check needs no sample image; the reply should read back the same text. It prints the recognized text on stdout and the token usage on stderr. It exits 1, with a one-line message, on an HTTP error, a refused or dropped connection, a reply slower than `--timeout`, or a reply without `choices[0].message.content`. Apart from `--synthetic` it uses only the standard library and runs on any Python 3.10+. Its flags: `--url` (default `http://127.0.0.1:30000`), `--model` (default `glm-ocr`), `--prompt` (default `Text Recognition:`), `--max-tokens` (default 4096), `--timeout` (default 300 s), and `--api-key` (default `$API_KEY`). With a key, add `-H "Authorization: Bearer $API_KEY"` to `curl`.
+`ocr_request.py` takes either an image file or `--synthetic TEXT`, which renders `TEXT` into a small PNG with Pillow, so the first check needs no sample image; the reply should read back the same text. It prints the recognized text on stdout and the token usage on stderr. It exits 1, with a one-line message, on an HTTP error (a redirect counts as one: it never follows one, so the key is never sent elsewhere), a refused or dropped connection, a reply slower than `--timeout`, or a reply without `choices[0].message.content`. Apart from `--synthetic` it uses only the standard library and runs on any Python 3.10+. Its flags: `--url` (default `http://127.0.0.1:30000`), `--model` (default `glm-ocr`), `--task text|table|formula` or `--prompt` (default `Text Recognition:`), `--max-tokens` (default 4096), `--timeout` (default 300 s), and `--api-key` (default `$API_KEY`). With a key, add `-H "Authorization: Bearer $API_KEY"` to `curl`.
 
 ## Request format
 

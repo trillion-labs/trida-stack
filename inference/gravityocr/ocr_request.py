@@ -118,7 +118,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument(
         "--synthetic", metavar="TEXT", help="render TEXT into a PNG and send that instead of a file"
     )
-    ap.add_argument(
+    which = ap.add_mutually_exclusive_group()
+    which.add_argument(
+        "--task", choices=sorted(TASK_PROMPTS), help="the region type, which picks its task prompt"
+    )
+    which.add_argument(
         "--prompt", default=DEFAULT_PROMPT, help=f"task prompt (default: '{DEFAULT_PROMPT}')"
     )
     ap.add_argument("--url", default=DEFAULT_URL, help=f"server root URL (default: {DEFAULT_URL})")
@@ -143,6 +147,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"HTTP timeout in seconds (default: {DEFAULT_TIMEOUT:g})",
     )
     args = ap.parse_args(argv)
+    if args.task:
+        args.prompt = TASK_PROMPTS[args.task]
     if (args.image is None) == (args.synthetic is None):
         ap.error("give exactly one of IMAGE or --synthetic TEXT")
     if not args.url.startswith(("http://", "https://")):
