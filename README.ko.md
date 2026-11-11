@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/zoro-mascot-wave-dark.gif">
+    <img src="docs/assets/zoro-mascot-wave.gif" alt="Zoro-1 마스코트" width="160">
+  </picture>
+</p>
+
 # trida-stack
 
 [English](README.md) | **한국어**

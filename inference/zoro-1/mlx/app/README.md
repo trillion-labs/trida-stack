@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../../../docs/assets/zoro-mascot-wave-dark.gif">
+    <img src="../../../../docs/assets/zoro-mascot-wave.gif" alt="The Zoro-1 mascot" width="120">
+  </picture>
+</p>
+
 # Zoro-1 Chat (macOS)
 
 A native SwiftUI chat app for the on-device MLX server in `../trida_mlx`. It starts
