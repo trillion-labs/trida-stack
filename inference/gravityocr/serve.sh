@@ -270,8 +270,10 @@ if [ "$WORKERS" = 1 ]; then
     } > "$keydir/server.yaml" )
   unset admin API_KEY
   ARGS+=(--config "$keydir/server.yaml")
-  ( trap '' HUP INT TERM; while kill -0 "$$" 2>/dev/null; do sleep 2; done; rm -rf -- "$keydir" ) \
-    </dev/null >/dev/null 2>&1 &
+  # Double fork: the watcher must not be the server's descendant, because sglang.launch_server SIGKILLs
+  # its whole process tree on exit (kill_process_tree), which no trap can block.
+  ( ( trap '' HUP INT TERM; while kill -0 "$$" 2>/dev/null; do sleep 2; done; rm -rf -- "$keydir" ) \
+      </dev/null >/dev/null 2>&1 & )
   if ! is_loopback "$SERVE_HOST"; then
     echo "[serve] note: listening on $SERVE_HOST; every request must send 'Authorization: Bearer <API_KEY>'." \
          "Authenticated clients can still make the server fetch http(s) image URLs and read local image" \

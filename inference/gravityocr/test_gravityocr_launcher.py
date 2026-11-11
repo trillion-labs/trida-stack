@@ -33,6 +33,23 @@ if argv[:1] == ["-c"] and "snapshot_download" in argv[1]:
     print(os.environ["STUB_SNAPSHOT"])
     raise SystemExit(0)
 rec = {"argv": argv, "env": dict(os.environ)}
+if os.environ.get("STUB_KILL_CHILDREN"):
+    # what sglang.launch_server does on exit: kill_process_tree(os.getpid(), include_parent=False)
+    import signal, subprocess
+    out = subprocess.run(["/bin/ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True).stdout
+    kids = {}
+    for line in out.splitlines():
+        if line.strip():
+            pid, ppid = map(int, line.split())
+            kids.setdefault(ppid, []).append(pid)
+    todo = list(kids.get(os.getpid(), []))
+    while todo:
+        pid = todo.pop()
+        todo += kids.get(pid, [])
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 if "--config" in argv:
     path = argv[argv.index("--config") + 1]
     with open(path) as f:
@@ -430,6 +447,14 @@ def test_api_key_reaches_sglang_through_a_private_config_file(launcher):
     if yaml is not None:
         assert yaml.safe_load(r.rec["config"]) == r.keys
     assert "Authorization: Bearer" in r.stderr
+    _assert_private_key_file(r)
+
+
+def test_key_file_is_removed_even_when_sglang_kills_its_children(launcher):
+    # SGLang's launcher SIGKILLs every descendant on exit; a watcher that is still the server's child
+    # dies with it and leaves server.yaml, keys included, on disk.
+    r = launcher(env={"API_KEY": "abc123", "STUB_KILL_CHILDREN": "1"})
+    assert r.returncode == 0, r.stderr
     _assert_private_key_file(r)
 
 
