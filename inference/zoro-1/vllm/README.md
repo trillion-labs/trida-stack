@@ -46,7 +46,7 @@ else is env-driven with sane defaults:
 | env | default | meaning |
 |---|---|---|
 | `CKPT` | `$TRIDA_MODEL`, else `trillionlabs/Zoro-1` | HF repo id or local path to the checkpoint |
-| `MODE` | `self-spec` | `self-spec` \| `causal` \| `diffusion` (pure denoising; not supported by the Trida2.0-4B recipe) |
+| `MODE` | `self-spec` | `self-spec` \| `causal` \| `diffusion` (pure denoising; Zoro-1 does not support it) |
 | `PORT` | `8000` | server port |
 | `SERVED_NAME` | `trida` | model id exposed on `/v1/models` (`chat.py`/`eval.py` pick it up automatically) |
 | `MAX_NUM_SEQS` | `1` | concurrent sequences per replica; `1` = latency mode |
@@ -73,7 +73,7 @@ Once the server logs `Application startup complete`, confirm it generates:
 ```bash
 curl -s http://localhost:${PORT:-8000}/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model":"trida-bd","messages":[{"role":"user","content":"What is 17 * 24?"}],"max_tokens":64}' \
+  -d '{"model":"trida","messages":[{"role":"user","content":"What is 17 * 24?"}],"max_tokens":64}' \
   | python -m json.tool
 ```
 

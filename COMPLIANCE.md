@@ -108,23 +108,30 @@ are **not** covered by this repository's Apache-2.0 licence. They are also not
 redistributed here. The table covers the Trida checkpoint and its bases, then the
 GravityOCR checkpoint that `inference/gravityocr/` serves and its base.
 
-| | component | licence | verified |
-|---|---|---|---|
-| base | [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) | **Apache-2.0** | HF model metadata, 2026-10-01 |
-| base | [Qwen/Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) | **Apache-2.0** | HF model metadata, 2026-10-01 |
-| base | [Qwen/Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B) | **Apache-2.0** | HF model metadata, 2026-10-01 |
-| derived | [trillionlabs/Trida2.0-4B](https://huggingface.co/trillionlabs/Trida2.0-4B) | **Apache-2.0** | HF model card, 2026-10-01 |
-| base | [zai-org/GLM-OCR](https://huggingface.co/zai-org/GLM-OCR) | **MIT** | HF model metadata, 2026-10-30 |
-| derived | [trillionlabs/GravityOCR](https://huggingface.co/trillionlabs/GravityOCR) | **MIT** | HF model card, 2026-10-30 |
+| | component | licence | access | verified |
+|---|---|---|---|---|
+| base | [Qwen/Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) | **Apache-2.0** | public | HF model metadata, 2026-11-09 |
+| base | [Qwen/Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B) | **Apache-2.0** | public | HF model metadata, 2026-11-09 |
+| base | [Qwen/Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B) | **Apache-2.0** | public | HF model metadata, 2026-11-09 |
+| derived | [trillionlabs/Zoro-1](https://huggingface.co/trillionlabs/Zoro-1) | **Apache-2.0** | gated | HF model metadata, 2026-11-09 |
+| derived | [trillionlabs/Zoro](https://huggingface.co/trillionlabs/Zoro) (published as `trillionlabs/Trida2.0-4B`) | **Apache-2.0** | public | HF model metadata, 2026-11-09 |
+| base | [zai-org/GLM-OCR](https://huggingface.co/zai-org/GLM-OCR) | **MIT** | public | HF model metadata, 2026-11-11 |
+| derived | [trillionlabs/GravityOCR](https://huggingface.co/trillionlabs/GravityOCR) | **MIT** | public | HF model metadata, 2026-11-11 |
+
+`tools/check_model_card.py` (weekly in CI, `model-card.yml`) compares the licence and access
+columns of the derived rows against Hugging Face.
 
 **Base models.** All three Qwen checkpoints the trainer targets are Apache-2.0, so no
 use restriction propagates from the base model into a derived checkpoint. This matters
 because a derived model can inherit the base model's terms — Apache-2.0 bases do not
 impose any.
 
-**Derived checkpoint.** `trillionlabs/Trida2.0-4B` is released under **Apache-2.0**. The
-inputs permit it: the base model is Apache-2.0, and the training data is Trillion Labs'
-own. The weights are public and ungated.
+**Derived checkpoints.** `trillionlabs/Zoro-1`, the model `inference/zoro-1/` serves, and
+`trillionlabs/Zoro` (first published as `trillionlabs/Trida2.0-4B`, which now redirects
+there) are released under **Apache-2.0**. The inputs permit it: the base model is
+Apache-2.0, and the training data is Trillion Labs' own. `Zoro` is public and ungated;
+`Zoro-1` is gated, so a user requests access on its model page before downloading it. The
+gate controls who downloads the weights, not the terms they are used under.
 
 **GravityOCR.** `trillionlabs/GravityOCR` is a document-OCR checkpoint derived from
 `zai-org/GLM-OCR`. Both are released under **MIT**, which places no use restriction on a
@@ -142,7 +149,7 @@ weights does not make the whole serving stack permissive:
 | path | kernels | terms for the operator |
 |---|---|---|
 | `--mode causal` (AR) | stock vLLM, no §1b dependency | Apache-2.0 throughout |
-| `--mode diffusion` / `self-spec` | §1b two-stream kernels | **PolyForm Noncommercial** |
+| `--mode self-spec` (and vLLM `MODE=diffusion`) | §1b two-stream kernels | **PolyForm Noncommercial** |
 | `inference/gravityocr/serve.sh`, `MODE=causal` / `MODE=self-spec` | upstream SGLang v0.5.10 + the Apache-2.0 §1 patch; no §1b dependency | Apache-2.0 throughout (weights MIT) |
 
 The restriction attaches to *running those kernels*, not to holding the weights. Anyone

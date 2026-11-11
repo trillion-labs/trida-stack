@@ -35,7 +35,7 @@ import time
 import torch
 import torch.nn as nn
 
-from decide_request import MAX_IMAGE_PIXELS, VISION, image_input, parse, prompt, with_reasoning
+from decide_request import MAX_IMAGE_PIXELS, VISION, image_input, parse, prompt, with_reasoning, to_answer
 
 END_THINK = "</think>"
 # Serving temperatures: logits are divided by T before the softmax. Fit T per checkpoint on held-out calibration
@@ -59,29 +59,6 @@ class PointerHead(nn.Module):
 
     def forward(self, h_decide, h_opts, owner):   # [Q, d], [sum K, d], question index of each option -> [sum K]
         return (self.k(h_opts) * self.q(h_decide)[owner]).sum(-1) * self.scale
-
-
-def _confidence(qtype, p):
-    k = len(p)
-    if k == 1:
-        return 1.0
-    if qtype == "score":
-        mode = max(range(k), key=p.__getitem__)
-        d = sum(abs(i - (k - 1) / 2) for i in range(k)) / k
-        return max(0.0, 1.0 - sum(pi * abs(i - mode) for i, pi in enumerate(p)) / d)
-    return (max(p) - 1 / k) / (1 - 1 / k)
-
-
-def to_answer(q, p):
-    """A question and its option probabilities -> the answer reported to the caller."""
-    r = lambda x: round(float(x), 4)   # noqa: E731
-    if q.qtype == "noul":
-        return {"type": "noul", "noul": r(p[1])}
-    if q.qtype == "choice":
-        return {"type": "choice", "choice": q.keys[max(range(len(p)), key=p.__getitem__)],
-                "confidence": r(_confidence("choice", p)), "probabilities": {k: r(v) for k, v in zip(q.keys, p)}}
-    return {"type": "score", "score": r(sum(i * x for i, x in enumerate(p))), "legend": q.options,
-            "confidence": r(_confidence("score", p)), "probabilities": {str(i): r(v) for i, v in enumerate(p)}}
 
 
 def serving_temperatures(ckpt):
@@ -182,17 +159,16 @@ class DecideEngine:
 
     # ---- decisions ----------------------------------------------------------------------------------
 
-    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768,
-                      allow_paths=True):
+    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768):
         """-> {"answers": {qid: answer}, "timing_ms"} (+ "reasoning", "reasoning_ms" when reasoning=True)."""
         t0 = time.perf_counter()
         extra = {}
         if reasoning:
-            img = parse(request, image, allow_paths).image   # fail fast on a bad request, before generating
+            img = parse(request, image).image   # fail fast on a bad request, before generating
             text = "".join([p async for p in self.athink_stream(request, max_reasoning_tokens, image=img)]).strip()
             extra = {"reasoning": text, "reasoning_ms": round((time.perf_counter() - t0) * 1000, 1)}
             request = with_reasoning(request, text)
-        req = parse(request, image, allow_paths)
+        req = parse(request, image)
         enc = req.encode(self.tok, self.proc)
         T = temperature or (self.image_T if enc.has_image else self.text_T)
         z = await self.alogits(enc, self._sized(req.image, enc.grid) if enc.has_image else None)

@@ -155,8 +155,10 @@ level is installed by the `Install CPU deps` step in `.github/workflows/ci.yml` 
 2. Make focused commits; keep unrelated changes out of the PR.
 3. Run `ruff check .`, `pre-commit run` (on your staged files), and the CPU-safe
    tests locally.
-4. Update docs (`README.md`, `inference/zoro-1/README.md`, `inference/gravityocr/README.md`,
-   `train/README.md`) when you change behavior, flags, or the model contract.
+4. Update docs (`README.md`, `inference/zoro-1/README.md`,
+   `inference/gravityocr/README.md`, `train/README.md`) when you
+   change behavior, flags, or the model contract. `README.md` is the source of truth;
+   mirror changes in `README.ko.md` when you can, or note in the PR that it needs a follow-up.
 5. If you touch dependencies or third-party code, update
    [`COMPLIANCE.md`](COMPLIANCE.md) and [`NOTICE`](NOTICE) accordingly — and never
    introduce a copyleft or bundle a noncommercial dependency.

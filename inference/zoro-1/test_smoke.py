@@ -110,6 +110,188 @@ def test_dry_run_and_no_shape_leave_the_model_alone(monkeypatch):
     assert called == []
 
 
+def _launch(monkeypatch, argv):
+    """Run serve.main() up to the exec and return the command it would exec."""
+    import pytest
+    launched = []
+
+    def fake_exec(prog, cmd):           # the real execvp never returns
+        launched.append(cmd)
+        raise SystemExit(0)
+    monkeypatch.setattr(serve.os, "execvp", fake_exec)
+    monkeypatch.setattr(sys, "argv", ["serve.py", *argv])
+    with pytest.raises(SystemExit):
+        serve.main()
+    assert len(launched) == 1
+    return launched[0]
+
+
+def test_no_shape_skips_shaping_without_dry_run(monkeypatch):
+    called = []
+    monkeypatch.setattr(serve, "for_sglang", lambda m, cache=None: called.append(m) or m)
+    _launch(monkeypatch, ["trillionlabs/Zoro-1", "--no-shape"])
+    assert called == []
+    _launch(monkeypatch, ["trillionlabs/Zoro-1"])
+    assert called == ["trillionlabs/Zoro-1"]
+
+
+def test_decide_default_model_reaches_serve_decide_as_a_local_dir(monkeypatch, tmp_path):
+    # serve_decide.py opens <ckpt>/jev_head.pt, so it needs a directory, not the HF id
+    import types
+    snap = tmp_path / "snapshot"
+    snap.mkdir()
+    monkeypatch.setitem(sys.modules, "huggingface_hub",
+                        types.SimpleNamespace(snapshot_download=lambda repo: str(snap)))
+    monkeypatch.delenv("TRIDA_MODEL", raising=False)
+    monkeypatch.delenv("TRIDA_DECIDE_MODEL", raising=False)
+    cmd = _launch(monkeypatch, ["--mode", "decide"])
+    ckpt = cmd[[i for i, c in enumerate(cmd) if c.endswith("serve_decide.py")][0] + 1]
+    assert Path(ckpt).is_dir() and Path(ckpt) == snap.resolve()
+
+
+def test_for_sglang_shapes_a_flat_causal_lm_checkpoint(tmp_path):
+    import json
+    raw = _raw_ckpt(tmp_path)
+    (raw / "config.json").write_text(json.dumps({"architectures": ["Qwen3_5ForCausalLM"],
+                                                 "model_type": "qwen3_5_text", "hidden_size": 8}))
+    cfg = json.loads((Path(serve.for_sglang(str(raw), tmp_path / "cache")) / "config.json").read_text())
+    assert cfg["architectures"] == ["Qwen3_5DLLMForConditionalGeneration"]
+    assert cfg["text_config"]["model_type"] == "qwen3_5_text" and cfg["text_config"]["hidden_size"] == 8
+    assert "architectures" not in cfg["text_config"]
+
+
+def test_an_incomplete_shim_is_rebuilt(tmp_path):
+    # a crash between writing config.json and the weight links must not leave a shim that is reused forever
+    raw = _raw_ckpt(tmp_path)
+    cache = tmp_path / "cache"
+    out = Path(serve.for_sglang(str(raw), cache))
+    (out / "model-00001-of-00002.safetensors").unlink()
+    assert serve.for_sglang(str(raw), cache) == str(out)
+    assert (out / "model-00001-of-00002.safetensors").is_symlink()
+
+
+def test_a_dangling_shim_link_is_rebuilt(tmp_path):
+    raw = _raw_ckpt(tmp_path)
+    cache = tmp_path / "cache"
+    out = Path(serve.for_sglang(str(raw), cache))
+    (raw / "tokenizer.json").unlink()                    # e.g. the HF cache was cleaned
+    assert serve.for_sglang(str(raw), cache) == str(out)
+    assert not (out / "tokenizer.json").is_symlink()     # rebuilt from what the checkpoint now has
+
+
+def test_a_changed_local_checkpoint_gets_a_fresh_shim(tmp_path):
+    import json
+    raw = _raw_ckpt(tmp_path)
+    cfg = {"architectures": ["Qwen3_5ForCausalLM"], "model_type": "qwen3_5_text", "hidden_size": 8}
+    (raw / "config.json").write_text(json.dumps(cfg))
+    cache = tmp_path / "cache"
+    first = serve.for_sglang(str(raw), cache)
+    (raw / "config.json").write_text(json.dumps({**cfg, "hidden_size": 16}))   # re-saved in place
+    second = serve.for_sglang(str(raw), cache)
+    assert second != first
+    assert json.loads((Path(second) / "config.json").read_text())["text_config"]["hidden_size"] == 16
+
+
+def test_shim_build_leaves_no_temp_dirs(tmp_path):
+    raw = _raw_ckpt(tmp_path)
+    cache = tmp_path / "cache"
+    out = Path(serve.for_sglang(str(raw), cache))
+    assert [p.name for p in cache.iterdir()] == [out.name]
+
+
+def test_a_shim_another_replica_finished_first_is_kept(monkeypatch, tmp_path):
+    # Two replicas start together and both miss the cache. The one that finishes second must use the
+    # winner's shim, never delete it: the winner's SGLang may already be loading from it.
+    import types
+    raw = _raw_ckpt(tmp_path)
+    name = Path(serve.for_sglang(str(raw), tmp_path / "probe")).name
+    cache = tmp_path / "cache"
+    winner = cache / name
+    real = serve._shape_tool()
+    seen = {}
+
+    def shape_while_another_replica_wins(raw_dir, out_dir, copy=False):
+        if not winner.exists():
+            real.shape(raw_dir, winner)                       # the other replica's finished shim
+            seen["inode"] = (winner / "config.json").stat().st_ino
+        return real.shape(raw_dir, out_dir)
+
+    monkeypatch.setattr(serve, "_shape_tool", lambda: types.SimpleNamespace(
+        is_shaped=real.is_shaped, carried_names=real.carried_names, shape=shape_while_another_replica_wins))
+    assert serve.for_sglang(str(raw), cache) == str(winner)
+    assert (winner / "config.json").stat().st_ino == seen["inode"]   # not deleted and rebuilt
+    assert [p.name for p in cache.iterdir()] == [name]               # no temp dirs left behind
+
+
+def test_temp_dirs_are_unique_per_build_not_per_pid(monkeypatch, tmp_path):
+    # PID 1 in two containers sharing one cache must not build into the same temp dir
+    raw = _raw_ckpt(tmp_path)
+    monkeypatch.setattr(serve.os, "getpid", lambda: 1)
+    made = []
+    real_mkdtemp = serve.tempfile.mkdtemp
+    monkeypatch.setattr(serve.tempfile, "mkdtemp", lambda **kw: made.append(real_mkdtemp(**kw)) or made[-1])
+    serve.for_sglang(str(raw), tmp_path / "a")
+    serve.for_sglang(str(raw), tmp_path / "b")
+    assert len(made) == 2 and Path(made[0]).name != Path(made[1]).name
+
+
+def test_hf_shims_from_different_caches_get_different_names(monkeypatch, tmp_path):
+    # One shared shim cache (e.g. an NFS home), a per-node HF cache: the same repo and revision then live at
+    # different paths, and each node's shim must link to its own copy instead of replacing the other's.
+    import shutil
+    import types
+    snaps = []
+    for node in ("node-a", "node-b"):
+        snap = tmp_path / node / "snapshots" / "766c5522cfb7aaaa"
+        snap.parent.mkdir(parents=True)
+        shutil.copytree(_raw_ckpt(tmp_path / node), snap)
+        snaps.append(snap)
+    cache = tmp_path / "shared-cache"
+    outs = []
+    for snap in snaps:
+        monkeypatch.setitem(sys.modules, "huggingface_hub",
+                            types.SimpleNamespace(snapshot_download=lambda repo, s=snap: str(s)))
+        outs.append(serve.for_sglang("trillionlabs/Zoro-1", cache))
+    assert outs[0] != outs[1]
+    assert all(Path(o).name.startswith("trillionlabs--Zoro-1-766c5522cfb7") for o in outs)   # still readable
+    assert serve._complete_shim(Path(outs[0]), snaps[0].resolve(), serve._shape_tool())       # neither replaced
+
+
+def test_a_shim_moved_away_mid_check_is_incomplete_not_a_crash(monkeypatch, tmp_path):
+    # another replica can move `out` aside between reading its config and listing it
+    raw = _raw_ckpt(tmp_path)
+    out = Path(serve.for_sglang(str(raw), tmp_path / "cache"))
+    real_iterdir = Path.iterdir
+
+    def vanished(self):
+        if self == out:
+            raise FileNotFoundError(str(self))
+        return real_iterdir(self)
+    monkeypatch.setattr(Path, "iterdir", vanished)
+    assert serve._complete_shim(out, raw.resolve(), serve._shape_tool()) is False
+
+
+def test_eval_summary_records_which_problems_ran():
+    # summary.json must say which problems were asked, not just how many: a shard of a bigger subsample has the
+    # same n but different problems
+    import argparse
+    import eval as ev
+    recs = [{"correct": i < 3, "error": None, "completion_tokens": 10, "latency_s": 1.0, "finish_reason": "stop"}
+            for i in range(4)]
+
+    def summary(num_problems, shard):
+        args = argparse.Namespace(task="gsm8k", num_problems=num_problems, shard=shard, max_workers=1,
+                                  max_tokens=8192, temperature=1.0, top_p=0.95, top_k=20, presence_penalty=0.0,
+                                  think=True)
+        return ev.summarize(args, "http://h:1", "m", len(recs), recs, 2.0)
+
+    s = summary(4, None)
+    assert (s["num_problems"], s["seed"], s["shard"]) == (4, 42, None)
+    assert (s["n"], s["correct"], s["accuracy_pct"], s["errors"]) == (4, 3, 75.0, 0)
+    assert (summary(16, "0/4")["num_problems"], summary(16, "0/4")["shard"]) == (16, "0/4")
+    assert summary(0, None)["seed"] is None                                   # the full set
+
+
 def main():
     import inspect
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

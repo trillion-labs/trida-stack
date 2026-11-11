@@ -197,7 +197,7 @@ def test_server_roundtrip():
         headers={"Content-Type": "application/json"})).read())
     assert r["usage"]["completion_tokens"] <= 10
     models = json.loads(urllib.request.urlopen(f"{base}/models").read())
-    assert models["data"][0]["context_length"] == 2048 and models["data"][0]["id"] == "trida2.0-4b"
+    assert models["data"][0]["context_length"] == 2048 and models["data"][0]["id"] == CKPT.name.lower()   # the folder name
     # context overflow -> OpenAI-style 400 that harnesses recognise (and compress)
     big = {"messages": [{"role": "user", "content": "hello world " * 3000}], "stream": True}
     try:

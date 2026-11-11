@@ -1,0 +1,103 @@
+// Copy into inference/zoro-1/mlx/app/Sources/TridaChat/KnowledgeGlue.swift (and rename to .swift). It is the only
+// app code that knows both the app and the knowledge package; written against the feat/zoro-chat-app API
+// (AppState.runDecision, decisionSettings, client, servedName, ReplyReview's "backed by the pages" check,
+// AgentTools.webTools). Adjust names here if the app's differ.
+import SwiftUI
+import TridaChatCore
+import TridaKnowledge
+import TridaKnowledgeUI
+
+/// Zoro-1's decisions and completions, for the knowledge graph's learning pipeline.
+final class AppKnowledgeBackend: KnowledgeBackend, @unchecked Sendable {
+    unowned let app: AppState
+
+    init(app: AppState) { self.app = app }
+
+    private static func state(_ kv: [(String, String)]) -> OrderedJSON { .object(kv.map { ($0.0, .string($0.1)) }) }
+
+    @MainActor private var settings: DecisionSettings {
+        var s = app.decisionSettings
+        s.reasoning = "never"                     // direct decisions: these run after every reply
+        return s
+    }
+
+    @MainActor func yesNo(state: [(String, String)], question: String) async throws -> Double {
+        let q = [DecisionQuestion.yesNo("q", question)]
+        let r = try await app.runDecision(Decision.body(state: Self.state(state), questions: q, settings: settings), q,
+                                          log: nil) { _ in }
+        return r.answers["q"]?.value ?? 0
+    }
+
+    @MainActor func choose(state: [(String, String)], question: String, options: [(key: String, label: String)])
+        async throws -> [String: Double] {
+        let q = [DecisionQuestion.choice("q", question, options.map { ($0.key, $0.label) })]
+        let r = try await app.runDecision(Decision.body(state: Self.state(state), questions: q, settings: settings), q,
+                                          log: nil) { _ in }
+        return Dictionary((r.answers["q"]?.options ?? []).map { ($0.key, $0.p) }, uniquingKeysWith: max)
+    }
+
+    @MainActor func complete(system: String, user: String, maxTokens: Int) async throws -> String {
+        var options = app.settings.generation
+        options.thinking = false
+        options.maxTokens = maxTokens
+        options.temperature = 0
+        let body = ChatClient.requestBody(messages: [["role": "system", "content": system],
+                                                     ["role": "user", "content": user]],
+                                          tools: nil, options: options, model: app.servedName)
+        var out = ""
+        for try await event in app.client.stream(body: body) {
+            if case let .content(t) = event { out += t }
+        }
+        return out
+    }
+}
+
+extension AppState {
+    /// Hook 3: call after a reply is final (after its review). Learns in the background.
+    func learnFromReply(chatID: Chat.ID, replyID: UUID) {
+        guard knowledge.enabled, let chat = chats.first(where: { $0.id == chatID }),
+              let ri = chat.messages.firstIndex(where: { $0.id == replyID }),
+              let ui = chat.messages[..<ri].lastIndex(where: { $0.role == .user && $0.decide == nil }) else { return }
+        let reply = chat.messages[ri]
+        guard reply.superseded != true, !reply.content.isEmpty else { return }
+        // what the web tools returned in this turn, and from where
+        var evidence: [String] = []
+        var sources: [String] = []
+        for m in chat.messages[(ui + 1)...ri] {
+            for run in m.toolRuns where AgentTools.webTools.contains(run.call.name) && run.status == .done
+                && !run.result.hasPrefix("error") {
+                evidence.append(run.result)
+                // fetch_url / open_link outlines put the page address on their second line
+                let lines = run.result.split(separator: "\n", maxSplits: 2)
+                if lines.count > 1, lines[1].hasPrefix("http") { sources.append(String(lines[1])) }
+            }
+        }
+        let x = Exchange(chatID: chatID.uuidString, messageID: replyID.uuidString,
+                         userText: chat.messages[ui].content, replyText: reply.content,
+                         webEvidence: evidence.isEmpty ? nil : evidence.joined(separator: "\n\n"),
+                         webSources: sources,
+                         webGrounded: reply.check?.contains("✓ backed by the pages") == true)
+        let backend = knowledgeBackend
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if await self.knowledge.learn(x, backend: backend) != nil { self.react(.notes) }   // the mascot: "Noted"
+        }
+    }
+
+    /// Hook 4: the remembered facts for the latest user message, appended to it in `history`.
+    func addKnowledge(to messages: inout [[String: Any]]) {
+        guard let i = messages.lastIndex(where: { $0["role"] as? String == "user" }),
+              let text = messages[i]["content"] as? String,
+              let block = knowledge.contextBlock(for: text) else { return }
+        messages[i]["content"] = text + "\n\n" + block
+    }
+}
+
+/// Hook 5: View → Knowledge (⇧⌘K).
+struct OpenKnowledgeButton: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Knowledge") { openWindow(id: "knowledge") }
+    }
+}

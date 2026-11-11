@@ -8,9 +8,8 @@ Self-speculative generation and typed decisions from one set of weights, behind 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](../../LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Backends](https://img.shields.io/badge/backends-SGLang%20%C2%B7%20vLLM%20%C2%B7%20MLX-8A2BE2.svg)](#backends)
-[![Speedrun](https://img.shields.io/badge/speedrun-H100%20%C2%B7%20L40S%20%C2%B7%20MLX-orange.svg)](#speedrun)
 
-[Speedrun](#speedrun) · [Quickstart](#quickstart) · [Test it](#test-it) · [Usage](#usage) · [Decisions](#decisions) · [Backends](#backends) · [Contributing](#contributing)
+[Quickstart](#quickstart) · [Test it](#test-it) · [Usage](#usage) · [Decisions](#decisions) · [Backends](#backends) · [Contributing](#contributing)
 
 </div>
 
@@ -25,60 +24,6 @@ In the spirit of nanoGPT, this directory serves **one model** and nothing else, 
 | `decide` | typed decisions (`/v1/decide`: yes/no, choice, score with probabilities), reason-then-decide, and OpenAI chat from one engine ([Decisions](#decisions)) |
 
 Zoro-1 does not support pure iterative diffusion decoding, so there is no `diffusion` mode. Other models get their own nano-inference next to this one (`inference/<model>/`).
-
-## Speedrun
-
-Like the [NanoGPT speedrun](https://github.com/KellerJordan/modded-nanogpt): one fixed task, a leaderboard per hardware track, and anyone can take a record.
-
-**The task:** answer a fixed GSM8K subsample with Zoro-1, one request at a time, as fast as possible.
-
-- **Record = wall-clock** of `eval.py` (`wall_s` in its `summary.json`). Lower is better.
-- **Accuracy floor: 87.0%.** Any change counts — kernels, configs, decode tricks, lossy ones too — as long as accuracy stays at or above the floor.
-- **Fixed:** model `trillionlabs/Zoro-1` (weights unchanged), client concurrency 1, temperature 1.0 / top-p 0.95 / top-k 20, thinking on, 8192-token budget, no failed requests.
-- **Problems:** 200 on the GPU tracks, 50 on MLX (`eval.py --num-problems N` takes the same seed-42 subsample every time).
-
-### 1× NVIDIA H100
-
-![H100 speedrun](speedrun/h100.svg)
-
-<!-- speedrun:h100 -->
-| # | Wall-clock | GSM8K | tok/s per request | Description | Date | Log | Contributors |
-|---|---|---|---|---|---|---|---|
-| – | no record yet: be the first | | | | | | |
-<!-- /speedrun:h100 -->
-
-### 1× NVIDIA L40S
-
-![L40S speedrun](speedrun/l40s.svg)
-
-<!-- speedrun:l40s -->
-| # | Wall-clock | GSM8K | tok/s per request | Description | Date | Log | Contributors |
-|---|---|---|---|---|---|---|---|
-| – | no record yet: be the first | | | | | | |
-<!-- /speedrun:l40s -->
-
-### Apple Silicon (MLX)
-
-Say the chip and memory in the description (e.g. "M3 Pro 18 GB, q8").
-
-![MLX speedrun](speedrun/mlx.svg)
-
-<!-- speedrun:mlx -->
-| # | Wall-clock | GSM8K | tok/s per request | Description | Date | Log | Contributors |
-|---|---|---|---|---|---|---|---|
-| – | no record yet: be the first | | | | | | |
-<!-- /speedrun:mlx -->
-
-### Submit a record
-
-```bash
-python serve.py --port 30000 --log server.log &                    # or vllm/serve_diffusion.sh, or the MLX server
-python eval.py gsm8k --num-problems 200 --max-workers 1 --server-log server.log   # 50 on MLX
-python speedrun/leaderboard.py add results/gsm8k_<stamp>/summary.json --track h100 \
-    --description "what you changed, in one line" --log <link to summary.json + requests.jsonl> --contributors @you
-```
-
-`add` checks the run against the rules above and that it beats the track's record, appends it to `speedrun/records/<track>.csv`, and redraws the table and chart. Open a PR with your change, the new row, and the run's `summary.json` + `requests.jsonl` (attach them or link them). A maintainer re-runs it on the same hardware class before merging. CI fails if the README tables or charts drift from the record files (`python speedrun/leaderboard.py check`).
 
 ## Quickstart
 
@@ -104,13 +49,13 @@ The model is resolved as **positional arg → `$TRIDA_MODEL` → `trillionlabs/Z
 hf auth login            # or: export HF_TOKEN=hf_...
 ```
 
-A `401` / `Repository not found` from the backend at startup means the token is missing or the account has no access yet. A local checkpoint directory needs no token.
+`serve.py` downloads the checkpoint itself before it starts the backend, in every mode, so a `401` / `Repository not found` at that step means the token is missing or the account has no access yet. The exceptions are `--no-shape`, which passes the id through and leaves the download (and any `401`) to the backend, and `--dry-run`, which downloads nothing. A local checkpoint directory needs no token. The SGLang shim for `causal` / `self-spec` goes to `$TRIDA_SHAPED_DIR` (default `~/.cache/trida/sglang`); `--no-shape` serves the path as given.
 
 ## Test it
 
 Three levels, from no hardware to the full stack:
 
-1. **No model, any machine** — wiring, request encoding, decision head, chat parsing, the speedrun checker:
+1. **No model, any machine** — wiring, request encoding, decision head, chat parsing:
    ```bash
    pytest -q            # from the repo root; CI runs the same
    ```
@@ -124,9 +69,22 @@ Three levels, from no hardware to the full stack:
    Decisions on MLX are not supported yet.
 3. **GPU, everything** — serve each mode and compare with the model card (GSM8K 89.9, MMLU-Pro 62.7 self-spec):
    ```bash
-   python serve.py --mode causal    --port 30000 &   python eval.py gsm8k --num-problems 200
-   python serve.py --mode self-spec --port 30000 &   python eval.py gsm8k --num-problems 200
-   python serve.py --mode decide    --port 30001      # then the /v1/decide example under Decisions
+   # wait until the server on port $1 (process $2) answers; give up if it exits or after 30 minutes
+   wait_up() {
+     for _ in $(seq 180); do
+       curl -sf "localhost:$1/v1/models" >/dev/null && return 0
+       kill -0 "$2" 2>/dev/null || { echo "server exited before it was ready" >&2; return 1; }
+       sleep 10
+     done
+     echo "server not ready after 30 minutes" >&2; return 1
+   }
+   # `wait` lets the old server free the port and GPU before the next one starts
+   for mode in causal self-spec; do
+     python serve.py --mode $mode --port 30000 & pid=$!
+     wait_up 30000 $pid && python eval.py gsm8k --num-problems 200
+     kill $pid; wait $pid
+   done
+   python serve.py --mode decide --port 30001        # then the /v1/decide example under Decisions
    ```
 
 ## Usage
@@ -167,7 +125,7 @@ gsm8k: 36/40 = 90.00%   errors=0   wall=110s
 
 From the *same* requests you get **accuracy**, **tok/s** (aggregate at the client concurrency `--max-workers`, and per request), **latency** p50/p90/mean, mean output length, and — with `--server-log` — **tokens per forward** (vLLM: from its `DiffusionDecoding` counters; SGLang self-spec: from the algorithm's stats line; SGLang causal logs no counter → `n/a`; causal is 1 by definition). Every request is written to `requests.jsonl` (prediction, gold, tokens, latency) so you can re-slice without re-running. For a per-stream latency profile use `--max-workers 1`; for aggregate throughput raise it. Keep `--max-tokens` a *budget*, not a knob: if the truncation percentage is not ~0, the number measures the budget, not the model. On the vLLM script use `LOG=server.log bash vllm/serve_diffusion.sh`.
 
-Defaults: temp 1.0 / top_p 0.95 / top_k 20, no presence penalty, thinking on, `--max-tokens 8192` — Zoro-1's self-spec setting (the model card's), identical to the SGLang self-spec config, so a number from `eval.py` means the same thing on either backend. Both backends honor these fields in self-spec (vLLM via its stock rejection sampler, `TRIDA_SS_SAMPLE=0` for exact greedy). `gsm8k`/`mmlu_pro` are self-contained (extraction-based); **ifeval** uses the Google Research IFEval scorer vendored in `ifeval_lib/` (Apache-2.0). `chat.py`/`eval.py` pick the served model id up from `/v1/models`, so they work unchanged against either backend.
+Defaults: temp 1.0 / top_p 0.95 / top_k 20, no presence penalty, thinking on, `--max-tokens 8192` — Zoro-1's self-spec sampling setting (the model card's), identical to the SGLang self-spec config. The sampling matches on either backend, but the default draft block does not yet: `serve.py` runs `b15_g8`, `vllm/serve_diffusion.sh` defaults to `SELFSPEC_N=4`, so compare tok/forward and speed across backends only at a matching block setting. Both backends honor these fields in self-spec (vLLM via its stock rejection sampler, `TRIDA_SS_SAMPLE=0` for exact greedy). `gsm8k`/`mmlu_pro` are self-contained (extraction-based); **ifeval** uses the Google Research IFEval scorer vendored in `ifeval_lib/` (Apache-2.0). `chat.py`/`eval.py` pick the served model id up from `/v1/models`, so they work unchanged against either backend.
 
 ## Decisions
 
@@ -262,12 +220,11 @@ The **vLLM** backend likewise needs one file fetched: `block_causal_readout.py`,
 ```bash
 python test_smoke.py              # no GPU: command construction, modes, the b15_g8 config
 pytest -q test_decide_cpu.py      # no GPU: decision requests, prefix prompts, head, chat parsing, HTTP
-pytest -q speedrun/               # the speedrun rules and the leaderboard rendering
 ```
 
 ## Contributing
 
-The best way in is the [speedrun](#speedrun): make Zoro-1 faster on your hardware and take a record. Beyond that:
+Open directions:
 
 - prefer server-parsed `content`/`reasoning_content` in `chat.py`/`eval.py` when `--reasoning-parser` is set
 - decisions on vLLM and MLX ([#60](https://github.com/trillion-labs/trida-stack/issues/60), [#61](https://github.com/trillion-labs/trida-stack/issues/61))
