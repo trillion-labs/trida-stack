@@ -46,8 +46,3 @@ def decision_loss(z, batch):
         per_variant.setdefault(q["variant"], []).append(loss)
     loss = torch.stack([torch.stack(v).mean() for v in per_variant.values()]).mean()
     return loss, (correct / hard if hard else float("nan"))
-
-
-
-# Compatibility for existing loss imports.
-jev_loss = decision_loss

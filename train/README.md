@@ -145,7 +145,7 @@ bash train/block_gated_delta_rule/fetch_kernels.sh
 ```
 
 It clones `yuchen-zhu-zyc/HybridDiffusion@6ca547a`, copies the kernel package in, and applies
-`trillion_mods.patch`. Until you run it, the hybrid path (`hf_block_diffusion_hybrid.py`,
+`trillion_mods.patch`. Until you run it, the hybrid path (`models/hybrid.py`,
 `forward_flare`) will not import. See
 [`block_gated_delta_rule/README.md`](block_gated_delta_rule/README.md) for the by-hand equivalent,
 and `LICENSE.HybridDiffusion` / `NOTICE.HybridDiffusion` / `VENDORED.md` for the license terms —
@@ -172,16 +172,18 @@ The root `train.py` launches `train/train.py`, whose `main()` connects these sta
 | Model/optimizer checkpoint saving and resume | `train/checkpoint.py` |
 
 The old `train.hf_block_diffusion` and `train.hf_block_diffusion_hybrid` imports
-remain available for existing tools. Training flags and launch commands are unchanged.
+remain available for existing tools. Launch commands use `--decision_*`; update scripts that still pass `--jev_*`.
 
-### Compatibility names
+### Compatibility and migration
 
-Use `train.data.decision`, `train.models.decision`, and `--decision_*` in new code.
-The CLI accepts only `--decision_*`; update launch scripts that use `--jev_*`.
-The old `train.jev`, `train.data.jev`, and `train.models.jev` imports still work. Existing `JevRowDataset`, `pack_jev`, `load_jev_records`, `jev_loss`,
-`forward_jev`, and `model(..., jev=batch)` calls remain aliases.
+Only `--decision_*` CLI flags, Python model arguments and metrics are supported.
+W&B configuration keys also use `decision_*`; update sweeps and dashboard filters.
+
+The actual pre-refactor import paths `train.jev`, `train.hf_block_diffusion`, and
+`train.hf_block_diffusion_hybrid` remain until **0.2.0**, when they will be removed.
+New code should import `train.data.decision` and `train.models.*` directly.
 
 The registered head parameter prefix `jev_head.*`, checkpoint file `jev_head.pt`,
-and optimizer parameter-group order are retained for existing checkpoints and
-serving tools. `model.decision_head` exposes that same head without registering
-a second module. Model metrics expose both `decision_*` and legacy `jev_*` keys.
+and optimizer parameter-group order remain unchanged for saved checkpoints and
+serving tools. `model.decision_head` exposes the same registered head without
+adding a second module. The `decision_*` tool scripts replace the old `jev_*` scripts.

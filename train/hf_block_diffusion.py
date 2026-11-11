@@ -1,4 +1,4 @@
-"""Compatibility import for the model now in ``train.models.block_diffusion``."""
+"""Compatibility import, removed in 0.2.0; use ``train.models.block_diffusion``."""
 import sys
 from train.models import block_diffusion as _implementation
 

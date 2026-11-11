@@ -1,4 +1,4 @@
-"""Compatibility import for the model now in ``train.models.hybrid``."""
+"""Compatibility import, removed in 0.2.0; use ``train.models.hybrid``."""
 import sys
 from train.models import hybrid as _implementation
 

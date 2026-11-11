@@ -177,16 +177,12 @@ class HFBlockDiffusion(nn.Module):
         """Head stored under jev_head to preserve checkpoint and optimizer parameter keys."""
         return getattr(self, "jev_head", None)
 
-    def param_groups(self, projector_lr_scale=1.0, decision_head_lr_scale=1.0, *, jev_head_lr_scale=None):
+    def param_groups(self, projector_lr_scale=1.0, decision_head_lr_scale=1.0):
         """Trainable parameters as optimizer groups, each tagged with an ``lr_scale`` relative to the
         base LR (the trainer applies ``schedule * lr_scale`` every step): the vision projector
         (``visual.merger``) at ``projector_lr_scale``, the decision pointer head at ``decision_head_lr_scale``, the
         language model at 1. The vision encoder is
         frozen, so it appears in neither group."""
-        if jev_head_lr_scale is not None:
-            if decision_head_lr_scale != 1.0 and decision_head_lr_scale != jev_head_lr_scale:
-                raise ValueError("Conflicting decision_head_lr_scale and jev_head_lr_scale")
-            decision_head_lr_scale = jev_head_lr_scale
         backbone, projector, decision_head = [], [], []
         for name, p in self.named_parameters():
             if not p.requires_grad:

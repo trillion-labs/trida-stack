@@ -141,11 +141,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   above `main()` in `train/train.py`; `main()` shows the stages directly. Model implementations live in `train/models/`;
   existing model import paths remain available.
 
-- Typed-decision training now uses `decision` names and accepts only `--decision_*`
-  CLI flags. Legacy imports, model calls and checkpoint/optimizer keys remain compatible.
-  It is split in two: data mapping, augmentation and encoding
-  in `train/data/decision.py`, and the pointer head and loss in `train/models/decision.py`.
-  `train/decision.py` re-exports both; legacy Jev imports remain compatibility aliases.
+- **Breaking:** typed-decision training now uses only `--decision_*` CLI flags,
+  Python model arguments, and metrics. W&B config keys use `decision_*` too;
+  update external job scripts, sweeps, and dashboard filters that use `jev_*`.
+  Data/encoding lives in `train/data/decision.py`, head/loss in
+  `train/models/decision.py`. Only the real pre-refactor imports (`train.jev` and
+  `train.hf_block_diffusion*`) remain as shims until **0.2.0**. Checkpoint names,
+  `jev_head.*` parameter keys and optimizer group order are unchanged.
 
 - Vulnerability reports have a second private channel: GitHub private vulnerability
   reporting is enabled, so the Security tab's **Report a vulnerability** button now

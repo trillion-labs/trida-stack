@@ -547,13 +547,8 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
         attn_impl: str = "flex_attention",
         require_kernels: bool | None = None,
         decision_head_dim: int = 0,
-        jev_head_dim: int | None = None,
         **kwargs,
     ):
-        if jev_head_dim is not None:
-            if decision_head_dim and decision_head_dim != jev_head_dim:
-                raise ValueError("Conflicting decision_head_dim and jev_head_dim")
-            decision_head_dim = jev_head_dim
         assert linear_block_mode in ("causal", "bidirectional"), linear_block_mode
         # Reuse the dense setup verbatim (model load, <|mask|> add + untied resize, flex-impl
         # injection, optional per-layer compile). Nothing dense-specific is changed.
@@ -915,11 +910,7 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
         loss, acc = decision_loss(z, decision)
         logs = {"decision_loss": loss.detach(), "decision_acc": acc,
                 "decision_questions": len(decision["questions"]), "decision_tokens": T}
-        return loss, {**logs, **{key.replace("decision_", "jev_"): value for key, value in logs.items()}}
-
-    def forward_jev(self, jev):
-        """Compatibility alias for forward_decision."""
-        return self.forward_decision(jev)
+        return loss, logs
 
     # ================= FLARE two-stream forward ([x0 ; xt], single + multi-turn) =================
     def _make_flare_views(self, input_ids, labels, answer_pos, eps: float = 1e-3):
@@ -1293,11 +1284,7 @@ class HFBlockDiffusionHybrid(HFBlockDiffusion):
     # ------------------------------------------------------------------
     def forward(self, input_ids, labels, attention_mask, seg_id=None, resp_pos=None,
                 resp_block=None, turn_id=None, pixel_values=None, image_grid_thw=None,
-                mrope_pos=None, jev=None, return_logits: bool = False, decision=None):
-        if decision is not None and jev is not None:
-            raise ValueError("Pass decision or jev, not both")
-        if decision is None:
-            decision = jev
+                mrope_pos=None, decision=None, return_logits: bool = False):
         if decision is not None:   # Route through forward for FSDP hooks.
             return self.forward_decision(decision)
         if pixel_values is not None and (self.ar_only or self.linear_block_mode != "bidirectional"):

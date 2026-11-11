@@ -53,8 +53,7 @@ def log_decision_progress(args, dev, running, global_step, lr, gnorm, t0, run):
         f"rec/step {counts[2].item()/args.log_every:,.0f} "
         f"| decision_tps {counts[1].item()/dt:,.0f} | mem {torch.cuda.max_memory_allocated() / 1e9:.1f}GB")
     if run is not None:
-        run.log({"jev_loss": running["decision"]/args.log_every, "jev_acc": running["decision_acc"]/args.log_every,
-                 "decision_loss": running["decision"]/args.log_every, "decision_acc": running["decision_acc"]/args.log_every,
+        run.log({"decision_loss": running["decision"]/args.log_every, "decision_acc": running["decision_acc"]/args.log_every,
                  "lr": lr, "grad_norm": float(gnorm)}, step=global_step)
 
 
@@ -84,8 +83,7 @@ def log_text_progress(args, dev, running, global_step, lr, gnorm, t0, run, decis
                  "peak_mem_gb": mem, "tot_tps": tot_tps, "seq_tps": seq_tps,
                  "resp_tps": resp_tps, "avg_seqlen": g_seqtok/mb,
                  "avg_ntok": g_ntok/mb,
-                 **({"jev_loss": running["decision"]/args.log_every, "jev_acc": running["decision_acc"]/args.log_every,
-                     "decision_loss": running["decision"]/args.log_every, "decision_acc": running["decision_acc"]/args.log_every}
+                 **({    "decision_loss": running["decision"]/args.log_every, "decision_acc": running["decision_acc"]/args.log_every}
                     if decision_iter is not None else {})}, step=global_step)
 
 

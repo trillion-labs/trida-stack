@@ -15,23 +15,11 @@ from train.data.text_sft_data import (
 )
 
 
-@dataclass(init=False)
+@dataclass
 class TrainingLoaders:
     text: DataLoader | None
     decision: Iterator | None  # Already started, preserving worker initialization before the optimizer.
 
-    def __init__(self, text, decision=None, *, jev=None):
-        if decision is not None and jev is not None:
-            raise ValueError("Pass decision or jev, not both")
-        self.text, self.decision = text, decision if decision is not None else jev
-
-    @property
-    def jev(self):
-        return self.decision
-
-    @jev.setter
-    def jev(self, value):
-        self.decision = value
 
 
 def _identity(x):

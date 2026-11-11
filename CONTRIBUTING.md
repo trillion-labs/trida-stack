@@ -135,7 +135,7 @@ CI's) is registered and never run.
 - `tools/test_chat.py` — the chat CLI's offline paths.
 - `train/test_stream_pack.py` — buffered first-fit packing for `--pack --multiturn`,
   on synthetic docs; needs `torch` and `transformers` (its import chain reaches
-  `train.hf_block_diffusion`), but downloads no model.
+  `train.models.block_diffusion`), but downloads no model.
 
 If you add tests, keep the CPU-safe ones runnable without a GPU or network, add them
 to `testpaths` in `pyproject.toml`, and check that whatever they import at module

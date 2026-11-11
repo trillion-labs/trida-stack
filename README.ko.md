@@ -92,11 +92,11 @@ Fast-dLLM v2 방식의 블록 디퓨전 SFT를 사용합니다. 각 학습 시�
 | `score` | 낮은 수준부터 순서대로 나열한 목록 | 수준의 기댓값 |
 
 `--decision_data <kev 형식 JSONL>`을 지정하면 [kev](https://github.com/jaredpalmer/kev) 방식의 의사결정 목적 함수를
-추가합니다(`train/jev.py`). 노이즈가 없는 인과적 스트림에 연결된 작은 **포인터 헤드**가 각 선택지의 `</opt>` 상태를
+추가합니다(`train/data/decision.py` / `train/models/decision.py`). 노이즈가 없는 인과적 스트림에 연결된 작은 **포인터 헤드**가 각 선택지의 `</opt>` 상태를
 질문의 `<decide>` 상태와 비교해 점수를 계산합니다. 각 옵티마이저 스텝에서는 일반 SFT 마이크로배치를 처리한 뒤
 `--decision_micro_per_step`개의 의사결정 마이크로배치를 처리하고, 해당 손실에 `--decision_loss_weight`를 곱해 더합니다.
 각 체크포인트에는 `jev_head.pt`가 함께 저장됩니다. `train/tools/export_kev_checkpoint.py`를 사용하면 kev 디렉터리 구조로 내보낼 수 있습니다.
-자세한 내용: [`train/README.md`](train/README.md#typed-decision-training-jevpy).
+자세한 내용: [`train/README.md`](train/README.md#typed-decision-training-decisionpy).
 
 ### 이미지 입력 (비전-언어 체크포인트)
 
@@ -193,14 +193,16 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
 ```text
 train/                         AR → 디퓨전 SFT 학습 코드 (진입점: train.py → train.train:main)
   README.md                    실행·학습 재개 방법, 모델 계열별 유의사항
-  hf_block_diffusion.py        블록 마스크, 손실 함수, HF 모델 래퍼 (dense / Qwen3)
-  hf_block_diffusion_hybrid.py 하이브리드 구현 (Qwen3.5: gated-delta 선형 어텐션 + 전체 어텐션)
-  jev.py                       유형별 의사결정 목적 함수 (포인터 헤드, kev 방식)
+  models/                    모델 구현, 생성, 의사결정 헤드
+  data/                      데이터 인코딩, 패킹, 로더
+  cli.py                     학습 옵션
+  distributed.py             분산 설정과 FSDP 샤딩
+  optimizer.py, checkpoint.py 옵티마이저, 저장과 학습 재개
+  train.py                   학습 루프와 main()
   tools/                       체크포인트 내보내기·비전 타워 결합·동등성 및 FSDP 검증 도구
   getting_started.ipynb        학습 튜토리얼
   block_gated_delta_rule/      블록 단위 인과적 gated-delta Triton 커널 다운로드 절차
                                (업스트림: PolyForm-NC, 코드 미포함 — fetch_kernels.sh 실행 필요)
-  data/text_sft_data.py        패킹 / 버킷팅 / 멀티턴 데이터 처리
 inference/                     nano-inference: 모델별로 구성된 간결한 서빙 스택
   zoro-1/                      trillionlabs/Zoro-1
     README.md                  서빙, 의사결정, 벤치마크

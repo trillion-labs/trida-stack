@@ -22,10 +22,3 @@ from train.data.decision import (  # noqa: F401
     user_tokens,
 )
 from train.models.decision import PointerHead, decision_loss  # noqa: F401
-
-
-# Legacy names remain available through train.jev.
-JevRowDataset = DecisionRowDataset
-load_jev_records = load_decision_records
-pack_jev = pack_decision
-jev_loss = decision_loss

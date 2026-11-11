@@ -1,5 +1,7 @@
 """CPU checks for training orchestration; no checkpoint downloads or CUDA required."""
 import itertools
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -260,32 +262,19 @@ def test_decision_cli_accepts_new_flags_and_rejects_legacy(suffix, value, expect
     assert error.value.code == 2
 
 
-def test_legacy_decision_imports_are_the_same_objects():
+def test_actual_legacy_imports_remain_until_020():
     import importlib
     from train.data import decision as data
     from train.models import decision as model
-    from train import decision
-
-    assert importlib.import_module('train.data.jev') is data
-    assert importlib.import_module('train.models.jev') is model
-    with pytest.warns(DeprecationWarning):
+    with pytest.warns(DeprecationWarning, match='0.2.0'):
         legacy = importlib.import_module('train.jev')
-    assert legacy is decision
     assert legacy.JevRowDataset is data.DecisionRowDataset
-    assert data.pack_jev is data.pack_decision
-    assert data.load_jev_records is data.load_decision_records
-    assert model.jev_loss is model.decision_loss
+    assert legacy.pack_jev is data.pack_decision
+    assert legacy.load_jev_records is data.load_decision_records
+    assert legacy.jev_loss is model.decision_loss
     assert legacy.PointerHead is model.PointerHead
-
-
-def test_training_loader_legacy_constructor_and_attribute():
-    stream = iter([1])
-    loaders = TrainingLoaders(text=None, jev=stream)
-    assert loaders.decision is loaders.jev is stream
-    loaders.jev = None
-    assert loaders.decision is None
-    with pytest.raises(ValueError):
-        TrainingLoaders(None, decision=stream, jev=stream)
+    assert importlib.import_module('train.hf_block_diffusion') is importlib.import_module('train.models.block_diffusion')
+    assert importlib.import_module('train.hf_block_diffusion_hybrid') is importlib.import_module('train.models.hybrid')
 
 
 def _decision_test_model():
@@ -306,48 +295,70 @@ def _decision_test_model():
     return model
 
 
-def test_decision_forward_preserves_loss_gradients_and_metrics():
+def _baseline():
+    def unpack(value):
+        if isinstance(value, dict):
+            if set(value) == {'tensor', 'dtype'}:
+                return torch.tensor(value['tensor'], dtype=getattr(torch, value['dtype'].split('.')[-1]))
+            return {key: unpack(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [unpack(item) for item in value]
+        return value
+    return unpack(json.loads((Path(__file__).parent / 'fixtures/decision_138239d.json').read_text()))
+
+
+def _model_from_baseline(data):
     model = _decision_test_model()
-    batch = {'input_ids': torch.tensor([[1, 2, 3]]), 'seg_id': torch.tensor([[0, 0, 0]]),
-             'decide': torch.tensor([2]), 'opts': torch.tensor([0, 1]), 'owner': torch.tensor([0, 0]),
-             'questions': [{'start': 0, 'k': 2, 'variant': 0, 'label': 1}]}
-    loss, logs = model(None, None, None, decision=batch)
+    model.load_state_dict(data['head'], strict=True)
+    with torch.no_grad():
+        model.tm.embed_tokens.weight.copy_(data['embedding'])
+    return model
+
+
+def test_decision_loss_and_gradients_match_pre_refactor_138239d():
+    data = _baseline()
+    model = _model_from_baseline(data)
+    loss, logs = model(None, None, None, decision=data['batch'])
+    # Independently generated with the original forward_jev / jev_loss at 138239d.
+    assert loss.item() == pytest.approx(0.7800275087356567, abs=1e-7)
     loss.backward()
-    grads = [p.grad.clone() for p in model.decision_head.parameters()]
-    model.zero_grad()
-    old_loss, old_logs = model(None, None, None, jev=batch)
-    old_loss.backward()
-    assert torch.equal(loss, old_loss)
-    assert all(torch.equal(p.grad, grad) for p, grad in zip(model.jev_head.parameters(), grads))
-    for suffix in ['loss', 'acc', 'questions', 'tokens']:
-        assert logs[f'decision_{suffix}'] == old_logs[f'jev_{suffix}']
-    assert torch.equal(model.forward_jev(batch)[0], loss)
-    with pytest.raises(ValueError):
-        model(None, None, None, decision=batch, jev=batch)
+    for name, parameter in model.named_parameters():
+        torch.testing.assert_close(parameter.grad, data['gradients'][name], rtol=1e-6, atol=1e-7)
+    assert set(logs) == {'decision_loss', 'decision_acc', 'decision_questions', 'decision_tokens'}
 
 
-def test_head_parameter_names_and_optimizer_state_stay_compatible():
-    model = _decision_test_model()
+def test_checkpoint_layout_and_adamw_resume_match_pre_refactor_138239d():
+    data = _baseline()
+    model = _model_from_baseline(data)
     assert model.decision_head is model.jev_head
-    keys = list(model.state_dict())
-    assert keys == ['jev_head.q.weight', 'jev_head.q.bias', 'jev_head.k.weight', 'jev_head.k.bias']
-    old_groups = model.param_groups(jev_head_lr_scale=5)
-    new_groups = model.param_groups(decision_head_lr_scale=5)
-    assert [g['lr_scale'] for g in old_groups] == [g['lr_scale'] for g in new_groups]
-    assert [[id(p) for p in g['params']] for g in old_groups] == [
-        [id(p) for p in g['params']] for g in new_groups]
-    optim = torch.optim.AdamW(old_groups)
-    sum(p.square().sum() for p in model.parameters()).backward()
-    optim.step()
-    restored = _decision_test_model()
-    restored.load_state_dict(model.state_dict(), strict=True)
-    new_optim = torch.optim.AdamW(restored.param_groups(decision_head_lr_scale=5))
-    new_optim.load_state_dict(optim.state_dict())
-    for old, new in zip(optim.state.values(), new_optim.state.values()):
-        assert all(torch.equal(old[key], new[key]) for key in old)
+    assert list(model.state_dict()) == ['jev_head.q.weight', 'jev_head.q.bias', 'jev_head.k.weight', 'jev_head.k.bias']
+    groups = model.param_groups(decision_head_lr_scale=5)
+    names = {id(parameter): name for name, parameter in model.named_parameters()}
+    # Literal historical ordering also catches q/k swaps, despite their identical shapes.
+    assert [(g['lr_scale'], [names[id(p)] for p in g['params']]) for g in groups] == [
+        (1.0, []),
+        (5, ['jev_head.q.weight', 'jev_head.q.bias', 'jev_head.k.weight', 'jev_head.k.bias']),
+    ]
+    assert [(g['lr_scale'], [tuple(p.shape) for p in g['params']]) for g in groups] == [
+        (1.0, []), (5, [(2, 4), (2,), (2, 4), (2,)])]
+    optimizer = torch.optim.AdamW(groups, lr=0.001)
+    model(None, None, None, decision=data['batch'])[0].backward()
+    optimizer.step()
+    for name, parameter in model.state_dict().items():
+        torch.testing.assert_close(parameter, data['updated_head'][name])
+    historical_state = data['optimizer']
+    historical_state['state'] = {int(key): value for key, value in historical_state['state'].items()}
+    optimizer.load_state_dict(historical_state)
+    head_names = data['groups'][1]['parameters']
+    parameters = dict(model.named_parameters())
+    for index, name in enumerate(head_names):
+        for key, value in historical_state['state'][index].items():
+            torch.testing.assert_close(optimizer.state[parameters[name]][key], value)
 
 
-def test_constructor_rejects_conflicting_head_aliases_before_loading_weights():
-    from train.models.hybrid import HFBlockDiffusionHybrid
-    with pytest.raises(ValueError, match='Conflicting'):
-        HFBlockDiffusionHybrid(decision_head_dim=32, jev_head_dim=16)
+def test_removed_model_aliases_are_not_accepted():
+    model = _decision_test_model()
+    with pytest.raises(TypeError, match='jev'):
+        model(None, None, None, jev={})
+    with pytest.raises(TypeError, match='jev_head_lr_scale'):
+        model.param_groups(jev_head_lr_scale=5)

@@ -13,7 +13,7 @@ handling (see NOTICE), so training text is byte-identical to what kev's serving 
 ``train/test_decision.py`` checks that.
 
 Rows run through the trainer's document-isolated causal stack (``forward_decision`` in
-``hf_block_diffusion_hybrid.py``): every question row is one packed document. ``pack_decision`` builds the
+``train/models/hybrid.py``): every question row is one packed document. ``pack_decision`` builds the
 batch dict, including the ``questions`` list that ``train.models.decision.decision_loss`` consumes.
 """
 import hashlib
@@ -304,8 +304,3 @@ def pack_decision(variants, tok):
         seg += [len(questions)] * pad
     return {"input_ids": torch.tensor([ids]), "seg_id": torch.tensor([seg]), "decide": torch.tensor(decide),
             "opts": torch.tensor(opts), "owner": torch.tensor(owner), "questions": questions}
-
-# Compatibility names for existing imports and serialized dataset references.
-JevRowDataset = DecisionRowDataset
-load_jev_records = load_decision_records
-pack_jev = pack_decision
