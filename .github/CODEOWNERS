@@ -20,6 +20,9 @@
 /.github/CODEOWNERS              @guks-trl @usik-luke-trl
 /tools/                          @guks-trl @usik-luke-trl
 
-# The fetch recipes are the install path for both two-stream code paths.
+# The fetch recipes and SGLang install paths (the two-stream kernels, and each model's sglang/ recipe).
 /train/block_gated_delta_rule/   @guks-trl @usik-luke-trl
 /inference/*/sglang/             @guks-trl @usik-luke-trl
+# GravityOCR's launcher: approved advisory exceptions rely on its EXTRA_ARGS allowlist, loopback rule
+# and admin key (docs/supply-chain/exceptions.md).
+/inference/gravityocr/serve.sh   @guks-trl @usik-luke-trl

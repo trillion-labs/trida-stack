@@ -105,7 +105,7 @@ None are redistributed from this repo — all are downloaded at eval time. See
 
 Software licences do not carry over to model weights, and the weights this stack serves
 are **not** covered by this repository's Apache-2.0 licence. They are also not
-redistributed here. The table covers the Trida checkpoint and its bases, then the
+redistributed here. The table covers the Zoro checkpoints and their bases, then the
 GravityOCR checkpoint that `inference/gravityocr/` serves and its base.
 
 | | component | licence | access | verified |

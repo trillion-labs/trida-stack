@@ -20,8 +20,10 @@ finding into a decision that comes back around.
   `evidence`. It is not an assumption.
 - Expiry is a re-review date, not a deadline for the upstream fix. Renewing is fine;
   renewing without re-reading is not.
-- The gate matches by id across every scanned file, and an id excepted once is
-  excepted everywhere. An entry written for one environment therefore says which
+- The gate passes a package once any one of its ids is excepted (it groups findings by
+  package, `tools/check_advisories.py`), so a new advisory on an excepted package is not
+  flagged until the gate matches per finding. An id excepted once is also excepted in every
+  scanned file. An entry written for one environment therefore says which
   environments its evidence covers. The entries for `inference/gravityocr/` come from
   scanning that recipe's own lock (`inference/gravityocr/sglang/requirements-lock.txt`,
   a separate Python 3.12 environment); where the same id can also reach the root or
@@ -382,9 +384,9 @@ finding into a decision that comes back around.
     import export_hf_checkpoint), on an optional export path whose nvidia-modelopt package
     is not in the lock; it writes a checkpoint and loads no pt2 archive. The
     repository's own torch.load() calls read jev_head.pt pointer-head weights that the
-    trainer writes (train/train.py:231, inference/zoro-1/decide_engine.py:141,
-    scripts/export_kev_checkpoint.py:32, train/tools/export_kev_checkpoint.py:28), not
-    pt2 archives.
+    trainer writes (train/train.py:231, inference/zoro-1/decide_engine.py:118,
+    scripts/export_kev_checkpoint.py:32, train/tools/export_kev_checkpoint.py:28), and
+    train/tools/jev_parity_trida.py:25 a test head the same tool writes; none are pt2 archives.
   approver: Trillion Labs research team
   expires: 2026-12-31
 
@@ -413,7 +415,7 @@ finding into a decision that comes back around.
     load our own Trida checkpoints: benchmark/serving/serve_trida_openai.py:210-212, the
     draft-alignment tools train/tools/draftalign/longhorizon.py:35-39 and slot_diag.py:44-48
     (both through HFBlockDiffusionHybrid) and gen_selfdistill.py:21 (a tokenizer), and the
-    zoro-1 serving launchers (inference/zoro-1/serve.py:112 and the vllm/ scripts), which
+    zoro-1 serving launchers (inference/zoro-1/serve.py:173 and the vllm/ scripts), which
     pass --trust-remote-code to SGLang or vLLM. Nothing here calls
     generate(custom_generate=...).
   evidence: >-
