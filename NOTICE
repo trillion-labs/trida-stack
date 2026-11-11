@@ -76,7 +76,7 @@ SGLang self-speculative decoding patch for GravityOCR
   License: Apache License 2.0
   Source:  https://github.com/sgl-project/sglang, tag v0.5.10
            (commit 1519acf37c23f2189adb93f57ca9cd2db1bebf18)
-  Derived: inference/gravityocr/sglang/gravityocr_selfspec.patch modifies 24 upstream
+  Derived: inference/gravityocr/sglang/gravityocr_selfspec.patch modifies 25 upstream
            files and python/pyproject.toml; inference/gravityocr/sglang/python/ holds
            the four new files the patch needs (copied in by sglang/setup.sh), two of
            which adapt portions of SGLang's speculative-decoding code. Applied to the

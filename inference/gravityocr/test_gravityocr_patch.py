@@ -37,6 +37,7 @@ PATCH_TARGETS = [
     "python/sglang/srt/dllm/config.py",
     "python/sglang/srt/dllm/mixin/req.py",
     "python/sglang/srt/dllm/mixin/scheduler.py",
+    "python/sglang/srt/entrypoints/http_server.py",
     "python/sglang/srt/layers/attention/flashinfer_backend.py",
     "python/sglang/srt/layers/attention/vision.py",
     "python/sglang/srt/managers/schedule_batch.py",
@@ -156,6 +157,18 @@ def test_patch_targets_exactly_the_expected_upstream_files():
     for marker in ("new file mode", "deleted file mode", "rename from", "GIT binary patch"):
         assert marker not in text, f"unexpected '{marker}' in the patch"
     assert not set(NEW_FILES) & set(PATCH_TARGETS)
+
+
+def test_server_info_never_returns_the_keys():
+    # Upstream /server_info returns dataclasses.asdict(server_args), keys included, at the NORMAL auth
+    # level: any API-key holder (or any local client, without a key) could read the admin key. The patch
+    # redacts both. This is the one hunk not in the GravityOCR release (see NOTICE).
+    text = PATCH.read_text(encoding="utf-8")
+    start = text.index("diff --git a/python/sglang/srt/entrypoints/http_server.py")
+    hunk = text[start:text.index("\ndiff --git ", start + 1)]
+    added = "\n".join(line[1:] for line in hunk.splitlines() if line.startswith("+") and not line.startswith("+++"))
+    assert 'for key in ("api_key", "admin_api_key"):' in added and '"<redacted>"' in added
+    assert "+        **server_args," in hunk and "-        **dataclasses.asdict(" in hunk
 
 
 # ---------------------------------------------------------------- the four new SGLang files

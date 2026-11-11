@@ -93,6 +93,26 @@ index 3524d40aa0daf456582a8076f9e3f48265b50c9e..4097c1f6319725226719bcf0792c8ed0
                      release_kv_cache(req, self.tree_cache)
                      req.time_stats.set_completion_time()
  
+diff --git a/python/sglang/srt/entrypoints/http_server.py b/python/sglang/srt/entrypoints/http_server.py
+index 6978e0c062e897f0680bf25c14524d3813647efc..790d4cb731236691799aba8dde43fad413789ffc 100644
+--- a/python/sglang/srt/entrypoints/http_server.py
++++ b/python/sglang/srt/entrypoints/http_server.py
+@@ -610,8 +610,14 @@ async def server_info():
+     if hasattr(_global_state.tokenizer_manager.server_args, "model_config"):
+         del _global_state.tokenizer_manager.server_args.model_config
+ 
++    # Never return the keys: this route is at the NORMAL auth level, so any API-key holder (or, without an API
++    # key, any local client) could read the admin key and call the admin-only endpoints.
++    server_args = dataclasses.asdict(_global_state.tokenizer_manager.server_args)
++    for key in ("api_key", "admin_api_key"):
++        if server_args.get(key):
++            server_args[key] = "<redacted>"
+     return {
+-        **dataclasses.asdict(_global_state.tokenizer_manager.server_args),
++        **server_args,
+         **_global_state.scheduler_info,
+         "internal_states": internal_states,
+         "version": __version__,
 diff --git a/python/sglang/srt/layers/attention/flashinfer_backend.py b/python/sglang/srt/layers/attention/flashinfer_backend.py
 index 4fe8aec313015ecd0f10d13a8e532746582bbf63..1eace260f4888bb8ac0769ab0cd2969d2644d021 100644
 --- a/python/sglang/srt/layers/attention/flashinfer_backend.py

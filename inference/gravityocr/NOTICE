@@ -17,7 +17,7 @@ Base project — SGLang
 ------------------------------------------------------------------------------
 Patch — sglang/gravityocr_selfspec.patch
   Copyright 2026 Trillion Labs. Licensed under the Apache License, Version 2.0.
-  A diff against the base commit above. It modifies 24 upstream source files
+  A diff against the base commit above. It modifies 25 upstream source files
   under python/sglang/srt/ and python/pyproject.toml, where it relaxes the
   torchao and torchcodec pins (sglang/overrides.txt records the versions used).
   The changes register the SELFSPEC_DIFFUSION speculative-decoding algorithm
@@ -25,6 +25,9 @@ Patch — sglang/gravityocr_selfspec.patch
   the scheduler, cache and CUDA-graph support it needs, and add optional runtime
   optimizations. The modified files keep their upstream copyright headers.
   Pure code; no model weights.
+  Differs from the patch in the GravityOCR release in one hunk only:
+  entrypoints/http_server.py, where /server_info no longer returns the API and
+  admin keys (added in this repository; to be upstreamed to GravityOCR).
 ------------------------------------------------------------------------------
 New files — sglang/python/sglang/srt/
   speculative/selfspec_diffusion_worker.py

@@ -22,7 +22,7 @@ This record is a separate component, because almost everything that the intake d
 rests on differs:
 
 - the upstream is sgl-project/sglang itself, at tag v0.5.10;
-- our changes are an Apache-2.0 patch to 24 upstream files and `python/pyproject.toml`,
+- our changes are an Apache-2.0 patch to 25 upstream files and `python/pyproject.toml`,
   plus four new files, all committed in this repository (수정포함);
 - it runs in its own Python 3.12 environment with its own resolved lock
   (`inference/gravityocr/sglang/requirements-lock.txt`), never installed together with
