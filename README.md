@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/zoro-mascot-wave-dark.gif">
+    <img src="docs/assets/zoro-mascot-wave.gif" alt="The Zoro-1 mascot" width="160">
+  </picture>
+</p>
+
 # trida-stack
 
 **English** | [한국어](README.ko.md)
@@ -33,6 +40,35 @@ Checkpoints trained with this repo, on Hugging Face:
 
 The agentic benchmark harnesses in [`benchmark/`](benchmark/) still default to the legacy
 [`trillionlabs/Trida-7B-Preview`](https://huggingface.co/trillionlabs/Trida-7B-Preview); moving them to Zoro-1 is tracked in #62.
+
+---
+
+## Zoro-1 Chat (macOS app)
+
+[**Zoro-1 Chat**](inference/zoro-1/mlx/app/README.md) is a native SwiftUI app that runs Zoro-1 as an
+agent on your Mac, on the [MLX stack](inference/zoro-1/mlx/). The model runs locally: no cloud and no API key.
+
+- **Fast and on-device.** Self-speculative decoding on Apple Silicon. Every reply shows its speed,
+  tokens per forward and how much of the prompt came from the cache.
+- **An agent with guard rails.** It reads files and PDFs in a workspace folder you pick, uses a
+  terminal, browses the web, and looks at images and screenshots. Read-only commands run in the
+  macOS sandbox; anything else asks first.
+- **Decisions at work.** The decision head routes tools, checks each reply, judges
+  approvals in auto mode, and answers your own `/decide` questions with a probability per option.
+- **It learns from you.** Facts from your chats go into a local knowledge graph you can browse (and
+  undo), or add on demand with `/update-kg`. Your 👍 / 👎, edits and corrected decisions export as
+  training data.
+- **A mascot.** The pixel mascot above shows what the model is doing: thinking, using a tool,
+  answering, checking.
+
+Requires an Apple Silicon Mac on macOS 14 or later. To build and install it (needs the Command Line
+Tools for `swift`):
+```bash
+cd inference/zoro-1/mlx && uv sync
+cd app && zsh build_app.sh --install
+```
+On first launch, *Get a Model* downloads Zoro-1 and converts it to MLX. See the
+[app README](inference/zoro-1/mlx/app/README.md) for every feature.
 
 ---
 
