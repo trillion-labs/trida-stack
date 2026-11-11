@@ -43,6 +43,33 @@
 
 ---
 
+## Zoro-1 Chat (macOS 앱)
+
+[**Zoro-1 Chat**](inference/zoro-1/mlx/app/README.md)은 Zoro-1을 Mac에서 에이전트로 실행하는 네이티브
+SwiftUI 앱입니다. [MLX 스택](inference/zoro-1/mlx/) 위에서 동작하며, 모델이 로컬에서 실행되므로 클라우드나 API 키가 필요 없습니다.
+
+- **빠른 온디바이스 실행.** Apple Silicon에서 self-speculative 디코딩으로 생성합니다. 답변마다 속도,
+  forward당 토큰 수, 프롬프트 캐시 적중량을 보여 줍니다.
+- **안전장치를 갖춘 에이전트.** 직접 고른 작업 폴더의 파일과 PDF를 읽고, 터미널을 쓰고, 웹을
+  탐색하고, 이미지와 스크린샷을 봅니다. 읽기 전용 명령은 macOS 샌드박스 안에서 실행되고, 그 밖의
+  명령은 먼저 확인을 받습니다.
+- **실제로 쓰이는 의사결정 헤드.** 도구 선택, 답변 검토, 자동 모드의 승인 판단을
+  맡고, 직접 묻는 `/decide` 질문에는 선택지별 확률로 답합니다.
+- **사용할수록 배웁니다.** 대화 속 사실을 로컬 지식 그래프에 쌓으며, 그래프는 직접 살펴보고 추가된 내용을 되돌릴 수 있으며
+  `/update-kg`로 원할 때 추가할 수도 있습니다. 👍 / 👎, 답변 수정, 고친 판단은 학습 데이터로 내보낼
+  수 있습니다.
+- **마스코트.** 위의 픽셀 마스코트가 모델의 상태(생각 중, 도구 사용, 답변, 검토)를 보여 줍니다.
+
+macOS 14 이상의 Apple Silicon Mac이 필요합니다. 빌드와 설치(`swift`를 위해 Command Line Tools 필요):
+```bash
+cd inference/zoro-1/mlx && uv sync
+cd app && zsh build_app.sh --install
+```
+처음 실행하면 *Get a Model*이 Zoro-1을 내려받아 MLX로 변환합니다. 모든 기능은
+[앱 README](inference/zoro-1/mlx/app/README.md)를 참고하세요.
+
+---
+
 ## 지원하는 모델 계열
 
 학습 코드는 기본적으로 특정 아키텍처에 종속되지 않습니다. `model.get_decoder()`로 디코더에 접근할 수 있는 Hugging Face(HF) 자기회귀 언어 모델을 대상으로 합니다.
