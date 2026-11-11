@@ -168,9 +168,8 @@ def create_app(engine):
         if "request" not in body:
             raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float}")
         try:
-            # allow_paths=False: an HTTP client may not have the server open its files as images
-            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
-                                        allow_paths=False)
+            # the image, if any, is in the request (base64 or a data URL): requests never name server files
+            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")))
         except RequestError as e:
             raise HTTPException(400, str(e)) from e
 

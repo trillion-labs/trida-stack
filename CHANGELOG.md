@@ -7,7 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- MLX server: `tool_choice: "none"` now keeps the tool schemas in the prompt and bans `<tool_call>`
+  (before, the tools were dropped from the prompt), so clients sending it (evals, Hermes) get a different
+  prompt than earlier baselines.
+
 ### Added
+
+- Zoro-1 Chat 0.6.0: **a personal knowledge graph** learned from chats (`inference/zoro-1/mlx/app/Knowledge`,
+  a standalone Swift package with its own `kg-selftest`).
+  - **Learning:** after each reply, Zoro-1 decides whether there is something lasting to remember and
+    proposes `subject —relation→ object` facts from your messages, grounded web answers and the documents
+    it read. Web and document facts need a quote that is really in what was read. Each relation has types
+    for its two ends: a fact that fits only the other way round is turned around, and one that fits neither
+    way is dropped. Zoro-1 also types new entries (a Role type for job titles) and links names to existing
+    entries.
+  - **Provenance:** each fact records when and how it was added, the chat, the model, the source page or
+    file with its quote, your message, and a history of changes. Functional relations end the older fact
+    instead of deleting it.
+  - **`/update-kg [focus]`:** learns from the whole chat (every turn, page and document), without the gate.
+  - **Using it:** the facts relevant to a message go with it, fixed when the message is sent so the prompt
+    cache still matches; `recall`, `remember` and `forget` tools.
+  - **Knowledge window** (⇧⌘K): Focus, All (every entry and group, isolated ones too, laid out by force;
+    drag, pinch, Fit) and Relations views. Facts are arrows from subject to object, dashed once ended.
+    An inspector edits entries and facts. A chip under each reply lists what it added, with Undo.
+  - **Brain button** in the sidebar: a pixel brain with a graph on it that shows learning, new facts and
+    relations waiting for review.
+- Zoro-1 Chat:
+  - **Web browsing:** `fetch_url` returns a page outline (title, sections, links, start of the text), and
+    `find_in_page`, `read_section` and `open_link` navigate the page. The system prompt carries today's
+    date and asks for answers quoted from the page, and a "backed by the pages" reply check runs after web
+    tools.
+  - **Auto and manual approvals:** auto mode runs writes and commands without asking. Risky patterns always
+    ask, and Zoro-1 judges the rest (P(safe) ≥ 0.8 runs).
+  - **Code viewer:** a right-hand panel with each written file's diff or current contents.
+  - **Scratch folder:** each chat gets a working folder that the model writes to without approval.
+    Long tool outputs are saved there with a preview and a path, `read_file` reads slices with `offset`,
+    and the toolbar's *Scratch* button lists the files.
+  - **Decision labels:** each reply keeps its typed decisions. You mark the right answers, and
+    `trida-mlx-datamine` writes them to `decision_labels.jsonl` as kev records (`--jev_data`).
+  - **`read_pdf`:** reads PDF text, with scanned pages as images.
+  - **Undo for `write_file`.**
+  - **Chats:** search and rename, and a context meter next to the composer.
+  - **`locate_files`:** a folder step for folders over 480 files, and an on-disk index of file summaries.
+  - **Agent mode is always on;** the toggle and `/agent` are gone.
+  - **Mascot:** a bigger panel; tool props and speed lines; tidying during compaction; numbers under the
+    caption; reactions to feedback, edits and clicks; listening and dozing; trainer levels with
+    accessories and badges; time-of-day touches; the mascot as the app icon and a live Dock icon.
+- Zoro-1 Chat:
+  - **Look:** a forest-and-sand theme for light and dark mode, sand bubbles for the user, and serif
+    Markdown headings.
+  - **Reply footer:** one line under each reply, with a self-spec draft meter and a check seal.
+  - **Sidebar:** chat rows with a green selection.
+  - **Mascot:** an animated pixel figure in the sidebar, showing the model's state (reading, thinking,
+    deciding, using a tool, answering, checking, done, error, waiting).
+- Zoro-1 Chat renders replies from Markdown natively: headings, nested and task lists, quotes,
+  aligned tables, rules, code blocks with a language label and a copy button, and display math shown as
+  LaTeX source. The parser is `Markdown.parse` in TridaChatCore.
+- `inference/zoro-1/mlx/filesearch/`: an offline eval of file search with the decision model
+  (DecisionRAG-style, arXiv:2610.35868): 35 questions with known answer files over a pinned snapshot of
+  this repository, comparing BM25, per-file yes/no, per-batch choice and tree navigation.
+- Zoro-1 Chat: a `locate_files` decision tool that finds files by meaning in any language. It ranks
+  every file's opening lines with per-batch choice questions, plus keyword search's top 10.
+- Shared SGLang/MLX decision requests and answer formatting, torch-free pointer-head
+  conversion to safetensors, bounded state reuse, and parity/HTTP regression tests (#61).
+
+- Typed decisions in the MLX server (`POST /v1/decide`): Zoro-1's pointer head answers choice / yes-no /
+  score questions over a state (one shared state prefill, a branch per question), and below a confidence
+  threshold the model reasons once (self-spec) and decides again. The server also gained a `<tool_call>`
+  ban for `tool_choice: "none"` (tools stay in the prompt, so the prompt cache still matches), and two
+  opt-in generation guards, off by default so evals and speedrun runs decode unguarded: a tool-call gate
+  (`--tool-call-gate P`, a call only where its raw probability is at least P) and a loop guard
+  (`--loop-guard`: exact and n-gram repeats; a loop while thinking closes the thinking and answers).
+  `/v1/models` reports both. Also `--log-requests` (old logs pruned at start, `--log-requests-keep-days`,
+  default 7), `--mlx-cache-limit-mb`, and `memory_mb` in `/v1/models`. A reply the loop guard cuts short
+  ends with `finish_reason: "length"`.
+- Zoro-1 Chat, a native macOS app for the MLX server (`inference/zoro-1/mlx/app`): streaming chat with decode
+  stats, images, agent tools (files, a per-chat terminal, screenshots, UI control), decision-model tool
+  routing, reply checks with one rewrite, `/decide`, compaction near the context limit, saved chats, and a
+  self-contained bundle / DMG build.
+- `trida-mlx-datamine` (the app's chats and request logs → scrubbed candidate training data: preference
+  pairs, feedback, tool use, decisions, failures, trajectories) and `trida-mlx-simuser` (an LLM plays the
+  user of the app to collect more trajectories, through a local, token-protected automation API).
 
 - `README.ko.md`: a Korean README, linked from the English one (#57).
 - README: a Models table with Hugging Face links for Zoro-1 and Zoro (formerly Trida2.0-4B), and
@@ -32,6 +114,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Zoro-1 Chat: agent mode is always on, and its toolbar toggle, setting and `/agent` command are gone.
+  With it off, the model still wrote tool calls as text that nothing could run; tool routing already
+  keeps tools out of replies that don't need them.
+- `trida-mlx-server`: without `--served-model-name`, the model id is the model folder or repo name,
+  lowercased (e.g. `zoro-1-mlx-q8`), instead of always `trida2.0-4b`. Zoro-1 Chat names a server it
+  did not start by the folder that server loaded.
+- Zoro-1 Chat reply review is one direct decision, with no reasoning pass. P(yes) below 0.2 fails and
+  triggers the rewrite; 0.2–0.5 is shown as unsure and changes nothing. "Claims match results" runs only
+  after an action tool or a failed or refused call, and is split into two questions: does the reply
+  claim an action, and did the tools show it succeeded.
+- MLX `POST /v1/decide` now defaults to `reasoning: false` instead of `"auto"`.
+  Send `reasoning: "auto"` explicitly to retain confidence-based escalation. Both
+  `true` and `"auto"` default to self-spec reasoning; `trida_mode: "causal"` overrides it.
 - **nano-inference is now one stack per model.** `inference/` moved to `inference/zoro-1/` and serves
   only `trillionlabs/Zoro-1`:
   - the default model is `trillionlabs/Zoro-1` (gated) instead of `trillionlabs/Trida2.0-4B`
@@ -80,6 +175,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Zoro-1 Chat:
+  - **Prompt cache across messages:** the tool router's empty reply placeholder was sent as an empty
+    assistant turn, so each new message re-read the whole chat (about 80 s at 42k tokens).
+  - **Agent loop:** the last step answers without tools instead of stopping at "Stopped after N agent
+    steps". A call repeated in the same turn, or a URL already opened earlier in the chat, is not run again.
+    After five web calls, the results say how many steps are left.
+  - **Searches:** a search that uses none of the user's words gets a note to search with their words as
+    written, since names were being romanized wrongly. `fetch_url` suggests Naver and namu.wiki for Korean
+    subjects.
+  - **Tool-call gate:** when the gate held back a call the model meant to make and the reply degenerated
+    into `|` until the loop guard, the step is retried once with the gate relaxed. Saving to the knowledge
+    graph now routes to the memory tools.
+- `inference/zoro-1/mlx`: tool calls written without the `<tool_call>` wrapper (bare `<function=…>` blocks after a first wrapped call) are now parsed instead of dropped. A stray `</tool_call>` no longer shows up in the reply.
 - Metrics snapshots are labelled with the ISO week in KST. The weekly run moved to Monday 07:17 KST
   (#54), which is still Sunday in UTC, so labelling by the UTC date named the first post-change run
   2026-W44 again and its PR (#71) would have overwritten the reviewed W44 snapshot. Every existing
@@ -93,6 +201,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tools/check_first_party.py` fails CI when a listed login stops resolving.
 
 ### Security
+
+- Decision requests never name files. `decide_request.parse` (both copies, SGLang and MLX) takes an image only
+  in memory: a PIL image, base64 or a data URL. Reading a file moved to `decide_request.open_image(path)`,
+  which Python callers call themselves, and the `allow_paths` flag every HTTP entry point had to remember to
+  turn off is gone. Before, `/v1/decide` was safe only because both servers passed `allow_paths=False`
+  (CodeQL: uncontrolled data used in a path expression).
 
 - `filelock` floored at `>=4.2.1` and both lock files moved off 4.1.0. Six
   advisories, the worst GHSA-v4x8-3wr5-3wq8 (HIGH). It is transitive, so the floor

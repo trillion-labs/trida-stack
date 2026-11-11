@@ -80,3 +80,6 @@ benchmark/**/predictions*.jsonl
 **/vllm_native_diffusion/block_causal_readout.py
 build/
 dist/
+
+# inference/zoro-1/mlx/filesearch/eval.py output
+filesearch_results/

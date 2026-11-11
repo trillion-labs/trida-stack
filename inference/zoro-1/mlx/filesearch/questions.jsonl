@@ -1,0 +1,35 @@
+{"id": "q01", "lang": "en", "question": "Where is the n-gram repetition detector that stops a generation stuck in a loop?", "gold": ["inference/mlx/trida_mlx/decode.py"]}
+{"id": "q02", "lang": "en", "question": "Which code trims long reasoning so it still fits into the decision state?", "gold": ["inference/mlx/trida_mlx/decision.py"]}
+{"id": "q03", "lang": "en", "question": "How does the chat app summarize old messages when the context window is almost full?", "gold": ["inference/mlx/app/Sources/TridaChat/Compaction.swift"]}
+{"id": "q04", "lang": "ko", "question": "앱을 껐다 켜도 대화 기록이 남도록 저장하는 코드는 어디 있어?", "gold": ["inference/mlx/app/Sources/TridaChat/ChatStore.swift"]}
+{"id": "q05", "lang": "en", "question": "Where are the chat app's slash commands defined?", "gold": ["inference/mlx/app/Sources/TridaChat/SlashCommands.swift"]}
+{"id": "q06", "lang": "en", "question": "Which part of the app decides, before the model answers, whether any tool is needed and which one?", "gold": ["inference/mlx/app/Sources/TridaChat/ToolRouter.swift"]}
+{"id": "q07", "lang": "ko", "question": "터미널 명령을 대화 내내 같은 셸 세션에서 실행하게 해 주는 구현은 어디야?", "gold": ["inference/mlx/app/Sources/TridaChatCore/ShellSession.swift"]}
+{"id": "q08", "lang": "en", "question": "Where does the app check a reply against quality criteria, such as answering in the user's language, and rewrite it?", "gold": ["inference/mlx/app/Sources/TridaChat/ReplyReview.swift"]}
+{"id": "q09", "lang": "ko", "question": "LLM이 사용자 역할을 맡아 앱과 대화하면서 궤적을 만드는 스크립트는?", "gold": ["inference/mlx/trida_mlx/simuser.py"]}
+{"id": "q10", "lang": "en", "question": "Which tool turns the app's logs into training data and scrubs personal information like emails and paths?", "gold": ["inference/mlx/trida_mlx/datamine.py"]}
+{"id": "q11", "lang": "en", "question": "Where is the local HTTP API that lets other programs drive the chat app, protected by a token file?", "gold": ["inference/mlx/app/Sources/TridaChat/Automation.swift"]}
+{"id": "q12", "lang": "en", "question": "What stops me from accidentally pushing to the public repository?", "gold": [".githooks/pre-push"]}
+{"id": "q13", "lang": "ko", "question": "비상업 라이선스라 저장소에 포함하지 않은 gated-delta Triton 커널은 어떻게 받아 와?", "gold": ["train/block_gated_delta_rule/fetch_kernels.sh", "train/block_gated_delta_rule/README.md"]}
+{"id": "q14", "lang": "en", "question": "Where is the complementary masking of the block-diffusion training loss implemented?", "gold": ["train/hf_block_diffusion.py", "train/hf_block_diffusion_hybrid.py"]}
+{"id": "q15", "lang": "en", "question": "How do I add a vision encoder to a checkpoint that was trained on text only?", "gold": ["train/tools/compose_vl_checkpoint.py"]}
+{"id": "q16", "lang": "en", "question": "How do I export a trained checkpoint so kev can benchmark and serve it?", "gold": ["train/tools/export_kev_checkpoint.py", "scripts/export_kev_checkpoint.py"]}
+{"id": "q17", "lang": "en", "question": "Where are multi-turn conversations packed into fixed-length training rows?", "gold": ["train/data/text_sft_data.py"]}
+{"id": "q18", "lang": "ko", "question": "결정(decision) 손실 가중치 같은 학습 명령줄 옵션은 어디서 정의돼?", "gold": ["train/cli.py"]}
+{"id": "q19", "lang": "en", "question": "How should I report a security vulnerability without opening a public issue?", "gold": ["SECURITY.md"]}
+{"id": "q20", "lang": "ko", "question": "이 프로젝트에서 누가 무엇을 결정하고 그 결정은 어디에 기록돼?", "gold": ["GOVERNANCE.md"]}
+{"id": "q21", "lang": "en", "question": "Where is the registry that maps instruction-following check names to their checker classes?", "gold": ["inference/ifeval_lib/instructions_registry.py"]}
+{"id": "q22", "lang": "en", "question": "Where does the vLLM integration register the diffusion model architecture?", "gold": ["inference/vllm/vllm_native_diffusion/plugin.py"]}
+{"id": "q23", "lang": "ko", "question": "Hugging Face 체크포인트를 Mac에서 쓸 수 있게 변환하고 8비트로 양자화하는 스크립트는?", "gold": ["inference/mlx/trida_mlx/convert.py"]}
+{"id": "q24", "lang": "ko", "question": "self-spec 디코딩 결과가 greedy AR과 정확히 같은지 확인하는 도구는 어디 있어?", "gold": ["inference/mlx/trida_mlx/verify.py"]}
+{"id": "q25", "lang": "en", "question": "Where are images encoded for the vision-language model on Apple Silicon?", "gold": ["inference/mlx/trida_mlx/vision.py"]}
+{"id": "q26", "lang": "en", "question": "Which patch adds two-stream diffusion support to SGLang?", "gold": ["inference/sglang/two_stream_diffusion.patch"]}
+{"id": "q27", "lang": "en", "question": "Which datasets can be downloaded for pretraining, and what are their licenses?", "gold": ["data/DATA_CATALOG.md", "data/download_pretraining.sh"]}
+{"id": "q28", "lang": "en", "question": "What collects the weekly community metrics snapshot?", "gold": ["tools/collect_metrics.py"]}
+{"id": "q29", "lang": "en", "question": "How do we run the SWE-bench evaluation?", "gold": ["benchmark/swe_bench/run_swebench.py", "benchmark/swe_bench/README.md"]}
+{"id": "q30", "lang": "en", "question": "What checks that the Hugging Face model card still matches the repo?", "gold": ["tools/check_model_card.py", ".github/workflows/model-card.yml"]}
+{"id": "q31", "lang": "ko", "question": "앱이 Python 서버 프로세스를 띄우고 종료하는 코드는?", "gold": ["inference/mlx/app/Sources/TridaChatCore/ServerProcess.swift"]}
+{"id": "q32", "lang": "en", "question": "Where are the on-screen click and typing actions the app's UI agent can take?", "gold": ["inference/mlx/app/Sources/TridaChat/UITools.swift", "inference/mlx/app/Sources/TridaChat/UIAgent.swift"]}
+{"id": "q33", "lang": "ko", "question": "답변에 좋아요/싫어요를 남기고 그걸 학습 데이터로 내보내는 기능은 어디 구현돼 있어?", "gold": ["inference/mlx/app/Sources/TridaChat/Feedback.swift"]}
+{"id": "q34", "lang": "en", "question": "Which tests cover the tool-call probability gate and the loop guard?", "gold": ["inference/mlx/tests/test_ban.py"]}
+{"id": "q35", "lang": "en", "question": "Where is the self-speculative decode config with block size 7 and generation block 4?", "gold": ["inference/configs/trida_self_spec_b7_g4.yaml"]}
