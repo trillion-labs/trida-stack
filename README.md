@@ -95,11 +95,11 @@ optional image) and typed *questions*, it returns calibrated probabilities inste
 | `choice` | `{key: description}` | a distribution over the keys |
 | `score` | a list of levels, lowest first | the expected level |
 
-`--jev_data <kev-format JSONL>` adds this objective in [kev](https://github.com/jaredpalmer/kev)'s
+`--decision_data <kev-format JSONL>` adds this objective in [kev](https://github.com/jaredpalmer/kev)'s
 scheme (`train/jev.py`): a small **pointer head** on the clean causal stream scores each option's
 `</opt>` state against the question's `<decide>` state. Each optimizer step runs the usual SFT
-micro-batches, then `--jev_micro_per_step` decision micro-batches whose loss is added with weight
-`--jev_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_kev_checkpoint.py`
+micro-batches, then `--decision_micro_per_step` decision micro-batches whose loss is added with weight
+`--decision_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_kev_checkpoint.py`
 exports kev's layout. Details: [`train/README.md`](train/README.md#typed-decision-training-jevpy).
 
 ### Images (vision-language checkpoints)
@@ -135,8 +135,8 @@ PYTHONPATH=. torchrun --nproc_per_node=8 train.py \
 Native-torch **FSDP2**, no DeepSpeed. `python train.py --help` lists all flags (packing,
 length/response bucketing, multi-turn supervision, activation offload, fused CE, …).
 
-Add a typed-decision objective to the same run with `--jev_data <kev-format JSONL files/dirs>`
-(see [Typed decisions](#typed-decisions-joint-training)); `--jev_only` trains the decision objective alone (no SFT data, no diffusion loss).
+Add a typed-decision objective to the same run with `--decision_data <kev-format JSONL files/dirs>`
+(see [Typed decisions](#typed-decisions-joint-training)); `--decision_only` trains the decision objective alone (no SFT data, no diffusion loss).
 
 The saved checkpoint is a **stock HF causal LM** plus an added `<|mask|>` token and a
 `block_diffusion.json` sidecar (`bd_size`, `mask_id`, `ar_loss_weight`) — so it loads with plain
