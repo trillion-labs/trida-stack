@@ -182,6 +182,14 @@ def test_no_other_files_under_the_sglang_tree():
 
 
 # ---------------------------------------------------------------- setup.sh and the lock
+def test_setup_never_puts_the_cwd_on_sys_path():
+    # From inference/gravityocr/, `python -` would find the recipe's own sglang/ folder before the
+    # installed SGLang, and the verify step would fail with a misleading "env does not match".
+    text = SETUP.read_text()
+    first_python = text.index('"$VENV/bin/python"')
+    assert "export PYTHONSAFEPATH=1" in text[:first_python]
+
+
 def _norm(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 

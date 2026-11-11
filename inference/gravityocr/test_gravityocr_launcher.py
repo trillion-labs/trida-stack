@@ -194,6 +194,22 @@ def test_self_spec_is_the_default(launcher):
     assert "management endpoints are open" in r.stderr
 
 
+def test_self_spec_turns_grammar_backends_off(launcher):
+    # The self-spec worker builds no grammar vocab mask, so a token a grammar forbids raises inside the
+    # scheduler and takes the whole server down. Until it does, self-spec serves no constrained decoding.
+    assert launcher().opt("--grammar-backend") == "none"
+    assert "--grammar-backend" not in launcher("MODE=causal").argv
+
+
+@pytest.mark.parametrize("from_recipe_folder", [False, True])
+def test_python_never_puts_the_cwd_on_sys_path(launcher, from_recipe_folder):
+    # From inference/gravityocr/, `python -m sglang.launch_server` would import the recipe's own sglang/
+    # folder (a namespace package, first on sys.path) instead of the installed SGLang.
+    r = launcher(cwd=HERE if from_recipe_folder else None)
+    assert r.returncode == 0, r.stderr
+    assert r.env["PYTHONSAFEPATH"] == "1"
+
+
 def test_echo_line(launcher):
     r = launcher()
     assert r.stdout.splitlines()[0] == (
@@ -392,6 +408,10 @@ def _assert_private_key_file(r):
     assert not keydir.exists()
 
 
+@pytest.mark.skipif(
+    BASH is not None and subprocess.run([BASH, "-c", "((BASH_VERSINFO[0] >= 4))"]).returncode != 0,
+    reason="bash 3.2 (macOS /bin/bash) escapes the quote in the key differently; serve.sh targets Linux",
+)
 def test_api_key_reaches_sglang_through_a_private_config_file(launcher):
     key = "s3cr'et/Key-1#x"
     r = launcher(env={"SERVE_HOST": "0.0.0.0", "API_KEY": key})

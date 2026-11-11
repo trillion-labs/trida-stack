@@ -38,6 +38,9 @@
 # same greedy outputs as that freeze on 100 OCR crops, in self-spec and causal mode.
 # The lock was generated with uv 0.11.27.
 set -euo pipefail
+# Never put the current directory on sys.path: run from inference/gravityocr/, `python -` would find the
+# recipe's own sglang/ folder before the installed SGLang, and the verify step would fail.
+export PYTHONSAFEPATH=1
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 # Package sources are fixed by the flags below; no index or config from the environment may add one.

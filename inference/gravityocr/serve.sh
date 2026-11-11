@@ -30,6 +30,10 @@
 # Verify:  curl -s http://127.0.0.1:30000/v1/models
 #          "$VBIN/python" inference/gravityocr/ocr_request.py --synthetic "Hello GravityOCR"
 set -euo pipefail
+# Python never puts the current directory on sys.path (this launcher, the Hub download and SGLang's
+# children): run from inference/gravityocr/, the recipe's own sglang/ folder would be imported instead of
+# the installed SGLang, and `-m sglang.launch_server` would not be found.
+export PYTHONSAFEPATH=1
 
 die() { local code=$1; shift; echo "[serve] error: $*" >&2; exit "$code"; }
 usage() { sed -n '/^# Serve /,/^set -euo pipefail$/{/^set /d;s/^# \{0,1\}//;p;}' "$0"; }
@@ -211,6 +215,10 @@ if [ "$MODE" = self-spec ]; then
   # size 1. Under bf16 kernels a near-tie can resolve differently from causal decoding. With
   # repetition_penalty != 1, export SELFSPEC_EXACT_PENALTY=1.
   ARGS+=(--speculative-algorithm SELFSPEC_DIFFUSION --speculative-num-draft-tokens "$DRAFT" --page-size 1)
+  # The self-spec worker builds no grammar vocab mask yet, so a token that a json_schema / regex / ebnf
+  # grammar forbids raised inside the scheduler and took the whole server down. With no grammar backend,
+  # SGLang aborts such requests with a clear error instead.
+  ARGS+=(--grammar-backend none)
   # SELFSPEC_POS_OFFSET=1 is the position layout GravityOCR's published results were produced with
   # (0 is the AR-aligned layout). A checkpoint dir with block_diffusion.json supplies the mask id
   # itself; otherwise GLM-OCR's <|mask|> (59282) is used.
