@@ -103,10 +103,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to a text-only checkpoint. `shape_for_sglang.py` passes VL checkpoints through.
   The FSDP ranks stay in lockstep when a batch has no images.
 - Typed-decision training in [kev](https://github.com/jaredpalmer/kev)'s scheme
-  (`train/jev.py`, `--jev_data` / `--jev_only`). A pointer head on the clean causal
+  (`train/data/decision.py`, `train/models/decision.py`, `--decision_data` / `--decision_only`). A pointer head on the clean causal
   stream answers typed questions (yes/no, pick one, score) over a state. kev's
   encoding, augmentation and loss are ported. It runs alone or interleaved with SFT,
-  with `--jev_head_lr_scale`, `--jev_loss_weight` and `--jev_micro_per_step`.
+  with `--decision_head_lr_scale`, `--decision_loss_weight` and `--decision_micro_per_step`.
   `train/tools/export_kev_checkpoint.py` exports a checkpoint to kev's layout for
   `kev.benchmark` / `kev.serve`.
 - `--fp32_master` (fp32 weights and AdamW state over bf16 compute; needed at small
@@ -135,6 +135,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `--mode decide` defaults to the same checkpoint, since Zoro-1 carries `jev_head.pt`
   - `inference/` is no longer a Python package (`pyproject.toml` packages `train` only); the scripts
     keep their sibling imports, and paths across docs, CI and tooling point at `inference/zoro-1/`
+
+- Training orchestration is split into model construction, distributed setup/sharding,
+  data loaders, optimizer and checkpointing modules. Training-loop functions stay
+  above `main()` in `train/train.py`; `main()` shows the stages directly. Model implementations live in `train/models/`;
+  existing model import paths remain available.
+
+- Typed-decision training now uses `decision` names and accepts only `--decision_*`
+  CLI flags. Legacy imports, model calls and checkpoint/optimizer keys remain compatible.
+  It is split in two: data mapping, augmentation and encoding
+  in `train/data/decision.py`, and the pointer head and loss in `train/models/decision.py`.
+  `train/decision.py` re-exports both; legacy Jev imports remain compatibility aliases.
 
 - Vulnerability reports have a second private channel: GitHub private vulnerability
   reporting is enabled, so the Security tab's **Report a vulnerability** button now

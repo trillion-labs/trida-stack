@@ -105,19 +105,19 @@ same checkpoint.
   `preprocessor_config.json`; `inference/zoro-1/sglang/tools/shape_for_sglang.py` shapes them for serving
   (text requests; image serving is not wired up yet).
 
-## Typed-decision training (`jev.py`)
+## Typed-decision training (`decision.py`)
 
-`--jev_data <kev-format JSONL files/dirs>` adds a typed-decision objective in kev's scheme
+`--decision_data <kev-format JSONL files/dirs>` adds a typed-decision objective in kev's scheme
 (https://github.com/jaredpalmer/kev) to the FLARE path: a pointer head on the clean causal stream scores each
 option's `</opt>` state against the question's `<decide>` state, trained with kev's cross-entropy, augmentation and
 none-of-the-above pairs (vendored; encodings are byte-identical to kev's, forward probabilities match kev's model to
-fp32 noise — `train/tools/jev_parity_*.py`).
+fp32 noise — `train/tools/decision_parity_*.py`).
 
-- **Schedule:** each optimizer step runs `--grad_accum` SFT micro-batches, then `--jev_micro_per_step` Jev
-  micro-batches; the Jev loss is added with `--jev_loss_weight` λ (like `--ar_loss_weight`), SFT gradients keep
-  their scale. Jev rows run with the plain causal kernels (doc-isolated), never the `[x0 ; xt]` two-stream ones.
-- **Data:** kev's training sets (`decision-v7` train, `night2/dates_unknowable`, `round15/joint`); `--jev_max_state`
-  (default 7,552), `--jev_max_tokens` per micro-batch, `--jev_p_none_pair` (0.25).
+- **Schedule:** each optimizer step runs `--grad_accum` SFT micro-batches, then `--decision_micro_per_step` decision
+  micro-batches; the decision loss is added with `--decision_loss_weight` λ (like `--ar_loss_weight`), SFT gradients keep
+  their scale. decision rows run with the plain causal kernels (doc-isolated), never the `[x0 ; xt]` two-stream ones.
+- **Data:** kev's training sets (`decision-v7` train, `night2/dates_unknowable`, `round15/joint`); `--decision_max_state`
+  (default 7,552), `--decision_max_tokens` per micro-batch, `--decision_p_none_pair` (0.25).
 - **Output:** each checkpoint also gets `jev_head.pt`; `train/tools/export_kev_checkpoint.py` writes kev's full-weight
   layout so `kev.benchmark --run` / `kev.serve --run` score and serve it.
 
@@ -154,3 +154,34 @@ the fetched code is noncommercial and not covered by this repo's license.
 Once fetched, the kernels are relative-import-only and self-contained (torch + triton + fla). Note
 for anyone debugging them: test through the real model path — synthetic random `g` (the log-decay
 gate must be ≤ 0) produces garbage that looks like kernel bugs.
+
+## Code layout
+
+The root `train.py` launches `train/train.py`, whose `main()` connects these stages:
+
+| Stage | File |
+|---|---|
+| GPU/process-group setup and FSDP sharding | `train/distributed.py` |
+| Model construction and pretrained component loading | `train/models/build.py` |
+| Dense and hybrid model implementations | `train/models/block_diffusion.py`, `train/models/hybrid.py` |
+| Text and decision data-loader construction | `train/data/loaders.py` |
+| Decision records, augmentation, encoding and packing | `train/data/decision.py` |
+| Decision pointer head and loss | `train/models/decision.py` |
+| AdamW setup, learning-rate schedule and optimizer updates | `train/optimizer.py` |
+| Text/mixed and decision-only loops, metrics | `train/train.py` (functions above `main()`) |
+| Model/optimizer checkpoint saving and resume | `train/checkpoint.py` |
+
+The old `train.hf_block_diffusion` and `train.hf_block_diffusion_hybrid` imports
+remain available for existing tools. Training flags and launch commands are unchanged.
+
+### Compatibility names
+
+Use `train.data.decision`, `train.models.decision`, and `--decision_*` in new code.
+The CLI accepts only `--decision_*`; update launch scripts that use `--jev_*`.
+The old `train.jev`, `train.data.jev`, and `train.models.jev` imports still work. Existing `JevRowDataset`, `pack_jev`, `load_jev_records`, `jev_loss`,
+`forward_jev`, and `model(..., jev=batch)` calls remain aliases.
+
+The registered head parameter prefix `jev_head.*`, checkpoint file `jev_head.pt`,
+and optimizer parameter-group order are retained for existing checkpoints and
+serving tools. `model.decision_head` exposes that same head without registering
+a second module. Model metrics expose both `decision_*` and legacy `jev_*` keys.

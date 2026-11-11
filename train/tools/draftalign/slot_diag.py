@@ -20,7 +20,7 @@ ap.add_argument("--out", default="")
 ap.add_argument("--tag", default="")
 a = ap.parse_args()
 
-from train.hf_block_diffusion_hybrid import HFBlockDiffusionHybrid
+from train.models.hybrid import HFBlockDiffusionHybrid
 
 dev = "cuda"
 rows = json.load(open(a.details))[: a.limit]

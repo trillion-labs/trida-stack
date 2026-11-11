@@ -91,10 +91,10 @@ Fast-dLLM v2 방식의 블록 디퓨전 SFT를 사용합니다. 각 학습 시�
 | `choice` | `{키: 설명}` | 각 키에 대한 확률 분포 |
 | `score` | 낮은 수준부터 순서대로 나열한 목록 | 수준의 기댓값 |
 
-`--jev_data <kev 형식 JSONL>`을 지정하면 [kev](https://github.com/jaredpalmer/kev) 방식의 의사결정 목적 함수를
+`--decision_data <kev 형식 JSONL>`을 지정하면 [kev](https://github.com/jaredpalmer/kev) 방식의 의사결정 목적 함수를
 추가합니다(`train/jev.py`). 노이즈가 없는 인과적 스트림에 연결된 작은 **포인터 헤드**가 각 선택지의 `</opt>` 상태를
 질문의 `<decide>` 상태와 비교해 점수를 계산합니다. 각 옵티마이저 스텝에서는 일반 SFT 마이크로배치를 처리한 뒤
-`--jev_micro_per_step`개의 의사결정 마이크로배치를 처리하고, 해당 손실에 `--jev_loss_weight`를 곱해 더합니다.
+`--decision_micro_per_step`개의 의사결정 마이크로배치를 처리하고, 해당 손실에 `--decision_loss_weight`를 곱해 더합니다.
 각 체크포인트에는 `jev_head.pt`가 함께 저장됩니다. `train/tools/export_kev_checkpoint.py`를 사용하면 kev 디렉터리 구조로 내보낼 수 있습니다.
 자세한 내용: [`train/README.md`](train/README.md#typed-decision-training-jevpy).
 
@@ -133,8 +133,8 @@ PYTHONPATH=. torchrun --nproc_per_node=8 train.py \
 DeepSpeed 없이 PyTorch의 **FSDP2**로 실행됩니다. 패킹, 길이·응답 기준 버킷팅, 멀티턴 지도 학습, 활성값 오프로딩,
 fused CE 등 전체 옵션은 `python train.py --help`에서 확인할 수 있습니다.
 
-학습 명령에 `--jev_data <kev 형식 JSONL 파일/디렉터리>`를 추가하면 의사결정 작업도 함께 학습합니다
-([유형별 의사결정](#유형별-의사결정-공동-학습) 참고). `--jev_only`를 사용하면 SFT 데이터와 디퓨전 손실 없이 의사결정 목적 함수만으로 학습합니다.
+학습 명령에 `--decision_data <kev 형식 JSONL 파일/디렉터리>`를 추가하면 의사결정 작업도 함께 학습합니다
+([유형별 의사결정](#유형별-의사결정-공동-학습) 참고). `--decision_only`를 사용하면 SFT 데이터와 디퓨전 손실 없이 의사결정 목적 함수만으로 학습합니다.
 
 체크포인트는 **일반 HF 자기회귀 언어 모델**에 `<|mask|>` 토큰과 별도 메타데이터 파일인 `block_diffusion.json`
 (`bd_size`, `mask_id`, `ar_loss_weight`)을 추가한 형태로 저장됩니다. `AutoModelForCausalLM.from_pretrained`로 바로 불러올 수 있습니다.
