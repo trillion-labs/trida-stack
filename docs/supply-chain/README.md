@@ -185,7 +185,8 @@ Apache-2.0 patch.
   --disable-pip`), since it targets Python 3.12 and CI runs 3.10; that mode skips the
   four `+cu129` builds (torchvision, torchaudio, torchao, torchcodec), which PyPI does not
   carry.
-- **GravityOCR's SGLang recipe is not exercised in CI.** No job applies its patch or
-  builds its environment, and the pin-drift and fetch-recipe checks cover only the
-  HybridDiffusion pin, so a change to `inference/gravityocr/sglang/` needs a manual run on
-  a GPU host.
+- **GravityOCR's SGLang environment is not built in CI.** The weekly fetch-recipe job
+  (`tools/verify_fetch.sh`) checks that the pinned SGLang commit resolves, that the patch
+  applies and that the patched sources parse, but no job builds the environment or starts
+  the server, so a change to `inference/gravityocr/sglang/` still needs a manual run on a
+  GPU host.

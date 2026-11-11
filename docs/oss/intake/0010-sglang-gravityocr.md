@@ -118,17 +118,18 @@ certifi), so that only the findings above remain.
    - NVIDIA's CUDA libraries, `cuda-python` and `nvidia-cutlass-dsl` come under NVIDIA's
      own licences. They are installed from NVIDIA's packages and not redistributed, like
      the CUDA libraries the root torch pin already installs.
-5. **No CI applies the patch.**
+5. **CI checks the patch weekly, not the engine.**
    - `setup.sh` checks that the clone is at the pinned commit and that the patch applies
      when someone runs it. The engine itself is checked only by a manual GPU run.
    - CI's CPU tests (`inference/gravityocr/test_gravityocr_patch.py`) check the committed
      files only: every SGLang commit quoted in the folder equals `BASE_COMMIT.txt`, the
-     patch touches exactly the expected 25 upstream files, the four new files parse and
+     patch touches exactly the expected 26 files, the four new files parse and
      carry their licence headers, `setup.sh` is valid bash and installs with
      `--no-deps --no-config` from explicit indexes, and the lock names the base tag and the
      pins `setup.sh` checks. They do not fetch upstream, apply the patch or run `setup.sh`.
-   - The Zoro recipe has a weekly upstream check (`tools/verify_fetch.sh`, 0002); this
-     recipe does not yet. Adding one is the condition most likely to resolve first.
+   - The weekly fetch-recipe job (`tools/verify_fetch.sh`, as for the Zoro recipe in 0002)
+     fetches the pinned SGLang commit, applies the patch, copies the four new files in and
+     checks that every patched and new source parses. It does not build the environment.
 
 ## Obligations we take on
 

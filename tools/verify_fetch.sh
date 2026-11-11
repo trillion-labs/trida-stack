@@ -12,6 +12,8 @@
 #   3. the fetched files match tools/kernel-checksums.txt  (integrity, not just reachability)
 #   4. trillion_mods.patch still applies cleanly
 #   5. the patched sources parse
+#   6-8. GravityOCR: the pinned SGLang commit resolves, gravityocr_selfspec.patch applies, and the
+#        patched plus new sources parse
 #
 # Needs network. Run: bash tools/verify_fetch.sh
 set -euo pipefail
@@ -56,3 +58,29 @@ python3 -m py_compile "$TMP"/*.py || { echo "FAIL: patched sources do not compil
 
 echo
 echo "OK: fetch recipe verified end to end at $COMMIT (18 sources, patch applies, output parses)."
+
+# ---- GravityOCR: upstream SGLang pin + gravityocr_selfspec.patch (inference/gravityocr/sglang/) ----
+G="$ROOT/inference/gravityocr/sglang"
+G_URL="${SGLANG_REPO:-https://github.com/sgl-project/sglang}"
+G_COMMIT="$(head -c 40 "$G/BASE_COMMIT.txt")"   # as setup.sh reads it
+[[ $G_COMMIT =~ ^[0-9a-f]{40}$ ]] || { echo "FAIL: $G/BASE_COMMIT.txt is not a full commit SHA"; exit 1; }
+echo
+echo "==> 6. GravityOCR: fetch the pinned SGLang commit $G_COMMIT"
+git init --quiet "$TMP/sglang"
+git -C "$TMP/sglang" fetch --quiet --depth 1 "$G_URL" "$G_COMMIT" || {
+  echo "FAIL: pinned SGLang commit $G_COMMIT no longer resolves at $G_URL"; exit 1; }
+git -C "$TMP/sglang" checkout --quiet FETCH_HEAD
+
+echo "==> 7. GravityOCR: gravityocr_selfspec.patch applies"
+git -C "$TMP/sglang" apply --check "$G/gravityocr_selfspec.patch" || {
+  echo "FAIL: gravityocr_selfspec.patch no longer applies to SGLang $G_COMMIT"; exit 1; }
+git -C "$TMP/sglang" apply "$G/gravityocr_selfspec.patch"
+cp -R "$G/python/." "$TMP/sglang/python/"
+
+echo "==> 8. GravityOCR: patched and new sources parse"
+g_files=()
+while IFS= read -r f; do g_files+=("$f"); done < <(
+  sed -n 's#^+++ b/\(.*\.py\)$#\1#p' "$G/gravityocr_selfspec.patch"; cd "$G" && find python -name '*.py')
+( cd "$TMP/sglang" && python3 -m py_compile "${g_files[@]}" ) || { echo "FAIL: patched GravityOCR sources do not compile"; exit 1; }
+echo
+echo "OK: GravityOCR recipe verified at SGLang $G_COMMIT (patch applies, ${#g_files[@]} sources parse)."
