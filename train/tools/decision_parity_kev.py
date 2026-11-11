@@ -1,7 +1,7 @@
 """kev venv: (1) encode N real training records (plain + augmented with a fixed seed) with kev's own code;
 (2) build a tiny random Qwen3.5 model, run kev's DecisionModel on a few records, dump probabilities.
 
-    KEV_DIR=/path/to/kev python train/tools/jev_parity_kev.py <out_dir> <tokenizer_dir>
+    KEV_DIR=/path/to/kev python train/tools/decision_parity_kev.py <out_dir> <tokenizer_dir>
 """
 import json, os, random, sys, torch
 import transformers.utils.import_utils as iu   # CPU parity: force the torch reference GDN / conv kernels

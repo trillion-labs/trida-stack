@@ -2,7 +2,7 @@ import Foundation
 
 /// A typed decision the app asked the server for while producing a reply (tool routing, a reply check, a
 /// decision tool), kept with that reply so the user can mark the right answers. Marked decisions are training
-/// data for the pointer head: `kevRecord()` is a line of kev's labelled JSONL (`train.py --jev_data`), and
+/// data for the pointer head: `kevRecord()` is a line of kev's labelled JSONL (`train.py --decision_data`), and
 /// trida-mlx-datamine writes them to decision_labels.jsonl.
 public struct DecisionRecord: Identifiable, Equatable, Sendable, Codable {
     public var id = UUID()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export a Jev-trained checkpoint (train.py --jev_data) to kev's full-weight checkpoint layout, so kev's own tools
+"""Export a Decision-trained checkpoint (train.py --decision_data) to kev's full-weight checkpoint layout, so kev's own tools
 score and serve it: `kev.benchmark --run <out>`, `kev.serve --run <out>`.
 
     python train/tools/export_kev_checkpoint.py --ckpt <save_dir>/step_N --out <dir> [--temperature T]

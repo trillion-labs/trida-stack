@@ -16,7 +16,7 @@ Writes (one JSON object per line; see manifest.json for counts)
   decisions.jsonl         every typed decision the server answered (tool routing, reply checks, /decide, tools):
                           state, questions, answers, reasoning; the model's own verdicts, not gold labels
   decision_labels.jsonl   decisions whose right answers the user marked in the app (a reply's "decisions"), as
-                          kev's labelled records ({"state", "questions": {id: {..., "label"}}}): train.py --jev_data
+                          kev's labelled records ({"state", "questions": {id: {..., "label"}}}): train.py --decision_data
   rollouts.jsonl          every logged generation as a trajectory: the exact request (messages, tools, template
                           switches, sampling) and the model's raw output (prompts / samples for on-policy
                           distillation or RL)
@@ -246,7 +246,7 @@ def mine_chats(chats: list, keep_images: bool):
 
 
 def mine_labels(chats: list) -> list:
-    """Decisions the user marked in the app, as kev's labelled requests (train.py --jev_data): only the
+    """Decisions the user marked in the app, as kev's labelled requests (train.py --decision_data): only the
     questions with a mark; a yes/no label is 1 / 0, a score label the level index, a choice label the key."""
     out = []
     for chat in chats:

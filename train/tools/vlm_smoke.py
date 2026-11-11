@@ -24,7 +24,7 @@ from train.data.text_sft_data import (  # noqa: E402
     StreamPackedMultiTurnCollator,
     load_image_processor,
 )
-from train.hf_block_diffusion_hybrid import HFBlockDiffusionHybrid  # noqa: E402
+from train.models.hybrid import HFBlockDiffusionHybrid  # noqa: E402
 
 BD = 8
 COLORS = {"red": (220, 30, 30), "green": (30, 200, 60), "blue": (40, 70, 230), "yellow": (240, 220, 30)}

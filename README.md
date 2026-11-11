@@ -131,12 +131,12 @@ optional image) and typed *questions*, it returns calibrated probabilities inste
 | `choice` | `{key: description}` | a distribution over the keys |
 | `score` | a list of levels, lowest first | the expected level |
 
-`--jev_data <kev-format JSONL>` adds this objective in [kev](https://github.com/jaredpalmer/kev)'s
-scheme (`train/jev.py`): a small **pointer head** on the clean causal stream scores each option's
+`--decision_data <kev-format JSONL>` adds this objective in [kev](https://github.com/jaredpalmer/kev)'s
+scheme (`train/data/decision.py` / `train/models/decision.py`): a small **pointer head** on the clean causal stream scores each option's
 `</opt>` state against the question's `<decide>` state. Each optimizer step runs the usual SFT
-micro-batches, then `--jev_micro_per_step` decision micro-batches whose loss is added with weight
-`--jev_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_kev_checkpoint.py`
-exports kev's layout. Details: [`train/README.md`](train/README.md#typed-decision-training-jevpy).
+micro-batches, then `--decision_micro_per_step` decision micro-batches whose loss is added with weight
+`--decision_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_kev_checkpoint.py`
+exports kev's layout. Details: [`train/README.md`](train/README.md#typed-decision-training-decisionpy).
 
 ### Images (vision-language checkpoints)
 
@@ -171,8 +171,8 @@ PYTHONPATH=. torchrun --nproc_per_node=8 train.py \
 Native-torch **FSDP2**, no DeepSpeed. `python train.py --help` lists all flags (packing,
 length/response bucketing, multi-turn supervision, activation offload, fused CE, …).
 
-Add a typed-decision objective to the same run with `--jev_data <kev-format JSONL files/dirs>`
-(see [Typed decisions](#typed-decisions-joint-training)); `--jev_only` trains the decision objective alone (no SFT data, no diffusion loss).
+Add a typed-decision objective to the same run with `--decision_data <kev-format JSONL files/dirs>`
+(see [Typed decisions](#typed-decisions-joint-training)); `--decision_only` trains the decision objective alone (no SFT data, no diffusion loss).
 
 The saved checkpoint is a **stock HF causal LM** plus an added `<|mask|>` token and a
 `block_diffusion.json` sidecar (`bd_size`, `mask_id`, `ar_loss_weight`) — so it loads with plain
@@ -228,14 +228,16 @@ See [`inference/zoro-1/README.md#decisions`](inference/zoro-1/README.md#decision
 ```
 train/                   AR -> diffusion SFT trainer    (entry: train.py -> train.train:main)
   README.md                  launching, resume, model-family notes
-  hf_block_diffusion.py      block masks, loss, HF model wrapper (dense / Qwen3)
-  hf_block_diffusion_hybrid.py   hybrid path (Qwen3.5: gated-delta linear + full attention)
-  jev.py                     typed-decision objective (pointer head, kev's scheme)
+  models/                    dense/hybrid models, construction, decision head
+  data/                      encoding, packing, data loaders
+  cli.py                     training options
+  distributed.py             distributed setup and FSDP sharding
+  optimizer.py, checkpoint.py optimizer updates, saving and resume
+  train.py                   training helpers and main()
   tools/                     export_kev_checkpoint.py, compose_vl_checkpoint.py, parity/FSDP checks
   getting_started.ipynb      training tutorial
   block_gated_delta_rule/    fetch recipe for the block-causal gated-delta Triton kernels
                              (PolyForm-NC upstream, NOT vendored -- run fetch_kernels.sh first)
-  data/text_sft_data.py      packing / bucketing / multi-turn
 inference/               nano-inference: one small serving stack per model
   zoro-1/                    trillionlabs/Zoro-1
     README.md                  serving, decisions, benchmarks

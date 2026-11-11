@@ -12,7 +12,7 @@ model-card license.
 |---|---|---|---|
 | IFEval scorer | `inference/zoro-1/ifeval_lib/` | [google-research · instruction_following_eval](https://github.com/google-research/google-research/tree/master/instruction_following_eval) | **Apache-2.0** |
 | Jev request encoding (vendored, adapted) | `inference/zoro-1/jev.py`, `inference/zoro-1/jev_head.py`, `scripts/export_kev_checkpoint.py`, `inference/zoro-1/decide_request.py`, `inference/zoro-1/decide_engine.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
-| Typed-decision training, kev scheme (vendored, adapted) | `train/jev.py`, `train/tools/export_kev_checkpoint.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
+| Typed-decision training, kev scheme (vendored, adapted) | `train/data/decision.py`, `train/models/decision.py`, `train/tools/export_kev_checkpoint.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
 | mlx-vlm Qwen3-VL vision encoder (adapted) | `inference/zoro-1/mlx/trida_mlx/vision.py` | [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) `mlx_vlm/models/qwen3_vl/vision.py` | **MIT** |
 | MLX gated-delta Metal kernel (adapted) | `inference/zoro-1/mlx/trida_mlx/kernels.py` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) `mlx_lm/models/gated_delta.py` | **MIT** |
 | Qwen3.5 / Trida chat template (test fixture) | `inference/zoro-1/mlx/tests/fixtures/trida_chat_template.jinja` | shipped with `trillionlabs/Trida2.0-4B` (from Qwen3.5) | **Apache-2.0** |
@@ -21,9 +21,10 @@ These are the only third-party source code redistributed in the repository (see
 [`NOTICE`](NOTICE)); `inference/zoro-1/jev.py` and `inference/zoro-1/jev_head.py` vendor kev's request
 mapping, encoding and pointer head, and `scripts/export_kev_checkpoint.py` writes kev's
 checkpoint format; `inference/zoro-1/decide_request.py` and `inference/zoro-1/decide_engine.py` (the
-decision server) follow the same encoding and pointer head. On the training side `train/jev.py` vendors the same mapping and
-encoding plus kev's augmentation, pointer head and loss, adapted to this trainer's packed
-rows, and `train/tools/export_kev_checkpoint.py` writes the same format. Everything else
+decision server) follow the same encoding and pointer head. On the training side,
+`train/data/decision.py` vendors the same mapping and encoding plus kev's augmentation, and
+`train/models/decision.py` vendors kev's pointer head and loss, both adapted to this
+trainer's packed rows, and `train/tools/export_kev_checkpoint.py` writes the same format. Everything else
 below is installed or fetched separately.
 
 ## 1b. Noncommercial upstream code (fetched via recipe, NOT bundled)
