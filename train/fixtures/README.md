@@ -17,3 +17,6 @@ uv run --no-project --with torch --with numpy python train/fixtures/generate_dec
 ```
 
 Tests consume the frozen values; they never run the generator or require Git history.
+The loss test compares computed gradients with the baseline. The optimizer test
+uses the frozen gradients directly: AdamW amplifies backend rounding differences
+in near-zero gradients, so recomputing them makes first-step updates vary by platform.
