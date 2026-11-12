@@ -1,3 +1,5 @@
+<h1 align="center">Trida-Stack</h1>
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/zoro-mascot-wave-dark.gif">
@@ -5,17 +7,19 @@
   </picture>
 </p>
 
-# trida-stack
+<p align="center">
+  <b>English</b> | <a href="README.ko.md">한국어</a>
+</p>
 
-**English** | [한국어](README.ko.md)
+<p align="center">
+  <b>One repo for turning an autoregressive LLM into a block-diffusion LLM that also makes typed decisions, and for serving it.</b>
+</p>
 
-<sub>This English README is the source of truth; the Korean translation may lag behind it.</sub>
-
-**One repo for turning an autoregressive LLM into a block-diffusion LLM, and for serving it.**
-
-[![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97%20Zoro--1-diffusion%20%2B%20decisions-yellow)](https://huggingface.co/trillionlabs/Zoro-1)
-[![Zoro](https://img.shields.io/badge/%F0%9F%A4%97%20Zoro-block%20diffusion-yellow)](https://huggingface.co/trillionlabs/Zoro)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+<p align="center">
+  <a href="https://huggingface.co/trillionlabs/Zoro-1"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Zoro--1-diffusion%20%2B%20decisions-yellow" alt="Zoro-1"></a>
+  <a href="https://huggingface.co/trillionlabs/Zoro"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Zoro-block%20diffusion-yellow" alt="Zoro"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
+</p>
 
 Two independent stacks:
 
