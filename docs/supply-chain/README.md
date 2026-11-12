@@ -33,7 +33,7 @@ PolyForm Noncommercial 1.0.0 and is therefore **never committed here**. See
 
 The fourth is upstream `sgl-project/sglang` at tag v0.5.10, the commit recorded in
 `inference/gravityocr/sglang/BASE_COMMIT.txt`. It is Apache-2.0, so our patch against it
-and the four new files the patch needs (copied in by `sglang/setup.sh`) are committed in
+and the seven new files the patch needs (copied in by `sglang/setup.sh`) are committed in
 that folder, and only the upstream checkout is fetched. Its environment, `sglang==0.5.10` included, is committed as a
 resolved lock that the advisory job and the release SBOM both read.
 
@@ -86,8 +86,8 @@ recorded hashes additionally detect the history being rewritten under the same r
 |---|---|---|
 | Pinned-commit drift | PR, push | the recorded pin disagreeing with `fetch_kernels.sh` |
 | Action pins | PR, push | a workflow running a GitHub Action from a tag instead of a commit SHA |
-| Dependency advisories | PR, push, weekly | a finding with no unexpired exception, or no report from the GravityOCR lock scan |
-| Fetch recipe | weekly | the recipe or its integrity check failing |
+| Dependency advisories | PR, push, weekly | a finding with no unexpired exception for its own id and package, or no report from the GravityOCR lock scan |
+| Fetch recipe | weekly | the recipe or its integrity check failing, or GravityOCR's SGLang patch no longer applying at its pinned commit |
 | Published model card | weekly | HF licence or visibility disagreeing with `COMPLIANCE.md` §4b |
 | Release SBOM | on release | invalid SBOM, or a finding with no exception |
 
@@ -177,9 +177,10 @@ Apache-2.0 patch.
 - Dependencies are declared as ranges in `requirements.txt`; the resolved set lives in
   `requirements-lock.txt` (85 packages) and `inference/zoro-1/requirements-lock.txt` (49).
   GravityOCR's server environment is resolved separately, for Python 3.12, into
-  `inference/gravityocr/sglang/requirements-lock.txt` (174) from the `requirements.in` and
-  `overrides.txt` beside it. Regenerate with the command in each file's header -- the
-  flags matter, since the resolution is platform-specific. Advisory scanning still reads
+  `inference/gravityocr/sglang/requirements-lock.txt` (177, including SGLang's build
+  backend) from the `requirements.in`, `overrides.txt` and `validated-freeze.txt` beside
+  it, at a fixed `--exclude-newer` date. Regenerate with the command in each file's header
+  -- the flags matter, since the resolution is platform-specific. Advisory scanning still reads
   the declared ranges for the first two; the lockfiles exist so the release SBOM describes
   something real. The GravityOCR lock is scanned as pinned (`pip-audit --no-deps
   --disable-pip`), since it targets Python 3.12 and CI runs 3.10; that mode skips the

@@ -182,8 +182,10 @@ finding into a decision that comes back around.
 # Found by scanning inference/gravityocr/sglang/requirements-lock.txt. That environment is
 # upstream sgl-project/sglang v0.5.10 (commit 1519acf37c23f2189adb93f57ca9cd2db1bebf18)
 # plus inference/gravityocr/sglang/gravityocr_selfspec.patch, in its own Python 3.12 venv.
-# Line numbers below are in python/sglang/ at that upstream commit. The four new files the
-# patch needs are cited by function name, because their licence header shifts the lines.
+# Line numbers below are in python/sglang/ at that upstream commit. The seven new files the
+# patch needs, and the upstream files the patch changes where the change matters here
+# (entrypoints/http_server.py, utils/auth.py), are cited by function name: the patch and the
+# licence headers shift their lines.
 
 - id: PYSEC-2026-535
   aliases: [GHSA-36m8-w8qf-g76p, CVE-2026-7304]
@@ -205,19 +207,25 @@ finding into a decision that comes back around.
     has neither the flag nor --config, through which a YAML file could set it, and the
     launcher's own values are checked, so none of them can carry a '--config' token
     either. serve.sh binds 127.0.0.1 unless SERVE_HOST is set, and refuses a non-loopback
-    SERVE_HOST unless API_KEY is set. With a key it runs one tokenizer worker, the only
-    mode in which SGLang v0.5.10 checks keys.
+    SERVE_HOST unless API_KEY is set. The patch makes every tokenizer worker check the keys
+    (upstream v0.5.10 checks them only with one worker), so a key is enforced with the FAST=1
+    default of two workers as well.
   evidence: >-
     server_args.py:656 defaults enable_custom_logit_processor to False. In
     inference/gravityocr/, the string 'enable-custom-logit-processor' appears only in the
     launcher test's refused inputs and the README table of refused options; serve.sh's
     allowlist does not contain it. prepare_server_args() merges a YAML file only for a
-    literal '--config' token (server_args.py:6530). The patch's selfspec_fast_commit.py
-    calls apply_custom_logit_processor only when sampling_info.has_custom_logit_processor
-    is true (verify_logits()), and sampling_batch_info.py sets that only when the flag is
-    on. Keys: entrypoints/http_server.py:1994-2022 installs add_api_key_middleware only
-    when tokenizer_worker_num == 1, and init_multi_tokenizer() asserts that api_key is
-    None (:223-226).
+    literal '--config' token (server_args.py:6530). The patch runs custom logit processors
+    only when sampling_info.has_custom_logit_processor is true: on the first token of a
+    round through SGLang's own sampler, and on the verify rows in selfspec_fast_commit.py
+    process_verify_logits(), which calls selfspec_sampling.py apply_custom_rows();
+    sampling_batch_info.py sets that flag only when the server flag is on. Keys: upstream
+    installs add_api_key_middleware only when tokenizer_worker_num == 1
+    (http_server.py:1994-2022), and init_multi_tokenizer() asserts that api_key is None
+    (:223-226). The patch replaces both: install_auth_middleware() (utils/auth.py) puts the
+    check on the module-level app that every uvicorn worker serves, the keys reach each
+    worker inside its pickled start target (entrypoints/http_worker_keys.py), and a worker
+    without keys answers 503.
   follow_up: Re-check each SGLang release for a fix to the dill.loads() sink.
   approver: Trillion Labs research team
   expires: 2026-12-31
@@ -276,9 +284,9 @@ finding into a decision that comes back around.
     request or a cache-key collision between requests. No upstream fix.
   mitigation: >-
     serve.sh binds 127.0.0.1 by default, for trusted local clients. A non-loopback
-    SERVE_HOST is refused unless API_KEY is set, and with a key serve.sh runs one tokenizer
-    worker, the only mode in which SGLang v0.5.10 checks keys, so only key holders can
-    send requests. EXTRA_ARGS cannot switch to a front-end that skips the key check
+    SERVE_HOST is refused unless API_KEY is set, and the patch makes every tokenizer worker
+    check the key (upstream v0.5.10 checks keys only with one worker), so only key holders
+    can send requests. EXTRA_ARGS cannot switch to a front-end that skips the key check
     (--grpc-mode, --encoder-only, --use-ray are not on its allowlist).
     Do not expose the port to untrusted callers, with or without a key: the same callers
     could also make the server fetch http(s) image URLs and read local image paths
@@ -325,13 +333,14 @@ finding into a decision that comes back around.
     model.safetensors only, and serve.sh's EXTRA_ARGS cannot set --load-format. Serve
     checkpoints only from trusted repositories, in safetensors. A request can reach the
     .bin/.pt loader too: POST /update_weights_from_disk names a model_path and load_format.
-    Whenever the server runs one tokenizer worker (API_KEY set, FAST=0 or
-    TOKENIZER_WORKERS=1), serve.sh gives SGLang a random admin key that it never prints, so
-    that endpoint, like every other management endpoint, refuses every caller. With the
-    FAST=1 default of two tokenizer workers and no key, SGLang enforces no keys and the
-    endpoint is open to every user of the host on the loopback bind; serve.sh says so at
-    startup and the README's Security section tells operators of shared hosts to set
-    API_KEY or TOKENIZER_WORKERS=1.
+    On every start, whatever the number of tokenizer workers, serve.sh gives SGLang a fresh
+    random admin key that it never prints, and the patch makes every tokenizer worker
+    enforce it, so that endpoint, like every other management endpoint, refuses every
+    caller, API_KEY holders included. The admin key cannot be read back: the patch blanks
+    api_key and admin_api_key in /server_info and /get_server_info (upstream v0.5.10
+    returns them to any caller that passes the API-key check) and keeps them out of the
+    logged server arguments, and serve.sh hands both keys to SGLang through a FIFO, never
+    through a file, a command line or the environment.
   evidence: >-
     The Hugging Face API lists model.safetensors and no .bin, .pt or .pth file for
     trillionlabs/GravityOCR @ bdbe9ab. The other torch.load() calls in srt are the
@@ -345,7 +354,12 @@ finding into a decision that comes back around.
     model_executor/model_runner.py:1351-1354 builds the loader from them, and the .bin/.pt
     iterator reads files with _load_pt_file() (model_loader/weight_utils.py:878-894):
     torch.load(weights_only=True), retried with weights_only=False for a legacy .tar file.
-    Keys are enforced only when tokenizer_worker_num == 1 (http_server.py:1994-2022).
+    Upstream enforces keys only when tokenizer_worker_num == 1 (http_server.py:1994-2022)
+    and returns them from server_info() (:601-618); the patch's install_auth_middleware()
+    (utils/auth.py) enforces them in every worker, and redact_server_args() blanks them in
+    server_info(). Checked on an H100 with the patched build: every ADMIN_OPTIONAL route,
+    /update_weights_from_disk included, answered 401 with no key, a wrong key and the API
+    key, with one and with two tokenizer workers.
   follow_up: Lifts with an SGLang rebase onto a release that requires torch 2.10 or later.
   approver: Trillion Labs research team
   expires: 2026-12-31

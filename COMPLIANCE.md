@@ -17,7 +17,7 @@ serves (§4b).
 | mlx-vlm Qwen3-VL vision encoder (adapted) | `inference/zoro-1/mlx/trida_mlx/vision.py` | [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) `mlx_vlm/models/qwen3_vl/vision.py` | **MIT** |
 | MLX gated-delta Metal kernel (adapted) | `inference/zoro-1/mlx/trida_mlx/kernels.py` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) `mlx_lm/models/gated_delta.py` | **MIT** |
 | Qwen3.5 / Trida chat template (test fixture) | `inference/zoro-1/mlx/tests/fixtures/trida_chat_template.jinja` | shipped with `trillionlabs/Trida2.0-4B` (from Qwen3.5) | **Apache-2.0** |
-| SGLang self-speculative decoding patch for GravityOCR (derived) | `inference/gravityocr/sglang/` (`gravityocr_selfspec.patch` and the four files under `sglang/python/`) | [sgl-project/sglang](https://github.com/sgl-project/sglang) v0.5.10 (commit `1519acf37c23f2189adb93f57ca9cd2db1bebf18`) | **Apache-2.0** |
+| SGLang self-speculative decoding patch for GravityOCR (derived) | `inference/gravityocr/sglang/` (`gravityocr_selfspec.patch` and the seven files under `sglang/python/`) | [sgl-project/sglang](https://github.com/sgl-project/sglang) v0.5.10 (commit `1519acf37c23f2189adb93f57ca9cd2db1bebf18`) | **Apache-2.0** |
 
 These are the only third-party source code redistributed in the repository (see
 [`NOTICE`](NOTICE)); `inference/zoro-1/jev.py` and `inference/zoro-1/jev_head.py` vendor kev's request
@@ -27,12 +27,17 @@ decision server) follow the same encoding and pointer head. On the training side
 `train/data/decision.py` vendors the same mapping and encoding plus kev's augmentation, and
 `train/models/decision.py` vendors kev's pointer head and loss, both adapted to this
 trainer's packed rows, and `train/tools/export_kev_checkpoint.py` writes the same format.
-`inference/gravityocr/sglang/gravityocr_selfspec.patch` modifies 24 files of upstream
+`inference/gravityocr/sglang/gravityocr_selfspec.patch` modifies 22 source files of upstream
 SGLang plus `python/pyproject.toml` (it relaxes the `torchao` and `torchcodec` pins). The
-four new files the patch needs, which `sglang/setup.sh` copies into the checkout
+seven new files the patch needs, which `sglang/setup.sh` copies into the checkout
 (`selfspec_diffusion_worker.py`, `selfspec_fast_attn.py`, `selfspec_fast_commit.py`,
-`glm_vit_graph_runner.py`), are Trillion Labs code, two of which adapt portions of
-SGLang's speculative-decoding code. The patch carries upstream
+`selfspec_commit_rules.py`, `selfspec_sampling.py`, `glm_vit_graph_runner.py`,
+`http_worker_keys.py`), are Trillion Labs code. Five of them adapt portions of SGLang code
+(its n-gram verify bookkeeping, penalizers, sampler and spec utilities, and the GLM-OCR
+vision encoder's forward) and carry SGLang's copyright notice, "Portions Copyright 2023-2024
+SGLang Team", with the files they adapt. Two CPU tests, `test_gravityocr_selfspec_cpu.py` and
+`test_gravityocr_gating.py`, embed verbatim copies of a few SGLang v0.5.10 functions as
+reference behaviour and say so in their headers. The patch carries upstream
 context lines, so it is listed here as derived Apache-2.0 code; the changes are stated in
 `inference/gravityocr/NOTICE`. `sglang/setup.sh` applies it to a clone of the pinned
 upstream commit at install time. Everything else below is installed or fetched
