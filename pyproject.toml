@@ -33,7 +33,7 @@ Issues = "https://github.com/trillion-labs/trida-stack/issues"
 [tool.setuptools]
 # First-party packages only. The PolyForm-NC two-stream kernels are NOT bundled (fetched by
 # train/block_gated_delta_rule/fetch_kernels.sh); vLLM / SGLang backends are installed separately.
-packages = ["train", "train.data"]
+packages = ["train", "train.data", "train.models"]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
@@ -55,7 +55,8 @@ testpaths = [
   "tools/test_check_supply_chain.py",
   "train/test_stream_pack.py",
   "train/test_vlm.py",
-  "train/test_jev.py",
+  "train/test_decision.py",
+  "train/test_training.py",
 ]
 
 [tool.ruff]

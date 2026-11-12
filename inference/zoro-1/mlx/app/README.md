@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="../../../../docs/assets/zoro-mascot-wave-dark.gif">
+    <img src="../../../../docs/assets/zoro-mascot-wave.gif" alt="The Zoro-1 mascot" width="120">
+  </picture>
+</p>
+
 # Zoro-1 Chat (macOS)
 
 A native SwiftUI chat app for the on-device MLX server in `../trida_mlx`. It starts
@@ -98,7 +105,7 @@ of the prompt came from the cache.
   reply checks, decision tools), each question with its options and the model's probabilities. Click
   the right answer when the model got it wrong (or to confirm it); Export Training Data writes the
   marked questions to `decision_labels.jsonl` as kev's labelled records, ready for
-  `train.py --jev_data`. Decisions with an image in the state are not kept.
+  `train.py --decision_data`. Decisions with an image in the state are not kept.
 - **Web browsing.** Four tools read the web like a text browser.
   - `fetch_url(url)` opens a page and returns its title, its section headings, how many links it has, and
     the start of its text. On Wikipedia that start is the infobox and the lead.

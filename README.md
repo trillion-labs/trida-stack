@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/zoro-mascot-wave-dark.gif">
+    <img src="docs/assets/zoro-mascot-wave.gif" alt="The Zoro-1 mascot" width="160">
+  </picture>
+</p>
+
 # trida-stack
 
 **English** | [한국어](README.ko.md)
@@ -33,6 +40,35 @@ Checkpoints trained with this repo, on Hugging Face:
 
 The agentic benchmark harnesses in [`benchmark/`](benchmark/) still default to the legacy
 [`trillionlabs/Trida-7B-Preview`](https://huggingface.co/trillionlabs/Trida-7B-Preview); moving them to Zoro-1 is tracked in #62.
+
+---
+
+## Zoro-1 Chat (macOS app)
+
+[**Zoro-1 Chat**](inference/zoro-1/mlx/app/README.md) is a native SwiftUI app that runs Zoro-1 as an
+agent on your Mac, on the [MLX stack](inference/zoro-1/mlx/). The model runs locally: no cloud and no API key.
+
+- **Fast and on-device.** Self-speculative decoding on Apple Silicon. Every reply shows its speed,
+  tokens per forward and how much of the prompt came from the cache.
+- **An agent with guard rails.** It reads files and PDFs in a workspace folder you pick, uses a
+  terminal, browses the web, and looks at images and screenshots. Read-only commands run in the
+  macOS sandbox; anything else asks first.
+- **Decisions at work.** The decision head routes tools, checks each reply, judges
+  approvals in auto mode, and answers your own `/decide` questions with a probability per option.
+- **It learns from you.** Facts from your chats go into a local knowledge graph you can browse (and
+  undo), or add on demand with `/update-kg`. Your 👍 / 👎, edits and corrected decisions export as
+  training data.
+- **A mascot.** The pixel mascot above shows what the model is doing: thinking, using a tool,
+  answering, checking.
+
+Requires an Apple Silicon Mac on macOS 14 or later. To build and install it (needs the Command Line
+Tools for `swift`):
+```bash
+cd inference/zoro-1/mlx && uv sync
+cd app && zsh build_app.sh --install
+```
+On first launch, *Get a Model* downloads Zoro-1 and converts it to MLX. See the
+[app README](inference/zoro-1/mlx/app/README.md) for every feature.
 
 ---
 
@@ -95,12 +131,12 @@ optional image) and typed *questions*, it returns calibrated probabilities inste
 | `choice` | `{key: description}` | a distribution over the keys |
 | `score` | a list of levels, lowest first | the expected level |
 
-`--jev_data <kev-format JSONL>` adds this objective in [kev](https://github.com/jaredpalmer/kev)'s
-scheme (`train/jev.py`): a small **pointer head** on the clean causal stream scores each option's
+`--decision_data <kev-format JSONL>` adds this objective in [kev](https://github.com/jaredpalmer/kev)'s
+scheme (`train/data/decision.py` / `train/models/decision.py`): a small **pointer head** on the clean causal stream scores each option's
 `</opt>` state against the question's `<decide>` state. Each optimizer step runs the usual SFT
-micro-batches, then `--jev_micro_per_step` decision micro-batches whose loss is added with weight
-`--jev_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_kev_checkpoint.py`
-exports kev's layout. Details: [`train/README.md`](train/README.md#typed-decision-training-jevpy).
+micro-batches, then `--decision_micro_per_step` decision micro-batches whose loss is added with weight
+`--decision_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_kev_checkpoint.py`
+exports kev's layout. Details: [`train/README.md`](train/README.md#typed-decision-training-decisionpy).
 
 ### Images (vision-language checkpoints)
 
@@ -135,8 +171,8 @@ PYTHONPATH=. torchrun --nproc_per_node=8 train.py \
 Native-torch **FSDP2**, no DeepSpeed. `python train.py --help` lists all flags (packing,
 length/response bucketing, multi-turn supervision, activation offload, fused CE, …).
 
-Add a typed-decision objective to the same run with `--jev_data <kev-format JSONL files/dirs>`
-(see [Typed decisions](#typed-decisions-joint-training)); `--jev_only` trains the decision objective alone (no SFT data, no diffusion loss).
+Add a typed-decision objective to the same run with `--decision_data <kev-format JSONL files/dirs>`
+(see [Typed decisions](#typed-decisions-joint-training)); `--decision_only` trains the decision objective alone (no SFT data, no diffusion loss).
 
 The saved checkpoint is a **stock HF causal LM** plus an added `<|mask|>` token and a
 `block_diffusion.json` sidecar (`bd_size`, `mask_id`, `ar_loss_weight`) — so it loads with plain
@@ -192,14 +228,16 @@ See [`inference/zoro-1/README.md#decisions`](inference/zoro-1/README.md#decision
 ```
 train/                   AR -> diffusion SFT trainer    (entry: train.py -> train.train:main)
   README.md                  launching, resume, model-family notes
-  hf_block_diffusion.py      block masks, loss, HF model wrapper (dense / Qwen3)
-  hf_block_diffusion_hybrid.py   hybrid path (Qwen3.5: gated-delta linear + full attention)
-  jev.py                     typed-decision objective (pointer head, kev's scheme)
+  models/                    dense/hybrid models, construction, decision head
+  data/                      encoding, packing, data loaders
+  cli.py                     training options
+  distributed.py             distributed setup and FSDP sharding
+  optimizer.py, checkpoint.py optimizer updates, saving and resume
+  train.py                   training helpers and main()
   tools/                     export_kev_checkpoint.py, compose_vl_checkpoint.py, parity/FSDP checks
   getting_started.ipynb      training tutorial
   block_gated_delta_rule/    fetch recipe for the block-causal gated-delta Triton kernels
                              (PolyForm-NC upstream, NOT vendored -- run fetch_kernels.sh first)
-  data/text_sft_data.py      packing / bucketing / multi-turn
 inference/               nano-inference: one small serving stack per model
   zoro-1/                    trillionlabs/Zoro-1
     README.md                  serving, decisions, benchmarks

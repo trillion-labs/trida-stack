@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Writes kev's checkpoint format (https://github.com/jaredpalmer/kev, kev/checkpoint.py; Copyright Jared Palmer and the
 # kev contributors, Apache-2.0).
-"""Export a Jev-trained checkpoint (train.py --jev_data) to kev's full-weight checkpoint layout, so kev's own tools
+"""Export a Decision-trained checkpoint (train.py --decision_data) to kev's full-weight checkpoint layout, so kev's own tools
 score and serve it: `kev.benchmark --run <out>`, `kev.serve --run <out>`.
 
     python scripts/export_kev_checkpoint.py --ckpt <save_dir>/step_N --out <dir> [--temperature T]

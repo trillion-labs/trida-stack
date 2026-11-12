@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/zoro-mascot-wave-dark.gif">
+    <img src="docs/assets/zoro-mascot-wave.gif" alt="Zoro-1 마스코트" width="160">
+  </picture>
+</p>
+
 # trida-stack
 
 [English](README.md) | **한국어**
@@ -33,6 +40,33 @@
 
 [`benchmark/`](benchmark/)의 에이전트 평가 도구는 아직 이전 모델인
 [`trillionlabs/Trida-7B-Preview`](https://huggingface.co/trillionlabs/Trida-7B-Preview)를 기본값으로 사용합니다. Zoro-1로의 전환은 #62에서 진행 중입니다.
+
+---
+
+## Zoro-1 Chat (macOS 앱)
+
+[**Zoro-1 Chat**](inference/zoro-1/mlx/app/README.md)은 Zoro-1을 Mac에서 에이전트로 실행하는 네이티브
+SwiftUI 앱입니다. [MLX 스택](inference/zoro-1/mlx/) 위에서 동작하며, 모델이 로컬에서 실행되므로 클라우드나 API 키가 필요 없습니다.
+
+- **빠른 온디바이스 실행.** Apple Silicon에서 self-speculative 디코딩으로 생성합니다. 답변마다 속도,
+  forward당 토큰 수, 프롬프트 캐시 적중량을 보여 줍니다.
+- **안전장치를 갖춘 에이전트.** 직접 고른 작업 폴더의 파일과 PDF를 읽고, 터미널을 쓰고, 웹을
+  탐색하고, 이미지와 스크린샷을 봅니다. 읽기 전용 명령은 macOS 샌드박스 안에서 실행되고, 그 밖의
+  명령은 먼저 확인을 받습니다.
+- **실제로 쓰이는 의사결정 헤드.** 도구 선택, 답변 검토, 자동 모드의 승인 판단을
+  맡고, 직접 묻는 `/decide` 질문에는 선택지별 확률로 답합니다.
+- **사용할수록 배웁니다.** 대화 속 사실을 로컬 지식 그래프에 쌓으며, 그래프는 직접 살펴보고 추가된 내용을 되돌릴 수 있으며
+  `/update-kg`로 원할 때 추가할 수도 있습니다. 👍 / 👎, 답변 수정, 고친 판단은 학습 데이터로 내보낼
+  수 있습니다.
+- **마스코트.** 위의 픽셀 마스코트가 모델의 상태(생각 중, 도구 사용, 답변, 검토)를 보여 줍니다.
+
+macOS 14 이상의 Apple Silicon Mac이 필요합니다. 빌드와 설치(`swift`를 위해 Command Line Tools 필요):
+```bash
+cd inference/zoro-1/mlx && uv sync
+cd app && zsh build_app.sh --install
+```
+처음 실행하면 *Get a Model*이 Zoro-1을 내려받아 MLX로 변환합니다. 모든 기능은
+[앱 README](inference/zoro-1/mlx/app/README.md)를 참고하세요.
 
 ---
 
@@ -91,12 +125,12 @@ Fast-dLLM v2 방식의 블록 디퓨전 SFT를 사용합니다. 각 학습 시�
 | `choice` | `{키: 설명}` | 각 키에 대한 확률 분포 |
 | `score` | 낮은 수준부터 순서대로 나열한 목록 | 수준의 기댓값 |
 
-`--jev_data <kev 형식 JSONL>`을 지정하면 [kev](https://github.com/jaredpalmer/kev) 방식의 의사결정 목적 함수를
-추가합니다(`train/jev.py`). 노이즈가 없는 인과적 스트림에 연결된 작은 **포인터 헤드**가 각 선택지의 `</opt>` 상태를
+`--decision_data <kev 형식 JSONL>`을 지정하면 [kev](https://github.com/jaredpalmer/kev) 방식의 의사결정 목적 함수를
+추가합니다(`train/data/decision.py` / `train/models/decision.py`). 노이즈가 없는 인과적 스트림에 연결된 작은 **포인터 헤드**가 각 선택지의 `</opt>` 상태를
 질문의 `<decide>` 상태와 비교해 점수를 계산합니다. 각 옵티마이저 스텝에서는 일반 SFT 마이크로배치를 처리한 뒤
-`--jev_micro_per_step`개의 의사결정 마이크로배치를 처리하고, 해당 손실에 `--jev_loss_weight`를 곱해 더합니다.
+`--decision_micro_per_step`개의 의사결정 마이크로배치를 처리하고, 해당 손실에 `--decision_loss_weight`를 곱해 더합니다.
 각 체크포인트에는 `jev_head.pt`가 함께 저장됩니다. `train/tools/export_kev_checkpoint.py`를 사용하면 kev 디렉터리 구조로 내보낼 수 있습니다.
-자세한 내용: [`train/README.md`](train/README.md#typed-decision-training-jevpy).
+자세한 내용: [`train/README.md`](train/README.md#typed-decision-training-decisionpy).
 
 ### 이미지 입력 (비전-언어 체크포인트)
 
@@ -133,8 +167,8 @@ PYTHONPATH=. torchrun --nproc_per_node=8 train.py \
 DeepSpeed 없이 PyTorch의 **FSDP2**로 실행됩니다. 패킹, 길이·응답 기준 버킷팅, 멀티턴 지도 학습, 활성값 오프로딩,
 fused CE 등 전체 옵션은 `python train.py --help`에서 확인할 수 있습니다.
 
-학습 명령에 `--jev_data <kev 형식 JSONL 파일/디렉터리>`를 추가하면 의사결정 작업도 함께 학습합니다
-([유형별 의사결정](#유형별-의사결정-공동-학습) 참고). `--jev_only`를 사용하면 SFT 데이터와 디퓨전 손실 없이 의사결정 목적 함수만으로 학습합니다.
+학습 명령에 `--decision_data <kev 형식 JSONL 파일/디렉터리>`를 추가하면 의사결정 작업도 함께 학습합니다
+([유형별 의사결정](#유형별-의사결정-공동-학습) 참고). `--decision_only`를 사용하면 SFT 데이터와 디퓨전 손실 없이 의사결정 목적 함수만으로 학습합니다.
 
 체크포인트는 **일반 HF 자기회귀 언어 모델**에 `<|mask|>` 토큰과 별도 메타데이터 파일인 `block_diffusion.json`
 (`bd_size`, `mask_id`, `ar_loss_weight`)을 추가한 형태로 저장됩니다. `AutoModelForCausalLM.from_pretrained`로 바로 불러올 수 있습니다.
@@ -193,14 +227,16 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
 ```text
 train/                         AR → 디퓨전 SFT 학습 코드 (진입점: train.py → train.train:main)
   README.md                    실행·학습 재개 방법, 모델 계열별 유의사항
-  hf_block_diffusion.py        블록 마스크, 손실 함수, HF 모델 래퍼 (dense / Qwen3)
-  hf_block_diffusion_hybrid.py 하이브리드 구현 (Qwen3.5: gated-delta 선형 어텐션 + 전체 어텐션)
-  jev.py                       유형별 의사결정 목적 함수 (포인터 헤드, kev 방식)
+  models/                    모델 구현, 생성, 의사결정 헤드
+  data/                      데이터 인코딩, 패킹, 로더
+  cli.py                     학습 옵션
+  distributed.py             분산 설정과 FSDP 샤딩
+  optimizer.py, checkpoint.py 옵티마이저, 저장과 학습 재개
+  train.py                   학습 루프와 main()
   tools/                       체크포인트 내보내기·비전 타워 결합·동등성 및 FSDP 검증 도구
   getting_started.ipynb        학습 튜토리얼
   block_gated_delta_rule/      블록 단위 인과적 gated-delta Triton 커널 다운로드 절차
                                (업스트림: PolyForm-NC, 코드 미포함 — fetch_kernels.sh 실행 필요)
-  data/text_sft_data.py        패킹 / 버킷팅 / 멀티턴 데이터 처리
 inference/                     nano-inference: 모델별로 구성된 간결한 서빙 스택
   zoro-1/                      trillionlabs/Zoro-1
     README.md                  서빙, 의사결정, 벤치마크
