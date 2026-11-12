@@ -43,19 +43,25 @@ tries, in order:
 
 1. the `SELFSPEC_MASK_ID` environment variable;
 2. `mask_id` in `<model path>/block_diffusion.json`;
-3. the `--dllm-algorithm` config, only when that option is given (`serve.sh` does not give it);
-4. otherwise it stops with an error. There is deliberately no silent default: with a wrong mask id
+3. otherwise it stops with an error. There is deliberately no silent default: with a wrong mask id
    the verify pass still emits the AR head's tokens, but almost no draft is accepted, which is easy
    to miss.
+
+SGLang's `--dllm-algorithm` (its separate diffusion-LLM path) is refused together with
+`--speculative-algorithm SELFSPEC_DIFFUSION`, so it plays no part here.
 
 `serve.sh` downloads a repo id to a local snapshot first, so `block_diffusion.json` is found there. It
 exports `SELFSPEC_MASK_ID=59282` only when the served directory has no `block_diffusion.json`. The
 server log names the source it used: `[selfspec-diffusion] K=33 mask_id=59282 (from <source>) bd_size=32`.
 
-`serve.sh` also sets `SELFSPEC_POS_OFFSET=1` by default: the position layout GravityOCR's published
-results were produced with, where the draft window sits one position after the one causal decoding
-gives the same token. `0` is the AR-aligned layout; during development it measured about the same
-draft acceptance. Keep `1` to reproduce the published behaviour.
+`serve.sh` also sets `SELFSPEC_POS_OFFSET=1` by default: every generated token (draft window, verify
+window, KV cache) sits one RoPE position after the one causal decoding and the model's training give
+it. This is the layout GravityOCR's published self-spec results were produced with; keep `1` to
+reproduce them. `0` is the causal layout, under which verification computes what causal decoding
+computes, up to floating point. In a development check on 200 crops it gave about the same draft
+acceptance, but it has not been validated for GravityOCR on this build's optimized path beyond the
+correctness tests in `README.md` ("What self-spec reproduces"). Block-diffusion training, GravityOCR's
+included, uses the causal layout, so `0` is the setting that matches training.
 
 ## Minimal checklist
 

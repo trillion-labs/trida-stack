@@ -86,7 +86,7 @@ recorded hashes additionally detect the history being rewritten under the same r
 |---|---|---|
 | Pinned-commit drift | PR, push | the recorded pin disagreeing with `fetch_kernels.sh` |
 | Action pins | PR, push | a workflow running a GitHub Action from a tag instead of a commit SHA |
-| Dependency advisories | PR, push, weekly | a finding with no unexpired exception for its own id and package, or no report from the GravityOCR lock scan |
+| Dependency advisories | PR, push, weekly | a finding with no unexpired exception, or no report from the GravityOCR lock scan |
 | Fetch recipe | weekly | the recipe or its integrity check failing, or GravityOCR's SGLang patch no longer applying at its pinned commit |
 | Published model card | weekly | HF licence or visibility disagreeing with `COMPLIANCE.md` §4b |
 | Release SBOM | on release | invalid SBOM, or a finding with no exception |

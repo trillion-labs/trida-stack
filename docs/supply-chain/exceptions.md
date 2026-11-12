@@ -207,9 +207,10 @@ finding into a decision that comes back around.
     has neither the flag nor --config, through which a YAML file could set it, and the
     launcher's own values are checked, so none of them can carry a '--config' token
     either. serve.sh binds 127.0.0.1 unless SERVE_HOST is set, and refuses a non-loopback
-    SERVE_HOST unless API_KEY is set. The patch makes every tokenizer worker check the keys
-    (upstream v0.5.10 checks them only with one worker), so a key is enforced with the FAST=1
-    default of two workers as well.
+    SERVE_HOST unless API_KEY is set. serve.sh runs one tokenizer worker unless
+    TOKENIZER_WORKERS asks for more, and the patch makes every tokenizer worker check the keys
+    (upstream v0.5.10 checks them only with one worker), so a key is enforced with that
+    opt-in as well.
   evidence: >-
     server_args.py:656 defaults enable_custom_logit_processor to False. In
     inference/gravityocr/, the string 'enable-custom-logit-processor' appears only in the

@@ -89,9 +89,9 @@ certifi), so that only the findings above remain.
 
 1. **Loopback by default.**
    - `serve.sh` binds 127.0.0.1. A non-loopback `SERVE_HOST` is refused unless `API_KEY`
-     is set. Every tokenizer worker checks the keys (upstream v0.5.10 checks them only with
-     one worker; the patch adds the check to each), so a key keeps the `FAST=1` default of
-     two workers.
+     is set. `serve.sh` runs one tokenizer worker unless `TOKENIZER_WORKERS` asks for more,
+     and every tokenizer worker checks the keys (upstream v0.5.10 checks them only with one
+     worker; the patch adds the check to each), so a key holds with that opt-in too.
    - `serve.sh` always sets a random admin key that it never prints, which closes SGLang's
      management endpoints (`/update_weights_from_disk` among them) whatever the number of
      workers. `/server_info` and `/get_server_info` return the configuration with both keys

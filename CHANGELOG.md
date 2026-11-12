@@ -23,15 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `validated-freeze.txt` and a fixed resolution date make the lock reproducible from the repo.
   `serve.sh` launches it (`MODE=self-spec` by default, or `causal`), binds to 127.0.0.1 by
   default, refuses a non-loopback `SERVE_HOST` without `API_KEY`, and runs one tokenizer worker
-  unless `TOKENIZER_WORKERS` asks for more. It locks SGLang's
-  management endpoints with a fresh random admin key on every start and hands the keys over
-  through a FIFO, so they never reach a file, a command line or an environment. `EXTRA_ARGS`
+  unless `TOKENIZER_WORKERS` asks for more. It locks SGLang's management endpoints with a
+  fresh random admin key on every start and hands the keys over through a FIFO, so they never
+  reach a file, a command line or an environment. `EXTRA_ARGS`
   accepts only a fixed list of logging and capacity options. `ocr_request.py` sends one crop
   through the OpenAI-compatible API (`--task text|table|formula`, key from `$API_KEY` only,
   redirects refused). Self-spec applies the request's sampling settings, penalties,
   `logit_bias`, `min_tokens` and grammars as causal decoding does, and returns log
-  probabilities; the README states what it reproduces. The patch also changes four upstream SGLang behaviours for every server it
-  builds: every tokenizer worker checks the keys, `/server_info` and the logged server arguments
+  probabilities; the README states what it reproduces. The patch also changes four upstream
+  SGLang behaviours for every server it builds: every tokenizer worker checks the keys, `/server_info` and the logged server arguments
   no longer contain them, the tokenizer workers' shared-memory segment is private, and a
   single-node server's torch.distributed rendezvous runs on 127.0.0.1 with a store that listens
   on loopback only (upstream binds it on every interface). CPU tests cover the patch and its

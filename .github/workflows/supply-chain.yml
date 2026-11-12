@@ -58,9 +58,8 @@ jobs:
           pip-audit -r inference/zoro-1/requirements.txt -f json -o audit-inference.json || true
       # The GravityOCR server environment is committed as a resolved lock for Python 3.12.
       # --no-deps --disable-pip audits those pins as written instead of resolving them, so
-      # the runner's 3.10 does not matter. The gate reads a missing report as no findings
-      # (with a NOTE), and a scan that cannot run writes none, so a missing or empty report
-      # fails here.
+      # the runner's 3.10 does not matter. The gate reads a missing report as clean, and a
+      # scan that cannot run writes none, so a missing or empty report fails here.
       - name: Scan the GravityOCR server lock
         run: |
           pip-audit -r inference/gravityocr/sglang/requirements-lock.txt --no-deps --disable-pip \

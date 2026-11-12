@@ -137,14 +137,13 @@ CI's) is registered and never run.
   and the server lock (read; `setup.sh`'s patch-and-verify steps run against a small synthetic
   repository), `serve.sh`'s command line and guards (run under `bash` against a stub server
   binary and a local checkpoint directory), and the OCR request client.
-  `test_gravityocr_selfspec_cpu.py`, `test_gravityocr_vit_graph.py` and
-  `test_gravityocr_gating.py` cover the patch's host-side logic (self-spec commit, sampling,
-  penalty and grammar rules; ViT graph settings; what the patch leaves untouched). They need
+  `test_gravityocr_selfspec_cpu.py`, `test_gravityocr_vit_graph.py`, `test_gravityocr_gating.py`
+  and `test_gravityocr_dist_init.py` cover the patch's host-side logic (self-spec commit,
+  sampling, penalty and grammar rules; ViT graph settings; what the patch leaves untouched; the
+  loopback-only rendezvous store). They need
   only what CI installs: no GPU, no SGLang, no network. Their parts that need the patched
   SGLang, and `test_gravityocr_auth.py`, skip in CI; `inference/gravityocr/README.md` says how
   to run them in the server environment.
-- `tools/test_check_advisories.py` — the advisory gate's per-finding matching and report
-  handling, on synthetic reports; stdlib and `pyyaml`.
 - `tools/test_chat.py` — the chat CLI's offline paths.
 - `train/test_stream_pack.py` — buffered first-fit packing for `--pack --multiturn`,
   on synthetic docs; needs `torch` and `transformers` (its import chain reaches
