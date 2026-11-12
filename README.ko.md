@@ -1,10 +1,7 @@
 <h1 align="center">Trida-Stack</h1>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/zoro-mascot-wave-dark.gif">
-    <img src="docs/assets/zoro-mascot-wave.gif" alt="Zoro-1 마스코트" width="160">
-  </picture>
+  <img src="docs/assets/zoro-banner-diffusion.gif" alt="Zoro-1 마스코트가 &quot;Hi! I'm Zoro-1. I write in blocks, not one by one.&quot;이라고 말하고, 글이 블록 단위로 노이즈에서 또렷해집니다" width="720">
 </p>
 
 <p align="center">
