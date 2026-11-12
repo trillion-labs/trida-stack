@@ -1,21 +1,22 @@
+<h1 align="center">Trida-Stack</h1>
+
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/zoro-mascot-wave-dark.gif">
-    <img src="docs/assets/zoro-mascot-wave.gif" alt="Zoro-1 마스코트" width="160">
-  </picture>
+  <img src="docs/assets/zoro-banner-diffusion.gif" alt="Zoro-1 마스코트가 어떤 도구를 쓸지 결정(ANSWER, 0.81)한 뒤 &quot;Hi! I'm Zoro-1. I write in blocks, not one by one.&quot;이라고 답하고, 글이 블록 단위로 노이즈에서 또렷해집니다" width="840">
 </p>
 
-# trida-stack
+<p align="center">
+  <a href="README.md">English</a> | <b>한국어</b>
+</p>
 
-[English](README.md) | **한국어**
+<p align="center">
+  <b>자기회귀(AR) LLM을 유형별 의사결정(typed decision)까지 할 수 있는 블록 디퓨전(block diffusion) LLM으로 전환하고 서빙하기 위한 학습·추론 도구를 제공합니다.</b>
+</p>
 
-<sub>영문 [README.md](README.md)가 기준 문서이며, 이 번역은 최신 내용을 반영하지 못할 수 있습니다.</sub>
-
-**자기회귀(AR) LLM을 블록 디퓨전(block diffusion) LLM으로 전환하고 서빙하기 위한 학습·추론 도구를 제공합니다.**
-
-[![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97%20Zoro--1-diffusion%20%2B%20decisions-yellow)](https://huggingface.co/trillionlabs/Zoro-1)
-[![Zoro](https://img.shields.io/badge/%F0%9F%A4%97%20Zoro-block%20diffusion-yellow)](https://huggingface.co/trillionlabs/Zoro)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+<p align="center">
+  <a href="https://huggingface.co/trillionlabs/Zoro-1"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Zoro--1-diffusion%20%2B%20decisions-yellow" alt="Zoro-1"></a>
+  <a href="https://huggingface.co/trillionlabs/Zoro"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Zoro-block%20diffusion-yellow" alt="Zoro"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License"></a>
+</p>
 
 학습과 추론을 위한 두 개의 독립적인 스택으로 구성되어 있습니다.
 
