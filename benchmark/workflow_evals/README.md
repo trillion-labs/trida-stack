@@ -21,9 +21,10 @@ setup and each run reject unexpected changes to the upstream checkout.
 
 The invoice dataset is Apache-2.0. The other three have no verified license
 declaration. They require `--allow-unverified-datasets` for local evaluation. This
-opt-in does not verify their licenses or authorize redistribution. Keep downloaded
+opt-in is a proposal awaiting maintainer approval, not an approved license exception.
+It does not verify their licenses or authorize redistribution. Keep downloaded
 data outside Git. See the
-[intake record](../../docs/oss/intake/0009-workflowevals.md).
+[intake record](../../docs/oss/intake/0011-workflowevals.md).
 
 ## Run
 
@@ -59,7 +60,8 @@ To reason before deciding, add `--reasoning --max-output-tokens 2048` and use a
 separate run name, such as `zoro-reasoning`. The token limit caps reasoning generation;
 the Trida default is 2,048 tokens, with a 4,096-token ceiling. The server also checks
 prompt + budget against its context length. Increase `--timeout` for slower runs.
-Unfinished reasoning is recorded as a failure, not scored as completed reasoning.
+Unfinished, empty, or state-trimmed reasoning is recorded as a failure, even if the
+server returns direct fallback answers. Only complete, untrimmed reasoning is scored.
 
 Repeat a command to resume; use a new run name when changing settings.
 Set `TRIDA_API_KEY` only if your server requires authentication.
@@ -91,6 +93,11 @@ The adapter sends inputs unchanged, but the decision encoder:
 
 These are hardcoded encoder limits. Increasing the server's `--context-length`
 alone does not remove them. Two invoice cases failed on this limit in the BF16 pilot.
+
+Reasoning also shares this state budget. Both servers keep the conclusion when
+only a reasoning tail fits and report `reasoning_trimmed: true`. If no reasoning
+fits, they return direct answers with `cut: "state_limit"`. This benchmark rejects
+both cases in reasoning mode; a normal generation stop alone is insufficient.
 
 Full-length evaluation requires a separate encoder/context change and
 validation with the model.

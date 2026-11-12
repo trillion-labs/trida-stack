@@ -35,7 +35,7 @@ import time
 import torch
 import torch.nn as nn
 
-from decide_request import RequestError, MAX_IMAGE_PIXELS, VISION, image_input, parse, prompt, with_reasoning, to_answer
+from decide_request import RequestError, MAX_IMAGE_PIXELS, VISION, fit_reasoning, image_input, parse, prompt, with_reasoning, to_answer
 
 END_THINK = "</think>"
 # Serving temperatures: logits are divided by T before the softmax. Fit T per checkpoint on held-out calibration
@@ -164,10 +164,11 @@ class DecideEngine:
         """-> {"answers": {qid: answer}, "timing_ms"} (+ "reasoning", "reasoning_ms" when reasoning=True)."""
         t0 = time.perf_counter()
         extra = {}
+        req = parse(request, image)
+        enc = req.encode(self.tok, self.proc)
         if reasoning:
-            img = parse(request, image).image   # fail fast on a bad request, before generating
             pieces, stats = [], {}
-            async for part in self._athink_events(request, max_reasoning_tokens, image=img):
+            async for part in self._athink_events(request, max_reasoning_tokens, image=req.image):
                 if isinstance(part, dict):
                     stats = part
                 else:
@@ -176,11 +177,19 @@ class DecideEngine:
             extra = {"reasoning": text, "reasoning_stats": stats,
                      "reasoning_ms": round((time.perf_counter() - t0) * 1000, 1)}
             if stats.get("finish_reason") == "length":
-                return {"answers": {}, "cut": "length",
-                        "timing_ms": round((time.perf_counter() - t0) * 1000, 1), **extra}
-            request = with_reasoning(request, text)
-        req = parse(request, image)
-        enc = req.encode(self.tok, self.proc)
+                extra["cut"] = "length"
+            elif not text:
+                extra["cut"] = "empty"
+            else:
+                image_tokens = int(enc.grid.prod(-1)[0]) // self.proc.merge_size ** 2 if enc.has_image else 0
+                fitted = fit_reasoning(request, text, self.tok, image_tokens)
+                extra["reasoning_trimmed"] = fitted != text
+                if not fitted:
+                    extra["cut"] = "state_limit"
+                else:
+                    req = parse(with_reasoning(request, fitted), req.image)
+                    enc = req.encode(self.tok, self.proc)
+            extra["answers_source"] = "direct" if "cut" in extra else "reasoned"
         T = temperature or (self.image_T if enc.has_image else self.text_T)
         z = await self.alogits(enc, self._sized(req.image, enc.grid) if enc.has_image else None)
         answers = {q.qid: to_answer(q, torch.softmax(zq / T, -1).tolist()) for q, zq in zip(req.questions, z)}

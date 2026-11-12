@@ -282,6 +282,31 @@ def with_reasoning(request, text):
     return {**request, "state": state}
 
 
+def fit_reasoning(request, text, tokenizer, image_tokens=0):
+    """Keep the reasoning's conclusion within the encoder's state budget.
+
+    Preserve the original state; return an empty string when it leaves no room for
+    reasoning. Callers must report any trimming and use direct answers if empty.
+    image_tokens counts image patches, excluding the two vision delimiters.
+    """
+    room = MAX_STATE - 1 - (image_tokens + 2 if image_tokens else 0)
+
+    def fits(candidate):
+        return len(_user(tokenizer, render(with_reasoning(request, candidate)["state"]))) <= room
+
+    if fits(text):
+        return text
+    ids = _user(tokenizer, text)
+    lo, hi = 0, len(ids) + 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if fits("…" + tokenizer.decode(ids[-mid:])):
+            lo = mid
+        else:
+            hi = mid
+    return "…" + tokenizer.decode(ids[-lo:]) if lo else ""
+
+
 # ---- response formatting (shared by SGLang and MLX) ------------------------------------------------
 
 def _confidence(qtype, p):

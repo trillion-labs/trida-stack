@@ -110,4 +110,4 @@ WorkflowEvals — TypeSafe AI
   Fetched at setup time; our patch adds Trida transport and CLI configuration.
   Invoice dataset: typesafe/evalsafe-invoice-processing, Apache-2.0.
   Three other evalsafe datasets have unverified licenses. Local evaluation
-  requires explicit opt-in; no dataset contents are distributed here. See docs/oss/intake/0009-workflowevals.md.
+  requires explicit opt-in; no dataset contents are distributed here. See docs/oss/intake/0011-workflowevals.md.

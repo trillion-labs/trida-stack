@@ -1,5 +1,29 @@
 # Review validation
 
+## Review fixes (2026-11-12)
+
+Rebased onto `origin/main` (`a02da55`, including #88).
+
+- Full CPU suite: **180 passed, 2 skipped** (transformers 5.x).
+- Offline adapter/setup suite: **20 passed**.
+- MLX decision and decision-extension suites: **43 passed**, using tiny random
+  checkpoints, including PyTorch head parity. This is not a Zoro-1 model evaluation.
+- Lint, shell syntax, action pins, and supply-chain checks passed.
+
+CUDA and MLX now share reasoning-state fitting. CPU tests cover states already at
+the 7,551-text-token cap, partial-tail fitting, image-token reservations, and the
+actual encoded rows retaining the conclusion. Both servers return direct answers
+with machine-readable `cut` values when reasoning is unfinished, empty, or cannot
+fit. The adapter rejects these fallbacks and `reasoning_trimmed: true` responses.
+The earlier empty-answers-on-truncation behavior described below is historical.
+
+Intake IDs are now 0011–0015, leaving 0009–0010 to #72. The proposed local opt-in
+for unverified datasets awaits maintainer approval; no approval is claimed.
+
+CUDA/Zoro-1 GPU inference remains pending; no GPU node is available. Luke's seven
+announced #83 commits were not available on #83's frozen head (`e0a8c60`) or the
+replacement branch when checked. They still need to be republished for comparison.
+
 ## Rebase validation (2026-11-11)
 
 Rebased onto `origin/main` (`dcd5163`), preserving the `inference/zoro-1/` layout.
@@ -56,4 +80,4 @@ ap_00001 RequestError: question 'line_0_scope' is too long: 1482 tokens of instr
 
 No inputs were shortened. The invoice dataset is Apache-2.0; license evidence and
 the pending status of the other three datasets are in the
-[intake record](../../docs/oss/intake/0009-workflowevals.md).
+[intake record](../../docs/oss/intake/0011-workflowevals.md).

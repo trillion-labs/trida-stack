@@ -20,7 +20,7 @@ from pathlib import Path
 import mlx.core as mx
 import numpy as np
 
-from .decide_request import MAX_STATE, RequestError, SPECIAL, VISION, parse, prompt, render, to_answer, with_reasoning
+from .decide_request import RequestError, SPECIAL, VISION, fit_reasoning, parse, prompt, to_answer, with_reasoning
 from .decode import DecodeStats, SamplingParams
 from .engine import IncrementalDetokenizer
 from .vision import image_key, preprocess
@@ -272,28 +272,8 @@ class Decider:
                 "stats": stats.as_dict()}
 
     def fit_reasoning(self, request, text, image=None):
-        """Retain the conclusion when reasoning would exceed the shared state budget."""
-        tok = self.engine.tokenizer
-        image_tokens = image[1] + 2 if image else 0
-        room = MAX_STATE - 1 - image_tokens
-
-        def fits(candidate):
-            state = render(with_reasoning(request, candidate)["state"])
-            # Match the canonical encoder's escaping and tokenization.
-            from .decide_request import _user
-            return len(_user(tok, state)) <= room
-
-        if fits(text):
-            return text
-        ids = tok.encode(text, add_special_tokens=False)
-        lo, hi = 0, len(ids) + 1
-        while hi - lo > 1:
-            mid = (lo + hi) // 2
-            if fits("…" + tok.decode(ids[-mid:])):
-                lo = mid
-            else:
-                hi = mid
-        return "…" + tok.decode(ids[-lo:]) if lo else ""
+        """Use the same state budget and conclusion-preserving fit as CUDA."""
+        return fit_reasoning(request, text, self.engine.tokenizer, image[1] if image else 0)
 
     def decide(
         self,
@@ -379,14 +359,19 @@ class Decider:
             result.update(reasoning=thought["text"], reasoning_stats=thought["stats"],
                           reasoning_ms=round((time.perf_counter() - thinking_start) * 1000, 1))
             if thought["ended"] != "complete":
-                result["cut"] = "reasoning did not finish; using the direct answer"
+                result["cut"] = "length"
+            elif not thought["text"].strip():
+                result["cut"] = "empty"
             else:
                 text = self.fit_reasoning(request, thought["text"], image)
-                if text != thought["text"]:
-                    result["reasoning_trimmed"] = True
-                reasoned = parse(with_reasoning(request, text), image=req.image)
-                result["reasoned"] = score(reasoned, self.encode(reasoned, image))
-                result["answers"] = result["reasoned"]["answers"]
+                result["reasoning_trimmed"] = text != thought["text"]
+                if not text:
+                    result["cut"] = "state_limit"
+                else:
+                    reasoned = parse(with_reasoning(request, text), image=req.image)
+                    result["reasoned"] = score(reasoned, self.encode(reasoned, image))
+                    result["answers"] = result["reasoned"]["answers"]
+            result["answers_source"] = "direct" if "cut" in result else "reasoned"
             result["timing_ms"] = round((time.perf_counter() - start) * 1000, 1)
             emit("result", result)
             return result

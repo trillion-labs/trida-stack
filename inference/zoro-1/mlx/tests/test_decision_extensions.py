@@ -79,7 +79,8 @@ def test_auto_reasoning_threshold_and_cutoff(decider, monkeypatch):
                           on_event=lambda kind, payload: events.append(kind))
     assert not sure["escalated"] and not calls and events == ["direct", "result"]
     uncertain = decider.decide(REQ, reasoning="auto", threshold=1)
-    assert calls and uncertain["escalated"] and "cut" in uncertain
+    assert calls and uncertain["escalated"] and uncertain["cut"] == "length"
+    assert uncertain["answers_source"] == "direct"
     assert uncertain["answers"] == uncertain["direct"]["answers"]
     assert "reasoned" not in uncertain
     monkeypatch.setattr(decider, "think", lambda *a, **k: {
@@ -87,6 +88,21 @@ def test_auto_reasoning_threshold_and_cutoff(decider, monkeypatch):
     done = decider.decide(REQ, reasoning="auto", threshold=1)
     assert done["escalated"] and "cut" not in done
     assert done["answers"] == done["reasoned"]["answers"]
+    assert done["answers_source"] == "reasoned"
+
+
+@pytest.mark.parametrize("text,cut", [("  ", "empty"), ("conclusion: facilities", "state_limit")])
+def test_reasoning_without_usable_state_returns_direct_answers(decider, monkeypatch, text, cut):
+    monkeypatch.setattr(decider, "think", lambda *a, **k: {
+        "text": text, "ended": "complete", "stats": {"finish_reason": "stop"}})
+    if cut == "state_limit":
+        monkeypatch.setattr(decider, "fit_reasoning", lambda *a, **k: "")
+    result = decider.decide(REQ, reasoning=True)
+    assert result["cut"] == cut and result["answers_source"] == "direct"
+    assert result["answers"] == result["direct"]["answers"]
+    assert "reasoned" not in result
+    if cut == "state_limit":
+        assert result["reasoning_trimmed"] is True
 
 
 def test_long_reasoning_keeps_conclusion(decider):

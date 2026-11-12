@@ -151,7 +151,7 @@ def create_app(engine):
     from fastapi import Body, FastAPI, HTTPException
     from fastapi.responses import StreamingResponse
 
-    from decide_request import MAX_REASONING_TOKENS, RequestError
+    from decide_request import RequestError
 
     name = os.path.basename(os.path.normpath(engine.ckpt))
     app = FastAPI(title="Trida decisions")
@@ -170,8 +170,6 @@ def create_app(engine):
             raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float, \"max_reasoning_tokens\"?: int (1..4096; default 768)}")
         try:
             budget = _num(body, "max_reasoning_tokens", 768, int)
-            if not 1 <= budget <= MAX_REASONING_TOKENS:
-                raise HTTPException(400, f"max_reasoning_tokens must be between 1 and {MAX_REASONING_TOKENS}")
             # Images use the shared request contract; server file paths are not accepted.
             return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
                                         max_reasoning_tokens=budget)

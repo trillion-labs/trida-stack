@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from decide_engine import PointerHead, prefix_prompts, to_answer
-from decide_request import SPECIAL, VISION, RequestError, parse, prompt, with_reasoning
+from decide_request import MAX_STATE, SPECIAL, VISION, RequestError, fit_reasoning, parse, prompt, with_reasoning
 from serve_decide import TurnSplitter, split_turn
 
 
@@ -21,6 +21,9 @@ class CharTok:
 
     def __call__(self, text, add_special_tokens=False):
         return type("Out", (), {"input_ids": [ord(c) + 100 for c in text]})()
+
+    def decode(self, ids):
+        return "".join(chr(i - 100) for i in ids)
 
 
 REQ = {"state": {"review": "Great!"},
@@ -353,12 +356,12 @@ def test_decide_forwards_reasoning_budget():
                                              "max_reasoning_tokens": 2048})
     assert response.status_code == 200
     assert engine.received == (REQ, True, {"max_reasoning_tokens": 2048})
-    for budget in [0, -1, 1.5, True]:
+    for budget in [1.5, True]:
         assert client.post("/v1/decide", json={"request": REQ,
                            "max_reasoning_tokens": budget}).status_code == 400
 
 
-def _reasoning_engine(finish="stop", context_length=16384):
+def _reasoning_engine(finish="stop", context_length=16384, text="Check it."):
     from decide_engine import DecideEngine
 
     class Tok(CharTok):
@@ -372,8 +375,8 @@ def _reasoning_engine(finish="stop", context_length=16384):
             self.calls += 1
 
             async def chunks():
-                yield {"text": "Check it.", "meta_info": {}}
-                yield {"text": "Check it.</think>" if finish == "stop" else "Check it.",
+                yield {"text": text, "meta_info": {}}
+                yield {"text": text + "</think>" if finish == "stop" else text,
                        "meta_info": {"finish_reason": {"type": finish}, "completion_tokens": 3}}
             return chunks()
 
@@ -383,6 +386,7 @@ def _reasoning_engine(finish="stop", context_length=16384):
     engine.text_T, engine.image_T, engine.engine = 1.0, 1.0, Backend()
 
     async def logits(enc, image):
+        engine.scored = enc
         return [torch.tensor([0.0, 1.0]) for row in enc.rows]
 
     engine.alogits = logits
@@ -402,9 +406,60 @@ def test_decide_exposes_real_reasoning_finish_status(finish):
     assert body["reasoning"] == "Check it."
     assert body["reasoning_stats"]["finish_reason"] == finish
     if finish == "length":
-        assert body["cut"] == "length" and body["answers"] == {}
+        assert body["cut"] == "length" and body["answers_source"] == "direct"
+        assert engine.scored.rows == parse(REQ).encode(engine.tok).rows
     else:
-        assert "cut" not in body and set(body["answers"]) == set(REQ["questions"])
+        assert "cut" not in body and body["answers_source"] == "reasoned"
+    assert set(body["answers"]) == set(REQ["questions"])
+
+
+@pytest.mark.parametrize("image_tokens", [0, 400])
+def test_fit_reasoning_preserves_conclusion_without_encoder_truncation(image_tokens):
+    tok = CharTok()
+    request = {**REQ, "state": "x" * 7000}
+    text = "step " * 300 + "conclusion: yes"
+    fitted = fit_reasoning(request, text, tok, image_tokens)
+    assert fitted.startswith("…") and fitted.endswith("conclusion: yes")
+    reasoned = parse(with_reasoning(request, fitted))
+    room = MAX_STATE - 1 - (image_tokens + 2 if image_tokens else 0)
+    assert len(tok(reasoned.state).input_ids) <= room
+    # Inspect what actually reaches the decision rows, not just the fitted string.
+    row = reasoned.encode_rows(tok, image_tokens)[0]["ids"]
+    q = row.index(tok.ids[SPECIAL[1]])
+    assert tok.decode(row[q - len("conclusion: yes"):q]) == "conclusion: yes"
+
+
+@pytest.mark.parametrize("state_size,expected_cut", [(MAX_STATE - 1, "state_limit"), (7000, None)])
+def test_cuda_reports_reasoning_trim_on_invoice_length_states(state_size, expected_cut):
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+
+    text = "step " * 300 + "conclusion: yes"
+    engine = _reasoning_engine(text=text)
+    request = {**REQ, "state": "x" * state_size}
+    body = TestClient(create_app(engine)).post("/v1/decide", json={
+        "request": request, "reasoning": True, "max_reasoning_tokens": 2048}).json()
+    assert body["reasoning_stats"]["finish_reason"] == "stop"
+    assert body["reasoning_trimmed"] is True
+    assert body["reasoning"] == text
+    if expected_cut:
+        assert body["cut"] == expected_cut and body["answers_source"] == "direct"
+        assert engine.scored.rows == parse(request).encode(engine.tok).rows
+    else:
+        assert "cut" not in body and body["answers_source"] == "reasoned"
+        row = engine.scored.rows[0]["ids"]
+        q = row.index(engine.tok.ids[SPECIAL[1]])
+        assert engine.tok.decode(row[q - len("conclusion: yes"):q]) == "conclusion: yes"
+
+
+def test_cuda_empty_reasoning_returns_explicit_direct_fallback():
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+
+    body = TestClient(create_app(_reasoning_engine(text="  "))).post("/v1/decide", json={
+        "request": REQ, "reasoning": True}).json()
+    assert body["cut"] == "empty" and body["answers_source"] == "direct"
+    assert body["answers"]
 
 
 @pytest.mark.parametrize("budget", [0, -1, 4097, 64000])

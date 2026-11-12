@@ -161,8 +161,15 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
 - **`"reasoning": true`:** the model first writes its reasoning (returned as `reasoning`), then decides with that reasoning added to the state.
   `max_reasoning_tokens` defaults to 768 and must be between 1 and 4,096. The prompt
   plus this budget must fit the configured context; invalid budgets return HTTP 400.
-  Responses include `reasoning_stats.finish_reason`. If generation hits its budget,
-  the response has `cut: "length"` and empty `answers`; partial reasoning is not scored.
+  Responses include `reasoning_stats.finish_reason`. Both CUDA and MLX use this contract:
+  - `answers_source: "reasoned"` means the decision used reasoning. If only the
+    conclusion fits the state budget, `reasoning_trimmed: true` reports that trimming;
+    the full generated text is still returned as `reasoning`.
+  - `cut: "length"` (generation budget), `"empty"` (empty completed text), or
+    `"state_limit"` (no room for reasoning) means `answers` holds **direct answers**
+    and `answers_source` is `"direct"`. MLX also retains its `direct` result object.
+    Clients must check these fields before treating the answers as reasoned.
+  WorkflowEvals rejects every `cut` and any `reasoning_trimmed` response in reasoning mode.
 - **Images:** add an `image` (path, base64 or data URL) to the request.
 - **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
   - It takes `tools`; tool calls come back as `tool_calls`.

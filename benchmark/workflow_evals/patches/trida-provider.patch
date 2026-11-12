@@ -96,7 +96,7 @@ new file mode 100644
 index 0000000..ec5c80c
 --- /dev/null
 +++ b/core/trida_client.py
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,87 @@
 +"""Transport adapter only; workflow questions, policies and scoring stay upstream."""
 +import math
 +import os
@@ -139,9 +139,14 @@ index 0000000..ec5c80c
 +            ) from exc
 +        raw = response.json()
 +        finish = (raw.get("reasoning_stats") or {}).get("finish_reason")
-+        if self.reasoning and (not raw.get("reasoning") or raw.get("cut") or finish != "stop"):
-+            reason = raw.get("cut") or finish or "missing completion metadata"
-+            raise ValueError(f"Reasoning did not complete: {reason}")
++        if self.reasoning:
++            if raw.get("cut") or finish != "stop":
++                reason = raw.get("cut") or finish or "missing completion metadata"
++                raise ValueError(f"Reasoning did not complete: {reason}")
++            if not str(raw.get("reasoning") or "").strip():
++                raise ValueError("Reasoning completed but returned empty text")
++            if raw.get("reasoning_trimmed"):
++                raise ValueError("Reasoning was trimmed to fit the decision state")
 +        answers = raw["answers"]
 +        if set(answers) != set(wire):
 +            raise ValueError("Response question IDs differ from the requested question IDs")

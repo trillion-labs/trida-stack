@@ -141,6 +141,23 @@ class TridaProviderTest(unittest.TestCase):
             configuration("trida:zoro-1", base_url=self.config.base_url,
                           trida_reasoning=True, max_output_tokens=64000)
 
+    def test_trimmed_reasoning_is_not_scored_as_full_reasoning(self):
+        self.client.reasoning = True
+        self.respond(payload={"answers": self.answers, "reasoning": "Full generated text",
+                              "reasoning_stats": {"finish_reason": "stop"},
+                              "reasoning_trimmed": True, "answers_source": "reasoned"})
+        with self.assertRaisesRegex(ValueError, "trimmed to fit"):
+            self.ask()
+
+    def test_empty_completed_reasoning_has_a_clear_error(self):
+        self.client.reasoning = True
+        for text in ["", "  ", None]:
+            with self.subTest(text=text):
+                self.respond(payload={"answers": self.answers, "reasoning": text,
+                                      "reasoning_stats": {"finish_reason": "stop"}})
+                with self.assertRaisesRegex(ValueError, "completed but returned empty text"):
+                    self.ask()
+
     def test_reasoning_rejected_for_other_providers(self):
         with self.assertRaisesRegex(ValueError, "Trida only"):
             configuration("typesafe:jev-1.13.0", trida_reasoning=True)
