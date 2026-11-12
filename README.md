@@ -1,7 +1,7 @@
 <h1 align="center">Trida-Stack</h1>
 
 <p align="center">
-  <img src="docs/assets/zoro-banner-diffusion.gif" alt="The Zoro-1 mascot says &quot;Hi! I'm Zoro-1. I write in blocks, not one by one.&quot; as each block of text resolves from noise" width="720">
+  <img src="docs/assets/zoro-banner-diffusion.gif" alt="The Zoro-1 mascot decides which tool to use (ANSWER, 0.81), then replies &quot;Hi! I'm Zoro-1. I write in blocks, not one by one.&quot; as each block of text resolves from noise" width="840">
 </p>
 
 <p align="center">

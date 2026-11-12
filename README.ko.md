@@ -1,7 +1,7 @@
 <h1 align="center">Trida-Stack</h1>
 
 <p align="center">
-  <img src="docs/assets/zoro-banner-diffusion.gif" alt="Zoro-1 마스코트가 &quot;Hi! I'm Zoro-1. I write in blocks, not one by one.&quot;이라고 말하고, 글이 블록 단위로 노이즈에서 또렷해집니다" width="720">
+  <img src="docs/assets/zoro-banner-diffusion.gif" alt="Zoro-1 마스코트가 어떤 도구를 쓸지 결정(ANSWER, 0.81)한 뒤 &quot;Hi! I'm Zoro-1. I write in blocks, not one by one.&quot;이라고 답하고, 글이 블록 단위로 노이즈에서 또렷해집니다" width="840">
 </p>
 
 <p align="center">
