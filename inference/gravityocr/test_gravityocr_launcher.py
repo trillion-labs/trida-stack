@@ -3,11 +3,15 @@
 """serve.sh dry runs: CPU only, no GPU, no network, no SGLang install.
 
 Each test runs the launcher with bash against a stub VBIN whose `python` prints the argv and
-environment it was exec'd with (and the --config file, if any) instead of starting a server. PATH is
-reduced to a few coreutils so a real nvidia-smi / nvcc on the machine never leaks in.
+environment it was exec'd with (and what it read through --config) instead of starting a server. PATH
+is reduced to a few coreutils so a real nvidia-smi / nvcc on the machine never leaks in. The stub can
+also end the way a real server can (an exit code, a signal, SGLang's exit-time kill_process_tree), so
+the key hand-over can be checked for every exit path.
 """
 
 import json
+import os
+import re
 import shutil
 import stat
 import subprocess
@@ -22,10 +26,14 @@ LAUNCHER = HERE / "serve.sh"
 BASH = shutil.which("bash")
 pytestmark = pytest.mark.skipif(BASH is None, reason="serve.sh needs bash")
 
-COREUTILS = ("sed", "mktemp", "sleep", "rm", "od")
+COREUTILS = ("sed", "mktemp", "sleep", "rm", "od", "mkfifo")
+# STUB_BEFORE_CONFIG / STUB_AFTER_CONFIG = "exit:<code>" or "signal:<NAME>": how the stub ends, before
+# it opens the --config path or after it has read it (default after: exit:0). STUB_KILL_TREE=1 first
+# SIGKILLs every descendant, like sglang/launch_server.py's
+# `finally: kill_process_tree(os.getpid(), include_parent=False)`.
 STUB_PYTHON = """#!/bin/sh
 exec "$STUB_PY" -I -c '
-import json, os, stat, sys
+import json, os, signal, stat, sys, time
 argv = sys.argv[1:]
 if argv[:1] == ["-c"] and "snapshot_download" in argv[1]:
     with open(os.environ["STUB_DL_LOG"], "w") as f:
@@ -33,31 +41,47 @@ if argv[:1] == ["-c"] and "snapshot_download" in argv[1]:
     print(os.environ["STUB_SNAPSHOT"])
     raise SystemExit(0)
 rec = {"argv": argv, "env": dict(os.environ)}
-if os.environ.get("STUB_KILL_CHILDREN"):
-    # what sglang.launch_server does on exit: kill_process_tree(os.getpid(), include_parent=False)
-    import signal, subprocess
-    out = subprocess.run(["/bin/ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True).stdout
-    kids = {}
-    for line in out.splitlines():
-        if line.strip():
-            pid, ppid = map(int, line.split())
-            kids.setdefault(ppid, []).append(pid)
-    todo = list(kids.get(os.getpid(), []))
-    while todo:
-        pid = todo.pop()
-        todo += kids.get(pid, [])
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+
+def descendants(pid):
+    out = []
+    for d in os.listdir("/proc"):
+        if d.isdigit():
+            try:
+                with open(f"/proc/{d}/stat") as f:
+                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+            except (OSError, IndexError, ValueError):
+                continue
+            if ppid == pid:
+                out += [int(d)] + descendants(int(d))
+    return out
+
+def finish(how):
+    print(json.dumps(rec), flush=True)
+    if os.environ.get("STUB_KILL_TREE"):
+        rec_kill = descendants(os.getpid())
+        for pid in rec_kill:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    kind, _, value = how.partition(":")
+    if kind == "signal":
+        os.kill(os.getpid(), getattr(signal, value))
+        time.sleep(30)
+    raise SystemExit(int(value))
+
 if "--config" in argv:
     path = argv[argv.index("--config") + 1]
-    with open(path) as f:
-        rec["config"] = f.read()
+    st = os.stat(path)  # stat, not open: opening a FIFO is what hands the keys over
     rec["config_path"] = path
-    rec["config_mode"] = stat.S_IMODE(os.stat(path).st_mode)
+    rec["config_is_fifo"] = stat.S_ISFIFO(st.st_mode)
+    rec["config_mode"] = stat.S_IMODE(st.st_mode)
     rec["config_dir_mode"] = stat.S_IMODE(os.stat(os.path.dirname(path)).st_mode)
-print(json.dumps(rec))
+    if os.environ.get("STUB_BEFORE_CONFIG"):
+        finish(os.environ["STUB_BEFORE_CONFIG"])
+    with open(path) as f:  # SGLang opens it once, at startup (server_args_config_parser.py)
+        rec["config"] = f.read()
+finish(os.environ.get("STUB_AFTER_CONFIG", "exit:0"))
 ' "$@"
 """
 NVCC_OUT = "Cuda compilation tools, release {rel}, V{rel}.85\\nBuild cuda_{rel}.r{rel}/compiler.0_0"
@@ -184,10 +208,10 @@ def test_self_spec_is_the_default(launcher):
     assert r.opt("--served-model-name") == "glm-ocr"
     assert r.opt("--context-length") == "16384"
     assert r.opt("--mem-fraction-static") == "0.6"
-    assert r.opt("--tokenizer-worker-num") == "2"  # FAST=1 without API_KEY
+    assert r.opt("--tokenizer-worker-num") == "1"  # one worker by default, FAST=1 too
+    assert "tokenizer workers" not in r.stderr  # the multi-worker note only for the opt-in
     for absent in (
         "--dp-size",
-        "--config",
         "--api-key",
         "--trust-remote-code",
         "--max-running-requests",
@@ -207,24 +231,9 @@ def test_self_spec_is_the_default(launcher):
     assert env["HF_HOME"] == str(launcher.tmp / "home" / ".cache" / "huggingface")
     assert env["PATH"].split(":")[:2] == [str(launcher.vbin), str(launcher.tmp / "cuda" / "bin")]
     assert "API_KEY" not in env
-    # two tokenizer workers: SGLang enforces no keys, and the launcher says so
-    assert "management endpoints are open" in r.stderr
-
-
-def test_self_spec_turns_grammar_backends_off(launcher):
-    # The self-spec worker builds no grammar vocab mask, so a token a grammar forbids raises inside the
-    # scheduler and takes the whole server down. Until it does, self-spec serves no constrained decoding.
-    assert launcher().opt("--grammar-backend") == "none"
-    assert "--grammar-backend" not in launcher("MODE=causal").argv
-
-
-@pytest.mark.parametrize("from_recipe_folder", [False, True])
-def test_python_never_puts_the_cwd_on_sys_path(launcher, from_recipe_folder):
-    # From inference/gravityocr/, `python -m sglang.launch_server` would import the recipe's own sglang/
-    # folder (a namespace package, first on sys.path) instead of the installed SGLang.
-    r = launcher(cwd=HERE if from_recipe_folder else None)
-    assert r.returncode == 0, r.stderr
-    assert r.env["PYTHONSAFEPATH"] == "1"
+    # the random admin key, and no API key: inference endpoints stay open on loopback
+    assert r.argv[-2] == "--config" and list(r.keys) == ["admin-api-key"]
+    assert r.stderr == ""
 
 
 def test_echo_line(launcher):
@@ -242,6 +251,16 @@ def test_mask_id_comes_from_block_diffusion_json(launcher):
     assert r.env["SELFSPEC_POS_OFFSET"] == "1" and r.env["SELFSPEC_FULLDRAFT"] == "1"
 
 
+def test_mask_id_fallback_is_named_and_matches_the_model_contract():
+    # serve.sh's fallback is GLM-OCR's <|mask|>; MODEL_CONTRACT.md documents the same id
+    m = re.search(r"^GLM_OCR_MASK_TOKEN_ID=(\d+)$", LAUNCHER.read_text(), re.M)
+    assert m, "serve.sh names its mask-id fallback GLM_OCR_MASK_TOKEN_ID"
+    assert m.group(1) == "59282"
+    assert "59282" not in LAUNCHER.read_text().replace(m.group(0), "")  # no second, unnamed copy
+    contract = (HERE / "MODEL_CONTRACT.md").read_text()
+    assert f"GravityOCR: {m.group(1)}, `<|mask|>`" in contract
+
+
 def test_explicit_mask_id_is_kept(launcher):
     r = launcher(env={"SELFSPEC_MASK_ID": "151329"})
     assert r.env["SELFSPEC_MASK_ID"] == "151329"
@@ -253,8 +272,42 @@ def test_causal_mode_has_no_self_spec_args_or_env(launcher):
     assert not [a for a in r.argv if a.startswith("--speculative")]
     assert "--page-size" not in r.argv
     assert not [k for k in r.env if k.startswith("SELFSPEC_")]  # inherited switches are dropped too
-    assert r.opt("--tokenizer-worker-num") == "2" and r.env["SS_GLM_VIT_GRAPH_MAXM"] == "2048"
+    assert r.opt("--tokenizer-worker-num") == "1" and r.env["SS_GLM_VIT_GRAPH_MAXM"] == "2048"
     assert r.stdout.startswith("[serve] MODE=causal ")
+
+
+def test_one_tokenizer_worker_by_default_and_more_as_an_opt_in(launcher):
+    # One worker is the default, with FAST=1 too; TOKENIZER_WORKERS=2 is an opt-in, and the launcher says what
+    # holds then: every worker of this patched SGLang checks the keys (upstream v0.5.10 checks none with more).
+    for kv in ((), ("FAST=1",), ("FAST=0",), ("MODE=causal",)):
+        r = launcher(*kv)
+        assert r.returncode == 0, r.stderr
+        assert r.opt("--tokenizer-worker-num") == "1" and "tokenizer workers" not in r.stderr
+    for kv, env in ((("TOKENIZER_WORKERS=2",), None), (("TOKENIZER_WORKERS=2",), {"API_KEY": "abc123"})):
+        r = launcher(*kv, env=env)
+        assert r.returncode == 0, r.stderr
+        assert r.opt("--tokenizer-worker-num") == "2"
+        assert "[serve] note: 2 tokenizer workers" in r.stderr and "checks API_KEY and the admin key in every worker" in r.stderr
+        assert len(r.keys["admin-api-key"]) == 64  # the management endpoints stay locked
+        assert "management endpoints are open" not in r.output
+
+
+def test_self_spec_keeps_the_grammar_backend(launcher):
+    # Constrained decoding works in self-spec mode (the verify rows get the grammar mask), so the launcher
+    # sets no --grammar-backend in either mode: SGLang's default, xgrammar, stays on.
+    for kv in ((), ("MODE=causal",), ("FAST=0",)):
+        r = launcher(*kv)
+        assert r.returncode == 0, r.stderr
+        assert "--grammar-backend" not in r.argv
+
+
+@pytest.mark.parametrize("from_recipe_folder", [False, True])
+def test_python_never_puts_the_cwd_on_sys_path(launcher, from_recipe_folder):
+    # From inference/gravityocr/, `python -m sglang.launch_server` would import the recipe's own sglang/
+    # folder (a namespace package, first on sys.path) instead of the installed SGLang.
+    r = launcher(cwd=HERE if from_recipe_folder else None)
+    assert r.returncode == 0, r.stderr
+    assert r.env["PYTHONSAFEPATH"] == "1"
 
 
 def test_fast0_keeps_only_the_required_self_spec_env(launcher):
@@ -405,7 +458,7 @@ def test_data_parallel_gpu_mismatch_exits_2(launcher, dp, gpu):
 def test_loopback_needs_no_key(launcher, host):
     r = launcher(env={"SERVE_HOST": host})
     assert r.returncode == 0, r.stderr
-    assert r.opt("--host") == host and "--config" not in r.argv
+    assert r.opt("--host") == host and list(r.keys) == ["admin-api-key"]
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "::", "10.1.2.3", "gpu-box", "127.0.0.1.example.com"])
@@ -415,14 +468,39 @@ def test_non_loopback_without_api_key_is_refused(launcher, host):
     assert "API_KEY" in r.stderr
 
 
-def _assert_private_key_file(r):
-    assert r.rec["config_mode"] == 0o600 and r.rec["config_dir_mode"] == 0o700
-    # The watcher removes the key directory once the server process is gone.
-    keydir = Path(r.rec["config_path"]).parent
-    deadline = time.monotonic() + 20
-    while keydir.exists() and time.monotonic() < deadline:
+def _leftovers(launcher):
+    """Key directories and launcher processes (the key writer, its guard, the guard's sleep) still
+    there. The processes are found by the per-test TMPDIR in their environment."""
+    tmp = launcher.tmp / "tmp"
+    dirs = sorted(tmp.glob("gravityocr-serve.*"))
+    procs = []
+    if Path("/proc/self/environ").exists():
+        marker = f"TMPDIR={tmp}".encode() + b"\0"
+        for d in Path("/proc").iterdir():
+            if d.name.isdigit() and int(d.name) != os.getpid():
+                try:
+                    if marker in (d / "environ").read_bytes():
+                        procs.append(int(d.name))
+                except OSError:
+                    pass
+    return dirs, procs
+
+
+def _assert_nothing_left(launcher, seconds=20):
+    deadline = time.monotonic() + seconds
+    while _leftovers(launcher) != ([], []) and time.monotonic() < deadline:
         time.sleep(0.2)
-    assert not keydir.exists()
+    assert _leftovers(launcher) == ([], [])
+
+
+def _assert_private_key_file(r, launcher):
+    # The keys travel through a FIFO (never a regular file) in a private directory, which the
+    # detached writer removes as soon as the server has read it.
+    assert r.rec["config_is_fifo"]
+    # permission bits only: a setgid parent directory hands its setgid bit to mktemp's directory
+    assert r.rec["config_mode"] & 0o777 == 0o600 and r.rec["config_dir_mode"] & 0o777 == 0o700
+    assert Path(r.rec["config_path"]).parent.parent == launcher.tmp / "tmp"
+    _assert_nothing_left(launcher)
 
 
 @pytest.mark.skipif(
@@ -434,7 +512,6 @@ def test_api_key_reaches_sglang_through_a_private_config_file(launcher):
     r = launcher(env={"SERVE_HOST": "0.0.0.0", "API_KEY": key})
     assert r.returncode == 0, r.stderr
     assert r.opt("--host") == "0.0.0.0"
-    # SGLang v0.5.10 enforces keys only with one tokenizer worker, so FAST=1 drops to one
     assert r.opt("--tokenizer-worker-num") == "1"
     assert "--api-key" not in r.argv and not [a for a in r.argv if key in a]
     assert key not in r.output and "API_KEY" not in r.env and key not in json.dumps(r.env)
@@ -447,15 +524,7 @@ def test_api_key_reaches_sglang_through_a_private_config_file(launcher):
     if yaml is not None:
         assert yaml.safe_load(r.rec["config"]) == r.keys
     assert "Authorization: Bearer" in r.stderr
-    _assert_private_key_file(r)
-
-
-def test_key_file_is_removed_even_when_sglang_kills_its_children(launcher):
-    # SGLang's launcher SIGKILLs every descendant on exit; a watcher that is still the server's child
-    # dies with it and leaves server.yaml, keys included, on disk.
-    r = launcher(env={"API_KEY": "abc123", "STUB_KILL_CHILDREN": "1"})
-    assert r.returncode == 0, r.stderr
-    _assert_private_key_file(r)
+    _assert_private_key_file(r, launcher)
 
 
 def test_api_key_on_loopback_is_also_honoured(launcher):
@@ -465,37 +534,71 @@ def test_api_key_on_loopback_is_also_honoured(launcher):
     assert r.opt("--tokenizer-worker-num") == "1"
 
 
-@pytest.mark.parametrize("fast", ["0", "1"])
-def test_api_key_always_means_one_tokenizer_worker(launcher, fast):
-    r = launcher(f"FAST={fast}", env={"API_KEY": "abc123"})
+@pytest.mark.parametrize(
+    "kv,workers",
+    [(("FAST=0",), "1"), (("FAST=1",), "1"), (("TOKENIZER_WORKERS=2",), "2"), (("TOKENIZER_WORKERS=4",), "4")],
+)
+def test_api_key_keeps_the_tokenizer_workers(launcher, kv, workers):
+    # every tokenizer worker checks the keys, so a key works with the opt-in of several workers too
+    r = launcher(*kv, env={"API_KEY": "abc123"})
     assert r.returncode == 0, r.stderr
     nums = [r.argv[i + 1] for i, a in enumerate(r.argv) if a == "--tokenizer-worker-num"]
-    assert nums == ["1"]
+    assert nums == [workers]
+    assert r.keys["api-key"] == "abc123" and len(r.keys["admin-api-key"]) == 64
 
 
-@pytest.mark.parametrize("workers", ["2", "4"])
-def test_api_key_with_more_tokenizer_workers_is_refused(launcher, workers):
-    r = launcher(f"TOKENIZER_WORKERS={workers}", env={"API_KEY": "abc123"})
-    assert r.returncode == 2 and not r.launched
-    assert "single tokenizer worker" in r.stderr
-
-
-def test_one_tokenizer_worker_locks_the_management_endpoints(launcher):
-    # With one worker SGLang enforces keys, so the launcher sets a random admin key it never shows:
-    # /update_weights_from_disk, /flush_cache, profiling, LoRA loading etc. refuse every caller.
-    runs = [launcher("FAST=0"), launcher("TOKENIZER_WORKERS=1"), launcher(env={"API_KEY": "abc123"})]
+def test_every_start_locks_the_management_endpoints(launcher):
+    # The launcher always sets a random admin key it never shows, whatever the number of tokenizer
+    # workers: /update_weights_from_disk, /flush_cache, profiling, LoRA loading etc. refuse every caller.
+    runs = [
+        launcher(),  # FAST=1, one tokenizer worker
+        launcher("FAST=0"),
+        launcher("TOKENIZER_WORKERS=4"),
+        launcher("MODE=causal"),
+        launcher("TOKENIZER_WORKERS=2", env={"API_KEY": "abc123"}),
+    ]
     admins = []
     for r in runs:
         assert r.returncode == 0, r.stderr
-        assert r.opt("--tokenizer-worker-num") == "1"
         admin = r.keys["admin-api-key"]
         assert len(admin) == 64 and set(admin) <= set("0123456789abcdef")
         assert admin not in r.output and not [a for a in r.argv if admin in a]
         assert admin not in json.dumps(r.env)
-        _assert_private_key_file(r)
+        assert "management endpoints are open" not in r.output
+        _assert_private_key_file(r, launcher)
         admins.append(admin)
+    assert [r.opt("--tokenizer-worker-num") for r in runs] == ["1", "1", "4", "1", "2"]
     assert len(set(admins)) == len(admins)  # fresh per start
-    assert "api-key" not in runs[0].keys  # no API_KEY: inference endpoints stay open on loopback
+    assert all("api-key" not in r.keys for r in runs[:4])  # no API_KEY: inference stays open on loopback
+
+
+# Every way the server process can end. The keys must be gone afterwards (no key directory, no writer
+# process left), whether or not the server read them first. "kill-tree" ends like sglang/launch_server.py
+# (SIGKILL to every descendant), which also kills anything the launcher left as the server's child.
+EXIT_PATHS = {
+    "normal-stop": ({}, 0, True),
+    "startup-failure": ({"STUB_BEFORE_CONFIG": "exit:1"}, 1, False),
+    "SIGTERM-before-reading": ({"STUB_BEFORE_CONFIG": "signal:SIGTERM"}, -15, False),
+    "SIGKILL-before-reading": ({"STUB_BEFORE_CONFIG": "signal:SIGKILL"}, -9, False),
+    "SIGTERM-after-reading": ({"STUB_AFTER_CONFIG": "signal:SIGTERM"}, -15, True),
+    "SIGKILL-after-reading": ({"STUB_AFTER_CONFIG": "signal:SIGKILL"}, -9, True),
+    "kill-tree-after-reading": ({"STUB_KILL_TREE": "1"}, 0, True),
+    "kill-tree-before-reading": ({"STUB_KILL_TREE": "1", "STUB_BEFORE_CONFIG": "exit:1"}, 1, False),
+}
+
+
+@pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="the stub and the check walk /proc")
+@pytest.mark.parametrize("path", sorted(EXIT_PATHS))
+def test_keys_are_gone_after_every_exit_path(launcher, path):
+    env, returncode, read = EXIT_PATHS[path]
+    r = launcher(env={"API_KEY": "abc123", **env})
+    assert r.returncode == returncode, r.stderr
+    assert r.rec["config_is_fifo"] and r.rec["config_mode"] & 0o777 == 0o600
+    if read:
+        assert r.keys["api-key"] == "abc123" and len(r.keys["admin-api-key"]) == 64
+    else:
+        assert "config" not in r.rec
+    _assert_nothing_left(launcher)
 
 
 def test_api_key_as_an_argument_is_refused(launcher):
@@ -546,11 +649,43 @@ def test_malformed_launcher_values_are_refused(launcher, kv):
 
 
 def test_config_cannot_be_smuggled_through_launcher_values(launcher):
-    # SGLang merges a YAML file wherever the literal token '--config' appears in its argv.
+    # SGLang merges a YAML file wherever the literal token '--config' appears in its argv. The value
+    # checks stop it first: TOKENIZER_WORKERS must be a positive integer.
     evil = launcher.tmp / "evil.yaml"
     evil.write_text("enable-custom-logit-processor: true\n")
     r = launcher("TOKENIZER_WORKERS=--config", env={"EXTRA_ARGS": f"{evil} 2"})
     assert r.returncode == 2 and not r.launched
+    assert "TOKENIZER_WORKERS must be a positive integer" in r.stderr
+
+
+def test_config_guard_refuses_a_config_token_that_passed_the_value_checks(launcher):
+    # The last guard (any '--config' element in the assembled argv) behind the value checks. A Hub
+    # snapshot path is only checked to be a directory, so a snapshot that resolves to a directory
+    # named '--config' (relative to the launcher's working directory) reaches it.
+    (launcher.tmp / "--config").mkdir()
+    r = launcher(env={"CKPT": "someorg/SomeOCR", "STUB_SNAPSHOT": "--config"})
+    assert r.returncode == 2 and not r.launched
+    assert "'--config' reached the server arguments through a launcher value; refusing" in r.stderr
+    assert not list((launcher.tmp / "tmp").glob("gravityocr-serve.*"))  # refused before any key exists
+
+
+# ---------------------------------------------------------------- torch.distributed rendezvous
+@pytest.mark.parametrize("host", ["127.0.0.1", "10.1.2.3", "0.0.0.0"])
+@pytest.mark.parametrize("dp", ["1", "2"])
+def test_distributed_rendezvous_is_left_to_sglang(launcher, host, dp):
+    # The patched SGLang rendezvouses a single-node server on 127.0.0.1, with a loopback-only
+    # store, whatever --host is (test_gravityocr_dist_init.py). --dist-init-addr or a rendezvous
+    # override would replace that, --dist-init-addr would also switch image tensors to the
+    # cross-node CPU transport, and both make DP replicas collide on one port. So the launcher
+    # passes none of the multi-node options (EXTRA_ARGS refuses them too, see FORBIDDEN_EXTRA) and
+    # sets no rendezvous override.
+    r = launcher(f"DP={dp}", "GPU=" + ",".join(map(str, range(int(dp)))),
+                 env={"SERVE_HOST": host, "API_KEY": "abc123"})
+    assert r.returncode == 0, r.stderr
+    assert r.opt("--host") == host
+    for flag in ("--dist-init-addr", "--nccl-init-addr", "--nnodes", "--node-rank", "--enable-dp-attention"):
+        assert not [a for a in r.argv if a.split("=")[0] == flag]
+    assert "SGLANG_DISTRIBUTED_INIT_METHOD_OVERRIDE" not in r.env
 
 
 # ---------------------------------------------------------------- EXTRA_ARGS allowlist
@@ -634,10 +769,9 @@ def test_allowed_extra_args_are_appended_last(launcher):
     tokens = extra.split()
     r = launcher(env={"EXTRA_ARGS": extra})
     assert r.returncode == 0, r.stderr
-    assert (
-        r.argv[-len(tokens) :] == tokens
-    )  # in order, after the launcher's own flags, no glob expansion
-    assert r.argv.index("--tokenizer-worker-num") < len(r.argv) - len(tokens)
+    # in order, after the launcher's own flags and before its --config, no glob expansion
+    assert r.argv[-len(tokens) - 2 : -2] == tokens and r.argv[-2] == "--config"
+    assert r.argv.index("--tokenizer-worker-num") < len(r.argv) - len(tokens) - 2
 
 
 def test_extra_args_come_before_the_launchers_config(launcher):

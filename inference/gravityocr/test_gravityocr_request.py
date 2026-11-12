@@ -1,12 +1,16 @@
 # Copyright 2026 Trillion Labs
 # SPDX-License-Identifier: Apache-2.0
-"""ocr_request.py: request encoding and CLI, CPU only, no network (urlopen is replaced)."""
+"""ocr_request.py: request encoding and CLI, CPU only. Most tests replace the HTTP call
+(ocr_request.send); the redirect and proxy tests use real sockets on 127.0.0.1 only."""
 
 import base64
 import http.client
+import http.server
 import importlib.util
 import io
 import json
+import re
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -28,7 +32,7 @@ def ocr_request():
 
 
 class FakeServer:
-    """Stands in for urllib.request.urlopen and records the request it gets."""
+    """Stands in for ocr_request.send and records the request it gets."""
 
     def __init__(self, content="ok", error=None, raw=None):
         self.content, self.error, self.raw, self.requests = content, error, raw, []
@@ -51,10 +55,9 @@ class FakeServer:
 
 
 @pytest.fixture
-def server(monkeypatch):
+def server(monkeypatch, ocr_request):
     fake = FakeServer()
-    monkeypatch.setattr(urllib.request, "urlopen", fake)
-    monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: type("Opener", (), {"open": staticmethod(fake)})())
+    monkeypatch.setattr(ocr_request, "send", fake)
     monkeypatch.delenv("API_KEY", raising=False)
     return fake
 
@@ -84,7 +87,7 @@ def test_task_prompts(ocr_request):
         "table": "Table Recognition:",
         "formula": "Formula Recognition:",
     }
-    assert ocr_request.DEFAULT_PROMPT == "Text Recognition:"
+    assert ocr_request.DEFAULT_TASK == "text" and ocr_request.DEFAULT_PROMPT == "Text Recognition:"
     assert ocr_request.DEFAULT_MODEL == "glm-ocr"
     assert ocr_request.DEFAULT_URL == "http://127.0.0.1:30000"
 
@@ -104,7 +107,8 @@ def test_guess_mime(ocr_request, name, mime):
     assert ocr_request.guess_mime(name) == mime
 
 
-def test_main_sends_one_request(ocr_request, server, tmp_path, capsys):
+def test_main_sends_one_request(ocr_request, server, tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("API_KEY", "k3y")
     crop = tmp_path / "crop.jpg"
     crop.write_bytes(b"\xff\xd8not-really-a-jpeg")
     rc = ocr_request.main(
@@ -118,8 +122,6 @@ def test_main_sends_one_request(ocr_request, server, tmp_path, capsys):
             "gravityocr",
             "--max-tokens",
             "77",
-            "--api-key",
-            "k3y",
             "--timeout",
             "5",
         ]
@@ -225,6 +227,9 @@ def test_unexpected_replies_are_reported(ocr_request, server, tmp_path, capsys, 
         ["a.png", "--url", "file:///etc"],
         ["a.png", "--url", "127.0.0.1:30000"],
         ["a.png", "--max-tokens", "0"],
+        ["a.png", "--api-key", "k3y"],  # the key comes from $API_KEY only
+        ["a.png", "--task", "chart"],
+        ["a.png", "--task", "table", "--prompt", "Table Recognition:"],
     ],
 )
 def test_bad_arguments_exit_2(ocr_request, server, argv):
@@ -246,65 +251,145 @@ def test_synthetic_renders_a_png(ocr_request, server):
     assert mime == "image/png" and data.startswith(PNG_SIGNATURE)
 
 
-def test_redirects_are_refused_and_the_key_never_follows(ocr_request, tmp_path, monkeypatch, capsys):
-    # urllib follows a 3xx and copies Authorization to whatever host Location names (turning the POST into
-    # a GET), so a hostile or misconfigured server could collect the key. Real loopback servers, no fakes.
-    import http.server
-    import threading
-
-    seen = []
-
-    class Collector(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            seen.append(self.headers.get("Authorization"))
-            body = json.dumps({"choices": [{"message": {"content": "leaked"}}]}).encode()
-            self.send_response(200)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        do_POST = do_GET
-
-        def log_message(self, *args):
-            pass
-
-    collector = http.server.HTTPServer(("127.0.0.1", 0), Collector)
-
-    class Redirector(http.server.BaseHTTPRequestHandler):
-        def do_POST(self):
-            self.send_response(302)
-            self.send_header("Location", f"http://127.0.0.1:{collector.server_port}/v1/chat/completions")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-
-        def log_message(self, *args):
-            pass
-
-    redirector = http.server.HTTPServer(("127.0.0.1", 0), Redirector)
-    for srv in (collector, redirector):
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
-    monkeypatch.delenv("API_KEY", raising=False)
-    try:
-        image = tmp_path / "crop.png"
-        image.write_bytes(PNG_SIGNATURE)
-        rc = ocr_request.main([str(image), "--url", f"http://127.0.0.1:{redirector.server_port}",
-                               "--api-key", "SECRET", "--timeout", "5"])
-    finally:
-        for srv in (collector, redirector):
-            srv.shutdown()
-    assert seen == [], "the request (and the key) followed the redirect"
-    assert rc == 1 and "302" in capsys.readouterr().err
+@pytest.mark.parametrize(
+    "task,prompt",
+    [
+        ("text", "Text Recognition:"),
+        ("table", "Table Recognition:"),
+        ("formula", "Formula Recognition:"),
+    ],
+)
+def test_task_selects_the_prompt(ocr_request, server, tmp_path, task, prompt):
+    crop = tmp_path / "crop.png"
+    crop.write_bytes(PNG_SIGNATURE)
+    assert ocr_request.main([str(crop), "--task", task]) == 0
+    assert server.body["messages"][0]["content"][1]["text"] == prompt
 
 
-@pytest.mark.parametrize("task", ["text", "table", "formula"])
-def test_task_selects_its_prompt(ocr_request, server, tmp_path, task):
-    image = tmp_path / "crop.png"
-    image.write_bytes(PNG_SIGNATURE)
-    assert ocr_request.main([str(image), "--task", task]) == 0
-    assert server.body["messages"][0]["content"][1]["text"] == ocr_request.TASK_PROMPTS[task]
+def test_custom_prompt(ocr_request, server, tmp_path):
+    crop = tmp_path / "crop.png"
+    crop.write_bytes(PNG_SIGNATURE)
+    assert ocr_request.main([str(crop), "--prompt", "Recognise this:"]) == 0
+    assert server.body["messages"][0]["content"][1]["text"] == "Recognise this:"
 
 
-def test_task_and_prompt_are_exclusive(ocr_request, server, tmp_path):
+def test_help_lists_the_tasks(ocr_request, capsys):
     with pytest.raises(SystemExit) as exc:
-        ocr_request.parse_args([str(tmp_path / "x.png"), "--task", "table", "--prompt", "Text Recognition:"])
-    assert exc.value.code == 2
+        ocr_request.main(["--help"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    for task, prompt in ocr_request.TASK_PROMPTS.items():
+        assert re.search(rf"^ +{task} +{re.escape(prompt)}$", out, re.M), out
+    assert "$API_KEY" in out and "--api-key" not in out
+
+
+# ---------------------------------------------------------------- real sockets on 127.0.0.1
+class _Recorder(http.server.ThreadingHTTPServer):
+    """A local HTTP server that records (method, path, Authorization) and answers with `reply`."""
+
+    def __init__(self, reply):
+        self.seen, self.reply = [], reply
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def _handle(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                self.rfile.read(n)
+                outer.seen.append((self.command, self.path, self.headers.get("Authorization")))
+                code, headers, body = outer.reply
+                self.send_response(code)
+                for k, v in headers.items():
+                    self.send_header(k, v)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            do_GET = do_POST = do_PUT = _handle
+
+            def log_message(self, *args):
+                pass
+
+        super().__init__(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.serve_forever, daemon=True).start()
+
+    @property
+    def url(self):
+        return f"http://127.0.0.1:{self.server_address[1]}"
+
+
+_OK = (200, {}, json.dumps({"choices": [{"message": {"content": "ok"}}], "usage": {}}).encode())
+
+
+@pytest.fixture
+def recorder():
+    started = []
+
+    def make(reply=_OK):
+        srv = _Recorder(reply)
+        started.append(srv)
+        return srv
+
+    yield make
+    for srv in started:
+        srv.shutdown()
+        srv.server_close()
+
+
+@pytest.fixture
+def no_proxy_env(monkeypatch):
+    for k in (
+        "http_proxy",
+        "HTTP_PROXY",
+        "https_proxy",
+        "HTTPS_PROXY",
+        "all_proxy",
+        "ALL_PROXY",
+        "no_proxy",
+        "NO_PROXY",
+    ):
+        monkeypatch.delenv(k, raising=False)
+
+
+def test_real_request_succeeds(ocr_request, recorder, tmp_path, monkeypatch, capsys, no_proxy_env):
+    crop = tmp_path / "crop.png"
+    crop.write_bytes(PNG_SIGNATURE)
+    monkeypatch.setenv("API_KEY", "SECRET")
+    target = recorder()
+    assert ocr_request.main([str(crop), "--url", target.url]) == 0
+    assert target.seen == [("POST", "/v1/chat/completions", "Bearer SECRET")]
+    assert capsys.readouterr().out == "ok\n"
+
+
+@pytest.mark.parametrize("code", [301, 302, 303, 307, 308])
+def test_redirects_are_refused_and_the_key_stays_put(
+    ocr_request, recorder, tmp_path, monkeypatch, capsys, no_proxy_env, code
+):
+    crop = tmp_path / "crop.png"
+    crop.write_bytes(PNG_SIGNATURE)
+    monkeypatch.setenv("API_KEY", "SECRET")
+    elsewhere = recorder()  # stands in for another host
+    location = elsewhere.url.replace("127.0.0.1", "localhost") + "/v1/chat/completions"
+    first = recorder((code, {"Location": location}, b""))
+    assert ocr_request.main([str(crop), "--url", first.url]) == 1
+    assert first.seen == [("POST", "/v1/chat/completions", "Bearer SECRET")]
+    assert elsewhere.seen == []  # neither followed (with the key) nor downgraded to a GET
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    err = captured.err
+    assert (
+        f"HTTP {code}" in err and location in err and "not followed" in err and "SECRET" not in err
+    )
+
+
+def test_proxy_environment_is_ignored(ocr_request, recorder, tmp_path, monkeypatch, no_proxy_env):
+    crop = tmp_path / "crop.png"
+    crop.write_bytes(PNG_SIGNATURE)
+    monkeypatch.setenv("API_KEY", "SECRET")
+    proxy, target = recorder(), recorder()
+    # urllib.request.urlopen caches its opener (and the proxies it read) on first use; drop the cache
+    # so that a client which went back to urlopen would read the proxy below and fail this test
+    monkeypatch.setattr(urllib.request, "_opener", None)
+    for var in ("http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.setenv(var, proxy.url)
+    assert ocr_request.main([str(crop), "--url", target.url]) == 0
+    assert proxy.seen == [] and target.seen == [("POST", "/v1/chat/completions", "Bearer SECRET")]

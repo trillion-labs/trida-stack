@@ -4,19 +4,25 @@
 """Send one image crop to a running GravityOCR server (serve.sh) and print the recognised text.
 
 GravityOCR reads one layout region per request: crop the region first (a paragraph, a table or a
-formula) and pick the matching task prompt:
+formula) and pick the matching task with --task (or pass a prompt of your own with --prompt):
 
-    Text Recognition:      plain text in reading order
-    Table Recognition:     the table as HTML
-    Formula Recognition:   the formula as LaTeX
+    --task text       Text Recognition:      plain text in reading order (the default)
+    --task table      Table Recognition:     the table as HTML
+    --task formula    Formula Recognition:   the formula as LaTeX
 
 The image travels inside the request as a base64 data URL; the client never asks the server to
 fetch a URL or read a file. Standard library only (Pillow is needed only for --synthetic).
 
     python ocr_request.py crop.png
-    python ocr_request.py table.png --prompt "Table Recognition:"
+    python ocr_request.py table.png --task table
     python ocr_request.py --synthetic "Hello GravityOCR"         # renders the text into a PNG first
     API_KEY=... python ocr_request.py crop.png --url http://gpu-box:30000
+
+The bearer key is read from $API_KEY only, never from the command line (arguments show up in the
+process list). The request goes to --url and nowhere else: redirects are refused, because urllib
+would resend the request, Authorization header included, to whatever host the redirect names; and
+proxy environment variables (http_proxy, https_proxy, ...) are ignored, because the proxy would
+receive the key.
 """
 
 from __future__ import annotations
@@ -37,7 +43,8 @@ TASK_PROMPTS = {
     "table": "Table Recognition:",
     "formula": "Formula Recognition:",
 }
-DEFAULT_PROMPT = TASK_PROMPTS["text"]
+DEFAULT_TASK = "text"
+DEFAULT_PROMPT = TASK_PROMPTS[DEFAULT_TASK]
 DEFAULT_URL = "http://127.0.0.1:30000"
 DEFAULT_MODEL = "glm-ocr"  # serve.sh SERVED_NAME default
 DEFAULT_MAX_TOKENS = 4096
@@ -52,6 +59,24 @@ MIME_BY_SUFFIX = {
     ".tif": "image/tiff",
     ".tiff": "image/tiff",
 }
+
+
+class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """Turn every 3xx into an HTTPError instead of following it. urllib would otherwise copy the
+    Authorization header to whatever host Location names (and turn the POST into a GET on 301-303)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None  # urllib then raises HTTPError for the 3xx response
+
+
+# An empty ProxyHandler: an exported http_proxy / https_proxy would otherwise receive the request,
+# key included, even for the loopback default URL.
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _RefuseRedirects)
+
+
+def send(request: urllib.request.Request, timeout: float):
+    """Open `request` with the opener above: no redirects followed, no proxies."""
+    return _OPENER.open(request, timeout=timeout)
 
 
 def guess_mime(path: str | os.PathLike) -> str:
@@ -101,38 +126,29 @@ def render_text_png(text: str, font_size: int = 32, margin: int = 24) -> bytes:
     return buf.getvalue()
 
 
-class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
-    """Never follow a redirect: urllib would resend the Authorization header to whatever host the
-    Location names, and turn the POST into a GET. A 3xx is reported as an HTTP error instead."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise urllib.error.HTTPError(req.full_url, code, f"redirect to {newurl} refused", headers, fp)
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(
         description="Send one image crop to a GravityOCR server and print the recognised text.",
-        epilog="Task prompts: " + ", ".join(f"'{p}'" for p in TASK_PROMPTS.values()),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="tasks (--task) and their prompts:\n"
+        + "".join(f"  {task:<9} {prompt}\n" for task, prompt in TASK_PROMPTS.items())
+        + "\nThe bearer key, if the server needs one, is read from $API_KEY. Redirects are not\n"
+        "followed and proxy variables (http_proxy, https_proxy, ...) are ignored.",
     )
     ap.add_argument("image", nargs="?", help="image file of one layout region (crop)")
     ap.add_argument(
         "--synthetic", metavar="TEXT", help="render TEXT into a PNG and send that instead of a file"
     )
-    which = ap.add_mutually_exclusive_group()
-    which.add_argument(
-        "--task", choices=sorted(TASK_PROMPTS), help="the region type, which picks its task prompt"
+    task = ap.add_mutually_exclusive_group()
+    task.add_argument(
+        "--task",
+        choices=sorted(TASK_PROMPTS),
+        help=f"region type; selects the task prompt (default: {DEFAULT_TASK})",
     )
-    which.add_argument(
-        "--prompt", default=DEFAULT_PROMPT, help=f"task prompt (default: '{DEFAULT_PROMPT}')"
-    )
+    task.add_argument("--prompt", help="a task prompt of your own, instead of --task")
     ap.add_argument("--url", default=DEFAULT_URL, help=f"server root URL (default: {DEFAULT_URL})")
     ap.add_argument(
         "--model", default=DEFAULT_MODEL, help=f"served model name (default: {DEFAULT_MODEL})"
-    )
-    ap.add_argument(
-        "--api-key",
-        default=os.environ.get("API_KEY"),
-        help="bearer key for a server started with API_KEY (default: $API_KEY)",
     )
     ap.add_argument(
         "--max-tokens",
@@ -147,14 +163,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"HTTP timeout in seconds (default: {DEFAULT_TIMEOUT:g})",
     )
     args = ap.parse_args(argv)
-    if args.task:
-        args.prompt = TASK_PROMPTS[args.task]
     if (args.image is None) == (args.synthetic is None):
         ap.error("give exactly one of IMAGE or --synthetic TEXT")
     if not args.url.startswith(("http://", "https://")):
         ap.error("--url must start with http:// or https://")
     if args.max_tokens < 1:
         ap.error("--max-tokens must be positive")
+    if args.prompt is None:
+        args.prompt = TASK_PROMPTS[args.task or DEFAULT_TASK]
     return args
 
 
@@ -166,8 +182,9 @@ def main(argv: list[str] | None = None) -> int:
         image_bytes, mime = Path(args.image).read_bytes(), guess_mime(args.image)
     payload = build_payload(image_bytes, mime, args.prompt, args.model, args.max_tokens)
     headers = {"Content-Type": "application/json"}
-    if args.api_key:
-        headers["Authorization"] = f"Bearer {args.api_key}"
+    api_key = os.environ.get("API_KEY")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     request = urllib.request.Request(
         args.url.rstrip("/") + "/v1/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
@@ -176,9 +193,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     url = request.full_url
     try:
-        with urllib.request.build_opener(_RefuseRedirects).open(request, timeout=args.timeout) as resp:
+        with send(request, timeout=args.timeout) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as exc:
+        if 300 <= exc.code < 400:
+            where = exc.headers.get("Location") if exc.headers is not None else None
+            print(
+                f"[ocr_request] HTTP {exc.code} from {url}: redirect to {where or '(no Location)'} not"
+                " followed (the request carries the bearer key); pass the final URL with --url",
+                file=sys.stderr,
+            )
+            return 1
         body = exc.read().decode("utf-8", "replace")
         print(f"[ocr_request] HTTP {exc.code} from {url}: {body}", file=sys.stderr)
         return 1
