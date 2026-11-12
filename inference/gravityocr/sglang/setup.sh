@@ -13,12 +13,15 @@
 #   2. Upstream sgl-project/sglang at the commit in BASE_COMMIT.txt (tag v0.5.10): a shallow fetch of
 #      exactly that commit into an empty $SGLANG_SRC, or reuse a checkout that is already at it.
 #   3. Apply gravityocr_selfspec.patch (skipped when already applied) and copy the new files in python/.
+#      Then check the checkout byte for byte: every tracked file equals the base commit with the patch
+#      applied, the new files equal ours, and python/ holds no other untracked file.
 #   4. Create $SGLANG_SRC/.venv-sglang (Python $PY) and install requirements-lock.txt as is: --no-deps,
 #      --no-build, nothing re-resolved. PyPI pins first, from https://pypi.org/simple only, then the four
 #      +cu128 builds from the PyTorch cu128 index only (the lock header says why it is two steps). uv
 #      config files and index variables (UV_INDEX, UV_EXTRA_INDEX_URL, UV_FIND_LINKS, ...) are ignored.
 #   5. Install the patched SGLang editable, with version 0.5.10. Upstream derives its version from git
-#      tags, which a shallow fetch does not have.
+#      tags, which a shallow fetch does not have. Offline and without build isolation: the build backend
+#      (setuptools, setuptools-scm, wheel) is the locked one from step 4, so nothing is fetched to build.
 #   6. Check the installed packages against the lock, then print VBIN for serve.sh.
 #
 # Env, or KEY=VAL arguments:
@@ -131,10 +134,20 @@ else
   git -C "$SGLANG_SRC" apply "$PATCH"
   log "applied gravityocr_selfspec.patch"
 fi
-want=$(sed -n 's#^diff --git a/\([^ ]*\) b/.*#\1#p' "$PATCH" | sort)
-have=$(git -C "$SGLANG_SRC" diff --name-only | sort)
-[ "$want" = "$have" ] || die "the tracked changes in $SGLANG_SRC are not exactly the patch's files:" \
-  "$(diff <(echo "$want") <(echo "$have") || true)"
+# Exact content, not just file names: every tracked file must be BASE with the patch applied, byte for
+# byte, so a local edit anywhere (inside a patched file or not) is refused. The expected tree is built
+# in a throwaway index: BASE, then `git apply --cached` of the patch.
+SCRATCH=$(mktemp -d)
+trap 'rm -rf "$SCRATCH"' EXIT
+expected_tree=$(export GIT_INDEX_FILE=$SCRATCH/index
+                git -C "$SGLANG_SRC" read-tree "$BASE" \
+                  && git -C "$SGLANG_SRC" apply --cached "$PATCH" \
+                  && git -C "$SGLANG_SRC" write-tree) \
+  || die "could not build $BASE + gravityocr_selfspec.patch in a scratch index"
+if ! git -C "$SGLANG_SRC" diff --quiet "$expected_tree" --; then
+  die "the tracked files in $SGLANG_SRC differ from $BASE + gravityocr_selfspec.patch:" \
+    "$(git -C "$SGLANG_SRC" diff --stat "$expected_tree" -- | tail -n 20)"
+fi
 mapfile -t new_files < <(cd "$HERE" && find python -type f -name '*.py' | sort)
 [ "${#new_files[@]}" -gt 0 ] || die "no new files under $HERE/python"
 for f in "${new_files[@]}"; do
@@ -142,8 +155,15 @@ for f in "${new_files[@]}"; do
     die "$f is an upstream file; the new files must not overwrite one"
   fi
   install -D -m 644 "$HERE/$f" "$SGLANG_SRC/$f"
+  cmp -s "$HERE/$f" "$SGLANG_SRC/$f" || die "$SGLANG_SRC/$f differs from $HERE/$f after copying"
 done
 log "copied ${#new_files[@]} new files into $SGLANG_SRC/python"
+# Nothing else may sit untracked in python/: the editable install would ship it. Files the checkout's
+# .gitignore covers (__pycache__/, *.egg-info/, the generated sglang/_version.py) do not count.
+extra=$(comm -13 <(printf '%s\n' "${new_files[@]}") \
+                 <(git -C "$SGLANG_SRC" ls-files --others --exclude-standard -- python | sort))
+[ -z "$extra" ] || die "untracked files in $SGLANG_SRC/python that are neither upstream nor ours:" "${extra//$'\n'/ }"
+log "checkout verified: $BASE + gravityocr_selfspec.patch + ${#new_files[@]} new files, byte for byte"
 exclude_file=$(git -C "$SGLANG_SRC" rev-parse --git-path info/exclude)
 case "$exclude_file" in /*) ;; *) exclude_file=$SGLANG_SRC/$exclude_file ;; esac
 mkdir -p "$(dirname "$exclude_file")"
@@ -172,14 +192,15 @@ if [ -n "$cu128_pins" ]; then
 fi
 
 # ── 5. the patched SGLang, editable ───────────────────────────────────────────────────────────────
+# --no-build-isolation: build with the venv's own setuptools / setuptools-scm / wheel, pinned in the
+# lock and installed in step 4, instead of whatever PyPI has today. --offline: so nothing can be fetched.
 SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SGLANG=$SGLANG_VERSION \
-  uv pip install --no-config -q --python "$VENV/bin/python" --no-deps --default-index "$PYPI_INDEX" \
-  -e "$SGLANG_SRC/python"
+  uv pip install --no-config -q --python "$VENV/bin/python" --no-deps --no-build-isolation --offline \
+  --default-index "$PYPI_INDEX" -e "$SGLANG_SRC/python"
 log "installed sglang $SGLANG_VERSION (editable) from $SGLANG_SRC/python"
 
 # ── 6. verify ─────────────────────────────────────────────────────────────────────────────────────
-FREEZE=$(mktemp)
-trap 'rm -f "$FREEZE"' EXIT
+FREEZE=$SCRATCH/freeze.txt
 uv pip freeze --python "$VENV/bin/python" > "$FREEZE"
 "$VENV/bin/python" - "$LOCK" "$FREEZE" "$SGLANG_SRC/python" "$SGLANG_VERSION" <<'PY' \
   || die "the installed env does not match requirements-lock.txt (see above)"
