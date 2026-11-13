@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Serve a Trida decision checkpoint: typed decisions and chat from one engine, one copy of the weights.
 
-  POST /v1/decide            {"request": {"state": ..., "questions": {...}}, "reasoning": false, "temperature": null}
+  POST /v1/decide            {"request": {"state": ..., "questions": {...}}, "reasoning": false, "temperature": null,
+                              "max_reasoning_tokens": 4096}
                              -> {"answers": {qid: answer}, "timing_ms": ...} (+ "reasoning" when reasoning=true)
   POST /v1/chat/completions  OpenAI-compatible, streaming or not; `tools` supported (tool calls parsed from the
                              model's <tool_call> blocks); the thinking is returned as reasoning_content; honours
@@ -166,10 +167,15 @@ def create_app(engine):
     @app.post("/v1/decide")
     async def decide(body: dict = Body(...)):
         if "request" not in body:
-            raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float}")
+            raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float, "
+                                     "\"max_reasoning_tokens\"?: int}")
         try:
             # the image, if any, is in the request (base64 or a data URL): requests never name server files
-            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")))
+            budget = _num(body, "max_reasoning_tokens", 4096, int)
+            if budget < 1:
+                raise HTTPException(400, f"max_reasoning_tokens must be positive, got {budget}")
+            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
+                                        budget)
         except RequestError as e:
             raise HTTPException(400, str(e)) from e
 
