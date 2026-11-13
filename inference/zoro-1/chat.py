@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""nano-inference chat — talk to a served diffusion LLM (OpenAI-compatible).
+"""nano-inference chat — talk to served Zoro-1 (OpenAI-compatible).
 
   python chat.py "What is 17 * 23?"     # one-shot
   python chat.py                         # interactive REPL (Ctrl-D to exit)
   python chat.py --no-think "..."        # disable the thinking trace
 
 Assumes a model is already served (see serve.py). Sampling defaults:
-temp 1.0 / top_p 0.95 / top_k 50 / no presence penalty — the same canonical setting
+temp 1.0 / top_p 0.95 / top_k 20 / no presence penalty — the same canonical setting
 eval.py uses, so chat and benchmark runs decode identically.
 """
 import argparse

@@ -19,7 +19,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import IterableDataset, get_worker_info
 
-from train.hf_block_diffusion import bucketed_clean_len
+from train.models.block_diffusion import bucketed_clean_len
 
 
 def _normalize_messages(messages):

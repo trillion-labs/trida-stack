@@ -130,8 +130,18 @@ def first_human_response(repo: str, number: int, author: str, is_pr: bool) -> dt
     return min(candidates) if candidates else None
 
 
+# The team, the schedule (Monday 07:17 KST) and the period reviews all run on Korean time. KST has no
+# daylight saving, so a fixed offset is exact.
+KST = dt.timezone(dt.timedelta(hours=9), "KST")
+
+
 def default_period(now: dt.datetime) -> str:
-    """ISO week, e.g. 2026-W42.
+    """ISO week in KST, e.g. 2026-W42.
+
+    The week is taken in KST, not UTC: the weekly run fires Monday 07:17 KST, which is still Sunday in
+    UTC. Labelling by the UTC date named that run after the week that was ending and collided with the
+    snapshot of the Monday before (2026-W44 was produced twice). In KST every snapshot is labelled with
+    the week of the Monday it was taken on, as every snapshot before the schedule change was.
 
     Weekly during the observation period, monthly once a 90-day baseline exists. The
     guideline puts a new project in a 4-8 week observation period whose purpose is
@@ -140,7 +150,7 @@ def default_period(now: dt.datetime) -> str:
     cumulative over the repository's whole history either way; the cadence sets only
     how often that cumulative figure is written down and reviewed.
     """
-    iso = now.isocalendar()
+    iso = now.astimezone(KST).isocalendar()
     return f"{iso.year}-W{iso.week:02d}"
 
 

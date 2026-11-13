@@ -10,7 +10,9 @@ stream, no CUDA:
 | decoder | `trida_mlx/model.py`, `trida_mlx/decode.py` | `causal` (AR baseline) and **`self-spec`** (diffusion draft + exact AR verify, lossless) |
 | server | `trida_mlx/server.py` | OpenAI-compatible `/v1/chat/completions` (+ `/v1/completions`), SSE streaming, **tool calls**, reasoning split, prompt cache |
 | agent | `trida_mlx/agent.py` | a tiny tool-using agent loop against the server (files, search, calculator; opt-in shell/write) |
+| decisions | `trida_mlx/decision.py`, `trida_mlx/decide_request.py` | `/v1/decide`: typed decisions (choice / yes-no / score) through Zoro-1's pointer head, escalating to self-spec reasoning when unsure |
 | vision | `trida_mlx/vision.py` | Qwen3.5 vision encoder + projector, image preprocessing, multimodal RoPE (checkpoints with a `vision_config`) |
+| data | `trida_mlx/datamine.py` | `trida-mlx-datamine`: the app's chats + request logs → candidate training data (preference pairs, feedback, tool use, decisions, failures, trajectories), scrubbed |
 | tools | `convert.py`, `verify.py`, `bench.py`, `profile.py` | quantize to MLX, first-contact correctness check, causal-vs-self-spec benchmark, step profile |
 
 Everything is built on `mlx_lm.models.qwen3_5` (weights, quantized layers, RoPE and the Metal
@@ -91,6 +93,54 @@ model and keeps the vision tower in bf16. Images go through the server as OpenAI
 `verify.py --image photo.jpg` runs the lossless/speed checks on an image prompt. In Hermes, set
 `hermes config set model.supports_vision true` so images are sent natively.
 
+## Decisions (Zoro-1 pointer head)
+
+A checkpoint with `jev_head.pt` or `jev_head.safetensors` also serves `POST /v1/decide`.
+It uses the same request envelope, row encoder, and answer fields as
+[`serve_decide.py`](../serve_decide.py). The canonical `../decide_request.py` is packaged
+unchanged and pinned by a test. Both head formats load without PyTorch. Conversion
+writes an unquantized float32 `jev_head.safetensors` and preserves `temperature.json`.
+
+```bash
+curl -s localhost:8000/v1/decide -H 'Content-Type: application/json' -d '{
+  "request": {
+    "state": {"ticket": "the printer on floor 3 is jammed again"},
+    "questions": {"team": {"type": "choice", "instructions": "Which team handles it?",
+                           "criteria": {"it": "IT support", "facilities": "Facilities"}}}
+  },
+  "reasoning": false
+}'
+```
+
+- Questions support `noul` (yes/no), `choice`, and `score`, with the same probabilities,
+  confidence, and score fields as SGLang. The shared encoder retains its 7552-token
+  state / 8192-token row budgets and state truncation.
+- The state is prefilled once; each question branches from a snapshot. Across requests,
+  the longest complete cached state that prefixes the new state is reused.
+  `--decision-cache-mb` bounds retained state memory (1024 MiB by default; 0 disables reuse).
+  This cache is independent of the chat cache and uses image-content keys.
+- Images go inside `request` as data URLs or bare base64. No request reads local paths or
+  fetches remote URLs. `min_image_pixels` / `max_image_pixels` control resolution
+  (448×448 maximum by default); direct Python calls may also pass a PIL image. Requests never name files:
+  open one with `decide_request.open_image(path)` first.
+- Temperatures come from `temperature.json`, falling back to Zoro-1's fitted model-card
+  text temperature (1.52) and 1.0 for images. Server flags `--decision-text-temperature` /
+  `--decision-image-temperature` and a per-request `temperature` override them. For CUDA
+  parity comparisons, explicitly select the same temperature on both servers.
+- `reasoning` defaults to `false`; `true` generates self-spec reasoning before deciding, with
+  `max_reasoning_tokens` defaulting to 768. `"auto"` first decides directly, then reasons if
+  any question's top probability is below `threshold` (default 0.7). Auto reasoning uses
+  self-spec and up to 8192 tokens by default. `trida_mode` can select `causal` or `self-spec`.
+  Completed reasoning is fitted to the state budget, keeping its conclusion. Incomplete
+  or looping reasoning keeps the direct answer and reports `cut`.
+- `stream: true` sends SSE data objects with `type: direct`, `type: reasoning` (text pieces),
+  and `type: result`, followed by `[DONE]`. The `direct` event includes `reason` when
+  reasoning will run, for progress displays. Auto results include `direct`, `escalated`, and,
+  when applicable, `reasoning` and `reasoned`. Boolean requests retain the shared answer fields.
+- `/v1/models` reports decision support, temperatures, and the cache budget. Without a head,
+  decision requests return 400. All model work runs on the MLX worker thread; direct Python
+  callers must hold `engine.lock` on the engine's owning thread.
+
 ## How self-spec maps onto MLX
 
 Reference semantics are the SGLang `HybridDiffusionSelfSpec` (`bd_bidir_shift`, block `2N-1`,
@@ -117,12 +167,12 @@ causal computation — greedy output equals `causal` output (see the bf16 note b
 ## Using it from Hermes Agent
 
 Hermes talks to any OpenAI-compatible endpoint; the server advertises `context_length` on
-`/v1/models` (Hermes requires ≥ 64K; default `--context-length 65536`) and returns a
+`/v1/models` (Hermes requires ≥ 64K; default `--context-length 131072`) and returns a
 `context_length_exceeded` 400 that Hermes turns into compaction.
 
 ```bash
 # terminal 1
-uv run trida-mlx-server --model ~/models/Trida2.0-4B-mlx-q8 --port 8080
+uv run trida-mlx-server --model ~/models/Trida2.0-4B-mlx-q8 --port 8080 --served-model-name trida2.0-4b
 # terminal 2 (one-time config)
 hermes config set model.provider custom
 hermes config set model.base_url http://127.0.0.1:8080/v1
@@ -160,6 +210,7 @@ uv run pytest                 # all offline tests (~30 s)
 uv run python tests/test_tiny.py   # decoder invariants on a tiny random Qwen3.5-hybrid (CPU or GPU)
 uv run python tests/test_e2e.py    # tiny raw-HF checkpoint: loader, convert q8, prompt cache, server, parsing
 uv run pytest tests/test_vision.py  # tiny multimodal checkpoint: image input end to end
+uv run pytest tests/test_decision.py  # tiny multimodal checkpoint + random pointer head: /v1/decide
 ```
 
 Pinned: chunked prefill = one-shot; canvas clean rows = AR logits; MASK rows read the block-end GDN
@@ -169,9 +220,57 @@ top-k/top-p matches the reference sampler; sampled self-spec reproduces the AR s
 distribution; snapshot/restore = fresh prefill; server non-stream / SSE / completions round trip;
 with an image: greedy self-spec = greedy AR, chunked prefill = one-shot, MRoPE positions, no prompt-cache
 reuse across different images, convert keeps the vision tower bit-identical, server `image_url` round trip.
+Decisions: the packaged decide_request.py equals inference/decide_request.py; branching from the shared state snapshot gives the
+same option logits as each question's full row (text and image states); escalation only when unsure,
+never on cut-off reasoning; server `/v1/decide` plain and streamed.
 On a Mac the same tests run on the GPU and therefore also cover the Metal kernel path.
 
+`uv run --with torch pytest tests/test_decision.py tests/test_decision_extensions.py`
+also runs the PyTorch pointer-head parity check. Conversion and q8 drift checks use tiny
+random weights; they do not establish trained-checkpoint accuracy.
+
+For a trained checkpoint, run the full local HTTP workflow (text, image, reasoning,
+chat, conversion, q8 comparison):
+
+```bash
+uv run python tests/run_decision_checkpoint.py \
+  --model /path/to/decision-checkpoint --output /tmp/zoro-decision-e2e
+```
+
+Add `--reference http://cuda-host:30001` for a SGLang comparison. The runner saves
+responses and logs under `--output`; `report.json` records whether CUDA parity ran.
+Its default absolute answer tolerance is 0.01. To compare two running servers with
+your own direct requests, use:
+
+```bash
+uv run python tests/compare_decisions.py \
+  --reference http://cuda-host:30001 --candidate http://localhost:8000 \
+  --requests decisions.jsonl --atol 0.005
+```
+
+The JSONL contains shared request envelopes with reasoning disabled. The client
+compares answer keys, types, and numeric fields, and exits nonzero on mismatches.
+
+
 ## Notes and limits
+
+- **Loop guard (server, `--loop-guard`, off by default; Zoro-1 Chat turns it on).** A reply that ends in one block of up to 256 tokens repeated 6 times in a row
+  (at least 96 tokens), such as the same tool call emitted until `max_tokens`, is stopped there
+  (`usage.trida.finish_reason: "repetition"`, OpenAI `finish_reason: "stop"`). It also stops looser loops: when at least half of the last 1,536 tokens end a 16-token phrase already
+  written in that window (re-deriving the same steps of a hard problem over and over). If that happens while
+  the model is still thinking, the server closes the thinking itself ("I keep going in circles…" +
+  `</think>`) and lets the model answer from what it has (`usage.trida.loop_stopped_thinking: true`); a
+  decision's reasoning that loops counts as cut off (the direct answer is used). Off by default so evals and
+  speedrun runs decode unguarded and stay comparable; `/v1/models` reports `loop_guard` and `tool_call_gate`
+  so a run can record what it used. `verify.py`, `bench.py` and the tests decode without it.
+- **Tool-call gate** (`--tool-call-gate P`, off by default; Zoro-1 Chat uses 0.7; per request
+  `tool_call_min_prob`). With tools,
+  `<tool_call>` may only be generated where its raw probability (temperature 1, before top-k/top-p) is at
+  least 0.7. Temperature 0.6 and top-k sharpen a single-token option against text answers spread over many
+  first tokens: in a logged translation request a raw 0.041 became 0.29 after sampling settings, and the
+  model called `calculator("1")`. The gate is part of the target distribution, so self-spec stays exact.
+- **`tool_choice: "none"`** keeps the tools in the rendered prompt (so the prompt cache still matches the
+  turns that may call them) and bans the `<tool_call>` token for that reply, in AR and self-spec alike.
 
 - **bf16/quantized numerics.** The canvas runs 7-row matmuls and the AR step 1-row matmuls, which
   are different kernels; at a near-tie the greedy argmax can flip. `verify.py` prints the AR

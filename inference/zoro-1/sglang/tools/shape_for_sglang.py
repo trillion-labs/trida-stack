@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Shape a raw two-stream Qwen3.5 checkpoint into the form SGLang can serve.
 
-The SGLang diffusion/self-spec decode paths load a checkpoint through the
+The two-stream SGLang backend (``causal`` and ``self-spec``) loads a checkpoint through the
 ``Qwen3_5DLLMForConditionalGeneration`` architecture (the text backbone nested
 inside a vision-language wrapper — the vision tower is instantiated but never
 used for text). A *raw* training checkpoint instead ships a flat
 ``Qwen3_5ForCausalLM`` / ``model_type: qwen3_5_text`` config, which SGLang has no
-implementation for — serving it fails at load (``causal``) or at the first
-decode block (``diffusion``: "missing the decode seed").
+implementation for — serving it fails at load or at the first decode block
+("missing the decode seed").
 
 A vision-language training checkpoint (``Qwen3_5ForConditionalGeneration``, real vision
 weights — see ``train/tools/compose_vl_checkpoint.py``) already has the wrapper layout; for it only
@@ -105,27 +105,28 @@ def is_shaped(cfg: dict) -> bool:
     return "Qwen3_5DLLMForConditionalGeneration" in cfg.get("architectures", [])
 
 
-def shape(raw_dir: Path, out_dir: Path, copy: bool = False) -> list:
-    """Write the shim: a rewritten config.json plus the weights and tokenizer files, symlinked (or copied)
-    from ``raw_dir``. ``out_dir`` must not exist. -> the carried file names."""
-    raw_cfg = json.loads((raw_dir / "config.json").read_text())
-    out_dir.mkdir(parents=True)
-    (out_dir / "config.json").write_text(json.dumps(shape_config(raw_cfg), indent=2))
-    carried = []
+def carried_names(raw_dir: Path) -> list:
+    """The files a shim of ``raw_dir`` carries over: the tokenizer/config side files, then the weight shards."""
     shards = sorted(p.name for p in raw_dir.glob("*.safetensors") if p.name not in CARRY)
-    for name in CARRY + shards:
-        src = raw_dir / name
-        if not src.exists():
-            continue
-        dst = out_dir / name
+    return [name for name in CARRY + shards if (raw_dir / name).exists()]
+
+
+def shape(raw_dir: Path, out_dir: Path, copy: bool = False) -> list:
+    """Write the shim: the weights and tokenizer files, symlinked (or copied) from ``raw_dir``, then a rewritten
+    config.json. config.json goes last, so a shim interrupted midway is never mistaken for a finished one.
+    ``out_dir`` must not exist. -> the carried file names."""
+    raw_cfg = json.loads((raw_dir / "config.json").read_text())
+    carried = carried_names(raw_dir)
+    if not any(n.endswith(".safetensors") or n.endswith(".index.json") for n in carried):
+        raise ValueError(f"no weights (*.safetensors) found in {raw_dir}")
+    out_dir.mkdir(parents=True)
+    for name in carried:
+        src, dst = raw_dir / name, out_dir / name
         if copy:
             shutil.copy2(src, dst)
         else:
             os.symlink(src.resolve(), dst)
-        carried.append(name)
-    if not any(n.endswith(".safetensors") or n.endswith(".index.json") for n in carried):
-        shutil.rmtree(out_dir)
-        raise ValueError(f"no weights (*.safetensors) found in {raw_dir}")
+    (out_dir / "config.json").write_text(json.dumps(shape_config(raw_cfg), indent=2))
     return carried
 
 

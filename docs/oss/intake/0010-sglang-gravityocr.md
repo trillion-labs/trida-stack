@@ -22,8 +22,8 @@ This record is a separate component, because almost everything that the intake d
 rests on differs:
 
 - the upstream is sgl-project/sglang itself, at tag v0.5.10;
-- our changes are an Apache-2.0 patch to 24 upstream files and `python/pyproject.toml`,
-  plus four new files, all committed in this repository (수정포함);
+- our changes are an Apache-2.0 patch to 22 upstream source files and `python/pyproject.toml`,
+  plus seven new files, all committed in this repository (수정포함);
 - it runs in its own Python 3.12 environment with its own resolved lock
   (`inference/gravityocr/sglang/requirements-lock.txt`), never installed together with
   `requirements.txt`.
@@ -53,7 +53,7 @@ worker is modelled on.
 
 | 기준 | 점수 | 근거 |
 |---|---|---|
-| A 기능 적합성 | 15 | covers the requirement, but we carry a 25-file patch and four new files. The fast path has been validated only on Hopper (sm_90) GPUs with a CUDA 12.x toolkit. |
+| A 기능 적합성 | 15 | covers the requirement, but we carry a 22-file patch and seven new files. The fast path has been validated only on Hopper (sm_90) GPUs with a CUDA 12.x toolkit. |
 | B 라이선스 적합성 | 16 | Apache-2.0, allowed. The obligations need upkeep: the patch modifies Apache-2.0 files, so the changes are stated (Apache-2.0 §4(b)) and the folder carries a NOTICE. |
 | C 유지보수 활성도 | 15 | upstream is very active, but we are frozen on v0.5.10 and the patch does not carry over to later releases. Upstream activity reaches us only through a rebase. |
 | D 보안 대응 | 7 | upstream publishes advisories, but five apply to v0.5.10 and none is fixed in a release we can move to (see below). This is between the 0–5 band (a known unfixed issue on a path we use) and 6–11. It is 7 rather than 5 or less because the one unfixed issue on our request path is LOW and local, and the CRITICAL sink in our runtime is behind a flag the launcher refuses. If either changes, this drops to the 0–5 band. |
@@ -89,12 +89,20 @@ certifi), so that only the findings above remain.
 
 1. **Loopback by default.**
    - `serve.sh` binds 127.0.0.1. A non-loopback `SERVE_HOST` is refused unless `API_KEY`
-     is set. With a key it runs one tokenizer worker, the only mode in which SGLang v0.5.10
-     checks keys.
-   - Whenever the server runs one tokenizer worker, `serve.sh` also sets a random admin key
-     that it never prints, which closes SGLang's management endpoints
-     (`/update_weights_from_disk` among them). With the `FAST=1` default of two workers and
-     no key they stay open to users of the host; `serve.sh` says so at startup.
+     is set. `serve.sh` runs one tokenizer worker unless `TOKENIZER_WORKERS` asks for more,
+     and every tokenizer worker checks the keys (upstream v0.5.10 checks them only with one
+     worker; the patch adds the check to each), so a key holds with that opt-in too.
+   - `serve.sh` always sets a random admin key that it never prints, which closes SGLang's
+     management endpoints (`/update_weights_from_disk` among them) whatever the number of
+     workers. `/server_info` and `/get_server_info` return the configuration with both keys
+     blanked (upstream v0.5.10 returns them), and the logged server arguments omit them. The keys reach SGLang through a mode-0600 FIFO in a private temporary
+     directory, which a writer outside the server's process tree removes once the server
+     has read it (or once the server is gone), so they are never written to a file.
+   - A single-node server's torch.distributed rendezvous runs on 127.0.0.1, and the patch
+     binds its store to loopback only, whatever `SERVE_HOST` is (upstream v0.5.10 connects
+     the rendezvous to `--host`, and torch binds the store on every interface). gloo and
+     NCCL still open sockets of their own, so a host reachable from untrusted networks
+     needs a firewall that admits only `PORT`.
    - `EXTRA_ARGS` accepts only a fixed list of logging and capacity options, by exact name.
      That keeps out `--enable-custom-logit-processor`, `--config`, `--host`, the keys, the
      LoRA options, other front-ends and transports (`--grpc-mode`, `--encoder-only`, DP
@@ -118,17 +126,57 @@ certifi), so that only the findings above remain.
    - NVIDIA's CUDA libraries, `cuda-python` and `nvidia-cutlass-dsl` come under NVIDIA's
      own licences. They are installed from NVIDIA's packages and not redistributed, like
      the CUDA libraries the root torch pin already installs.
-5. **No CI applies the patch.**
-   - `setup.sh` checks that the clone is at the pinned commit and that the patch applies
-     when someone runs it. The engine itself is checked only by a manual GPU run.
+5. **CI applies the patch weekly; the engine is checked by hand.**
+   - `tools/verify_fetch.sh`, which the weekly and on-demand `fetch-recipe` job runs (as for
+     the Zoro recipe, 0002), fetches upstream at the commit in `BASE_COMMIT.txt`, checks
+     that tag v0.5.10 still points at it, applies the patch, checks that the new files do
+     not exist upstream, and compiles the patched and new Python files. It does not build
+     the environment or run the engine: that is a manual GPU run.
+   - `setup.sh` checks the checkout byte for byte when someone runs it: every tracked file
+     equals the pinned commit with the patch applied, the new files equal the committed
+     ones, and nothing else is untracked under `python/`. It builds SGLang offline with the
+     locked build backend, so nothing unpinned is installed.
    - CI's CPU tests (`inference/gravityocr/test_gravityocr_patch.py`) check the committed
-     files only: every SGLang commit quoted in the folder equals `BASE_COMMIT.txt`, the
-     patch touches exactly the expected 25 upstream files, the four new files parse and
-     carry their licence headers, `setup.sh` is valid bash and installs with
-     `--no-deps --no-config` from explicit indexes, and the lock names the base tag and the
-     pins `setup.sh` checks. They do not fetch upstream, apply the patch or run `setup.sh`.
-   - The Zoro recipe has a weekly upstream check (`tools/verify_fetch.sh`, 0002); this
-     recipe does not yet. Adding one is the condition most likely to resolve first.
+     files: every SGLang commit quoted in the folder equals `BASE_COMMIT.txt`, the patch
+     touches exactly the expected upstream files, the new files parse and carry their
+     licence headers, `setup.sh` installs with `--no-deps --no-config` from explicit
+     indexes, and the lock names the base tag, pins the build backend and agrees with the
+     committed `validated-freeze.txt` it was resolved from. They also run `setup.sh`'s
+     patch-and-verify steps against a small synthetic repository. They do not fetch
+     upstream.
+   - Further CPU tests cover the patch's host-side logic without a GPU:
+     `test_gravityocr_selfspec_cpu.py` (commit rules, penalty, sampling and grammar rows
+     against SGLang's step-by-step behaviour), `test_gravityocr_vit_graph.py` (ViT graph
+     settings and fallbacks), `test_gravityocr_gating.py` (the patch leaves SGLang's
+     diffusion-LLM and EAGLE draft-runner modules untouched) and
+     `test_gravityocr_dist_init.py` (the loopback-only rendezvous store, run on CPU torch
+     from the patch text). Their parts that need the
+     patched SGLang, and all of `test_gravityocr_auth.py`, skip in CI and are run by hand in
+     the server environment.
+
+## Origin and licence of our code
+
+Everything under `inference/gravityocr/` was taken from the GravityOCR repository
+(github.com/trillion-labs/GravityOCR, commit `1c60368`), whose copyright holder, Trillion
+Labs, also holds the copyright in this repository.
+
+| what | in GravityOCR | here |
+|---|---|---|
+| `sglang/gravityocr_selfspec.patch` and the new SGLang files under `sglang/python/` | `patches/sglang/`. GravityOCR is MIT, but its `LICENSE` keeps these modifications of SGLang under Apache-2.0 | Apache-2.0. Same bytes; the new files only gain a licence header |
+| `serve.sh` | adapted from `serve/serve_sglang_ocr.sh`, MIT | Apache-2.0 |
+| `ocr_request.py` | adapted from `serve/test_request.py`, MIT | Apache-2.0 |
+| `README.md`, `MODEL_CONTRACT.md` | draw on `serve/SGLANG_SERVE.md`, MIT | Apache-2.0 |
+| `sglang/setup.sh`, the lock files, `NOTICE`, the tests | written for this repository | Apache-2.0 |
+
+So the SGLang patch is not relicensed: it was Apache-2.0 at the source. The hand-written
+files were MIT in GravityOCR. They are contributed here under Apache-2.0 by their copyright
+holder, which is what [`CONTRIBUTING.md`](../../../CONTRIBUTING.md) and
+[`LICENSE_POLICY.md`](../LICENSE_POLICY.md) ("Licence of our own contributions") require of
+every contribution. GravityOCR's own copies stay MIT.
+
+- **Relicensing approved by:** OPEN, not yet recorded. Name, role and date of whoever signs off
+  for Trillion Labs; the maintainers are asked who that should be. Not inferred from the
+  commit history.
 
 ## Obligations we take on
 
@@ -137,10 +185,16 @@ certifi), so that only the findings above remain.
 - **Stated changes.** The modified upstream files are listed in the patch itself and
   summarised in the folder NOTICE.
 - **Licence headers.**
-  - The four new files carry a Trillion Labs Apache-2.0 header that names the upstream
+  - The seven new files carry a Trillion Labs Apache-2.0 header that names the upstream
     commit.
-  - Two of them (`selfspec_diffusion_worker.py`, `selfspec_fast_commit.py`) also name
-    the SGLang file they adapt.
+  - The five that adapt SGLang code (`selfspec_diffusion_worker.py`,
+    `selfspec_fast_commit.py`, `selfspec_commit_rules.py`, `selfspec_sampling.py`,
+    `glm_vit_graph_runner.py`) also carry SGLang's notice ("Portions Copyright 2023-2024
+    SGLang Team", Apache-2.0) and name the SGLang files they adapt, as Apache-2.0 §4(c)
+    asks.
+  - `test_gravityocr_selfspec_cpu.py` and `test_gravityocr_gating.py` embed verbatim
+    copies of a few SGLang v0.5.10 functions as reference behaviour; their headers carry
+    the same notice.
 - **Records.** Keep [`COMPLIANCE.md`](../../../COMPLIANCE.md) §1 and §2, the asset
   register row and the exception entries in step with the pin.
 

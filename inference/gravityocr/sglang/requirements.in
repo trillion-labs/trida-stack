@@ -23,3 +23,13 @@ certifi>=2026.10.19     # was 2026.6.17: GHSA-6q48-6c7w-9gw2 (CRITICAL; PYSEC-20
 
 # Pre-release pin carried over from the GPU-validated freeze (SGLang 0.5.10 needs >= 4.0.0b4).
 flash-attn-4==4.0.0b19
+
+# torch is the PyPI 2.9.1 build (CUDA 12.8), as in the GPU-validated freeze. The PyTorch cu128 index that
+# resolves torchao, torchaudio, torchcodec and torchvision also has 2.9.1+cu128, which "==2.9.1" matches.
+torch!=2.9.1+cu128
+
+# Build backend for the editable SGLang install. SGLang's python/pyproject.toml [build-system] requires
+# setuptools>=61.0 (floored above), setuptools-scm>=8.0 and wheel. setup.sh builds SGLang --offline
+# --no-build-isolation, so these come from the lock, never from PyPI at build time.
+setuptools-scm>=8.0
+wheel

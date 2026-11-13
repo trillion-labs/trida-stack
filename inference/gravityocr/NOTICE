@@ -17,37 +17,61 @@ Base project — SGLang
 ------------------------------------------------------------------------------
 Patch — sglang/gravityocr_selfspec.patch
   Copyright 2026 Trillion Labs. Licensed under the Apache License, Version 2.0.
-  A diff against the base commit above. It modifies 24 upstream source files
+  A diff against the base commit above. It modifies 22 upstream source files
   under python/sglang/srt/ and python/pyproject.toml, where it relaxes the
   torchao and torchcodec pins (sglang/overrides.txt records the versions used).
   The changes register the SELFSPEC_DIFFUSION speculative-decoding algorithm
   (block-diffusion draft, autoregressive verify) for GLM-OCR checkpoints, add
   the scheduler, cache and CUDA-graph support it needs, and add optional runtime
-  optimizations. The modified files keep their upstream copyright headers.
+  optimizations. They also change four upstream behaviours for every server
+  built from the patch: the server-info endpoints, the logged server arguments
+  and the request dumps no longer contain the API and admin keys; every
+  tokenizer worker checks the keys; the shared-memory segment that hands
+  the server arguments to the tokenizer workers is created private and is
+  never read when another user owns it; and a single-node server's
+  torch.distributed rendezvous runs on 127.0.0.1 with a store that listens
+  on loopback only. The modified files keep their upstream copyright headers.
   Pure code; no model weights.
 ------------------------------------------------------------------------------
 New files — sglang/python/sglang/srt/
   speculative/selfspec_diffusion_worker.py
   speculative/selfspec_fast_attn.py
   speculative/selfspec_fast_commit.py
+  speculative/selfspec_commit_rules.py
+  speculative/selfspec_sampling.py
   multimodal/glm_vit_graph_runner.py
+  entrypoints/http_worker_keys.py
   Copyright 2026 Trillion Labs. Licensed under the Apache License, Version 2.0.
-  Copied into the patched checkout by sglang/setup.sh. Portions of
-  selfspec_diffusion_worker.py and selfspec_fast_commit.py are adapted from
-  sglang/srt/speculative/ngram_info.py (Copyright 2023-2024 SGLang Team,
-  Apache License, Version 2.0): the n-gram verify and accept bookkeeping.
+  Copied into the patched checkout by sglang/setup.sh. Five of them adapt
+  portions of SGLang v0.5.10 (Copyright 2023-2024 SGLang Team, Apache License,
+  Version 2.0) and carry that notice at the top of the file, with the sources:
+    selfspec_diffusion_worker.py, selfspec_fast_commit.py and
+    selfspec_commit_rules.py: the n-gram verify and accept bookkeeping of
+      sglang/srt/speculative/ngram_info.py;
+    selfspec_sampling.py: the penalty, sampling and grammar-bitmask code of
+      sglang/srt/sampling/penaltylib/, sglang/srt/layers/sampler.py and
+      sglang/srt/speculative/spec_utils.py;
+    glm_vit_graph_runner.py: GlmOcrVisionModel.forward in
+      sglang/srt/models/glm_ocr.py.
+  selfspec_fast_attn.py and http_worker_keys.py are original code.
 ------------------------------------------------------------------------------
 Launcher, client and tests — serve.sh, ocr_request.py, test_gravityocr_*.py
   Copyright 2026 Trillion Labs. Licensed under the Apache License, Version 2.0.
   serve.sh and ocr_request.py are adapted from serve/serve_sglang_ocr.sh and
   serve/test_request.py in https://github.com/trillion-labs/GravityOCR, where
   Trillion Labs publishes them under the MIT License.
+  test_gravityocr_selfspec_cpu.py and test_gravityocr_gating.py contain short
+  verbatim copies of SGLang v0.5.10 functions (Copyright 2023-2024 SGLang Team,
+  Apache License, Version 2.0), used as reference behaviour; each file's header
+  says so and marks the copied blocks.
 ------------------------------------------------------------------------------
 
 The patch, the new files and the launcher are also published in
-https://github.com/trillion-labs/GravityOCR. Comments in the new files that
-mention "natcache", src/fast_sampling.py or docs/SGLANG_SELFSPEC_IMPL.md refer
-to that repository.
+https://github.com/trillion-labs/GravityOCR. The patch here is byte-identical to
+the copy published there at commit 1c60368, and the new files differ from
+GravityOCR's only by the licence header at their top: changes to them are made in
+GravityOCR first. Comments in the new files that mention "natcache",
+src/fast_sampling.py or docs/SGLANG_SELFSPEC_IMPL.md refer to that repository.
 
 Referenced, NOT bundled
 ------------------------------------------------------------------------------

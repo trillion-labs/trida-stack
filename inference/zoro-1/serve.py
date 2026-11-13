@@ -19,8 +19,9 @@ Usage:
   python serve.py /path/to/local/zoro-1 --port 30000 # a local copy, or $TRIDA_MODEL
 
 The model is the optional positional argument; when omitted it falls back to $TRIDA_MODEL (for decide, first
-$TRIDA_DECIDE_MODEL), then to `trillionlabs/Zoro-1`. It is passed straight to the backend, so a Hugging Face id is
-auto-downloaded. Zoro-1 is gated: request access on its model page, then `hf auth login` or set HF_TOKEN.
+$TRIDA_DECIDE_MODEL), then to `trillionlabs/Zoro-1`. serve.py downloads a Hugging Face id itself before it starts
+the backend (except with --no-shape, which passes the id through for the backend to download, and --dry-run). Zoro-1
+is gated: request access on its model page, then `hf auth login` or set HF_TOKEN.
 
 SGLang loads Zoro-1 through the two-stream architecture, so for causal / self-spec the checkpoint is shaped once
 (sglang/tools/shape_for_sglang.py): an HF id is downloaded, then a shim with a rewritten config.json and symlinked
@@ -36,9 +37,11 @@ import importlib.util
 import json
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 CONFIGS = Path(__file__).parent / "configs"
@@ -67,32 +70,90 @@ def _shape_tool():
     return mod
 
 
+def local_checkpoint(model):
+    """`model` as a local directory: a path is used as is, an HF id is downloaded (the HF cache is reused)."""
+    if Path(model).is_dir():
+        return Path(model).resolve()
+    from huggingface_hub import snapshot_download
+    print(f"[serve] fetching {model} from Hugging Face (the first run downloads the full checkpoint)", flush=True)
+    return Path(snapshot_download(model)).resolve()
+
+
+def _complete_shim(out, raw, tool):
+    """True when `out` is a finished shim of `raw`: a shaped config.json plus every file `raw` carries, each link
+    still resolving."""
+    names = tool.carried_names(raw)
+    try:
+        if not tool.is_shaped(json.loads((out / "config.json").read_text())):
+            return False
+        present = {p.name for p in out.iterdir()}   # `out` can be moved aside by another replica at any point
+    except (OSError, ValueError):
+        return False
+    return present == {"config.json", *names} and all((out / n).exists() for n in names)
+
+
 def for_sglang(model, cache=None):
     """The checkpoint directory the SGLang backend should load: `model` itself when it is already shaped, else a
-    shim of it under `cache` (made once, reused after). An HF id is downloaded first (the HF cache is reused)."""
-    raw = Path(model)
-    if not raw.is_dir():
-        from huggingface_hub import snapshot_download
-        raw = Path(snapshot_download(model))
-    raw = raw.resolve()
+    shim of it under `cache` (made once, reused after). An HF id is downloaded first.
+
+    The shim is built in a temp dir unique to this build and renamed into place, so a crash, Ctrl-C or another
+    replica (even PID 1 in another container on a shared cache) never sees a half-written one. If another replica
+    installed a complete shim first, it is used, not rebuilt. A shim that is incomplete, or whose links no longer
+    resolve, is moved aside and replaced; when several replicas race on a stale one, the path can be absent for
+    the moment between two renames, and the shim that ends up there is equivalent to the one moved aside."""
+    raw = local_checkpoint(model)
     tool = _shape_tool()
-    if tool.is_shaped(json.loads((raw / "config.json").read_text())):
+    cfg_text = (raw / "config.json").read_text()
+    if tool.is_shaped(json.loads(cfg_text)):
         return str(raw)
     cache = Path(cache or os.environ.get("TRIDA_SHAPED_DIR", Path.home() / ".cache" / "trida" / "sglang"))
-    # an HF snapshot dir is named by its revision; keep the repo name too so the cache reads well
     if Path(model).is_dir():
-        name = f"{raw.name}-{hashlib.sha1(str(raw).encode()).hexdigest()[:8]}"
+        # a local dir can be re-saved in place, so its config is part of the key
+        key = hashlib.sha1((str(raw) + "\n" + cfg_text).encode()).hexdigest()[:8]
+        name = f"{raw.name}-{key}"
     else:
-        name = f"{model.replace('/', '--')}-{raw.name[:12]}"
+        # an HF snapshot dir is named by its revision; keep the repo name too so the cache reads well. The snapshot's
+        # path is in the key as well: the shim links to it, and a shim cache shared by nodes with their own HF caches
+        # (an NFS home, per-node scratch) must give each node its own shim rather than one they keep replacing.
+        where = hashlib.sha1(str(raw).encode()).hexdigest()[:8]
+        name = f"{model.replace('/', '--')}-{raw.name[:12]}-{where}"
     out = cache / name
-    if out.is_dir() and tool.is_shaped(json.loads((out / "config.json").read_text())):
+    if _complete_shim(out, raw, tool):
         return str(out)
-    if out.exists():
-        import shutil
-        shutil.rmtree(out)
-    tool.shape(raw, out)
-    print(f"[serve] shaped {raw} -> {out}", flush=True)
+    cache.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix=f".{name}.tmp-", dir=cache))
+    try:
+        tmp = work / "shim"                       # shape() wants a directory that does not exist yet
+        tool.shape(raw, tmp)
+        if _install(tmp, out, work, lambda: _complete_shim(out, raw, tool)):
+            print(f"[serve] shaped {raw} -> {out}", flush=True)
+        elif _complete_shim(out, raw, tool):
+            print(f"[serve] reusing the shim another replica just made: {out}", flush=True)
+        else:
+            raise RuntimeError(f"could not install the SGLang shim at {out}")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
     return str(out)
+
+
+def _install(tmp, out, work, out_is_complete):
+    """Rename the finished shim `tmp` to `out`. -> True if ours is now at `out`; False if `out` holds a complete shim
+    another process installed (kept: it may be loading from it) or a racing process got there first. A stale `out` is
+    moved into `work`, which the caller deletes; nothing is deleted at `out` itself, so `out` is absent only between
+    the two renames below."""
+    try:
+        os.replace(tmp, out)                      # succeeds when `out` is absent (or an empty dir)
+        return True
+    except OSError:
+        pass
+    if out_is_complete():
+        return False
+    try:
+        os.replace(out, work / "stale")
+        os.replace(tmp, out)
+        return True
+    except OSError:
+        return False
 
 
 def build_decide_command(args):
@@ -167,6 +228,8 @@ def main():
 
     if args.mode in MODES and args.shape and not args.dry_run:
         args.model = for_sglang(args.model)
+    elif args.mode == DECIDE_MODE and not args.dry_run:
+        args.model = str(local_checkpoint(args.model))   # serve_decide.py reads <ckpt>/jev_head.pt from disk
     cmd = build_command(args)
     print("[serve]", " ".join(shlex.quote(c) for c in cmd), flush=True)
     if args.dry_run:

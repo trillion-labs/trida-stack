@@ -22,14 +22,18 @@
 #   SERVED_NAME   model name clients send and /v1/models reports (default glm-ocr)
 #   CONTEXT       --context-length (default 16384)
 #   MEMFRAC       --mem-fraction-static (default 0.6)
-#   API_KEY       optional bearer key; set it in the environment, never as an argument. With a key
-#                 the server runs one tokenizer worker, the only mode in which SGLang checks keys
+#   API_KEY       optional bearer key; set it in the environment, never as an argument
+#   TOKENIZER_WORKERS  tokenizer worker processes (default 1); every worker checks the keys
 #   EXTRA_ARGS    extra SGLang logging / capacity options from a fixed list, appended last
 #   SKIP_PREFLIGHT=1   skip the CUDA toolkit / ninja / GPU checks
 #
 # Verify:  curl -s http://127.0.0.1:30000/v1/models
 #          "$VBIN/python" inference/gravityocr/ocr_request.py --synthetic "Hello GravityOCR"
 set -euo pipefail
+# Python never puts the current directory on sys.path (this launcher, the Hub download and SGLang's
+# children): run from inference/gravityocr/, the recipe's own sglang/ folder would be imported instead of
+# the installed SGLang, and `-m sglang.launch_server` would not be found.
+export PYTHONSAFEPATH=1
 
 die() { local code=$1; shift; echo "[serve] error: $*" >&2; exit "$code"; }
 usage() { sed -n '/^# Serve /,/^set -euo pipefail$/{/^set /d;s/^# \{0,1\}//;p;}' "$0"; }
@@ -95,9 +99,16 @@ done
   || die 2 "GPU=$GPU lists ${#GPUS[@]} device(s) but DP=$DP: list exactly one GPU per data-parallel replica"
 
 # ---- network exposure and tokenizer workers ----------------------------------------------------
-# The default bind is loopback. Any other address requires API_KEY. SGLang v0.5.10 checks keys only
-# with a single tokenizer worker: with more, its HTTP workers install no auth middleware and refuse
-# to start when a key is set. So a key means one worker; FAST=1 otherwise runs two.
+# The default bind is loopback. Any other address requires API_KEY. One tokenizer worker by default, with
+# FAST=1 too; TOKENIZER_WORKERS=2 (or more) is an opt-in. Every tokenizer worker checks the keys
+# (upstream v0.5.10 checks them only with one worker; the patch installs the check in each), so the
+# opt-in keeps API_KEY and the admin lock.
+# SERVE_HOST is the HTTP bind address only: the patched SGLang rendezvouses torch.distributed on
+# 127.0.0.1 for a single-node server, with a store that listens on loopback only, whatever SERVE_HOST
+# is. --dist-init-addr (refused in EXTRA_ARGS) would move the rendezvous off loopback, switch image
+# tensors to the cross-node CPU transport and make DP replicas collide on one port, so the launcher
+# passes no rendezvous options. On a host reachable from untrusted networks, still firewall every
+# inbound port except PORT (README.md, Security: gloo and NCCL open sockets of their own).
 is_loopback() { [[ $1 =~ ^127\.[0-9]+\.[0-9]+\.[0-9]+$ || $1 == localhost || $1 == ::1 ]]; }
 if ! is_loopback "$SERVE_HOST" && [ -z "$API_KEY" ]; then
   die 2 "SERVE_HOST=$SERVE_HOST is not a loopback address: set API_KEY so every request must authenticate, or keep SERVE_HOST=127.0.0.1"
@@ -107,10 +118,7 @@ if [ -n "$API_KEY" ]; then
   ( LC_ALL=C; [[ $API_KEY =~ $key_re && $API_KEY != -* ]] ) \
     || die 2 "API_KEY must be printable ASCII without spaces and must not start with '-'"
 fi
-if [ "$FAST" = 1 ] && [ -z "$API_KEY" ]; then WORKERS="${TOKENIZER_WORKERS:-2}"; else WORKERS="${TOKENIZER_WORKERS:-1}"; fi
-if [ -n "$API_KEY" ] && [ "$WORKERS" != 1 ]; then
-  die 2 "API_KEY needs a single tokenizer worker (got TOKENIZER_WORKERS=$WORKERS): SGLang v0.5.10 checks keys only then"
-fi
+WORKERS="${TOKENIZER_WORKERS:-1}"
 
 # ---- EXTRA_ARGS: logging and capacity options only ----------------------------------------------
 # Every EXTRA_ARGS token that starts with '-' must be one of these exact option names, bare or as
@@ -205,73 +213,95 @@ if [ -n "$GRAPHBS" ]; then ARGS+=(--cuda-graph-max-bs "$GRAPHBS"); fi
 # DP>1: SGLang data parallelism, one replica per listed GPU behind one port.
 if [ "$DP" -gt 1 ]; then ARGS+=(--dp-size "$DP"); fi
 
-if [ "$MODE" = self-spec ]; then
-  # Block-diffusion self-speculative decoding: the diffusion head drafts K = bd_size + 1 = 33 tokens per
-  # round and the AR path verifies them; needs the SELFSPEC_DIFFUSION choice from the patch and page
-  # size 1. Under bf16 kernels a near-tie can resolve differently from causal decoding. With
-  # repetition_penalty != 1, export SELFSPEC_EXACT_PENALTY=1.
-  ARGS+=(--speculative-algorithm SELFSPEC_DIFFUSION --speculative-num-draft-tokens "$DRAFT" --page-size 1)
-  # SELFSPEC_POS_OFFSET=1 is the position layout GravityOCR's published results were produced with
-  # (0 is the AR-aligned layout). A checkpoint dir with block_diffusion.json supplies the mask id
-  # itself; otherwise GLM-OCR's <|mask|> (59282) is used.
-  export SELFSPEC_FULLDRAFT="${SELFSPEC_FULLDRAFT:-1}" SELFSPEC_POS_OFFSET="${SELFSPEC_POS_OFFSET:-1}"
-  if [ ! -f "$CKPT/block_diffusion.json" ]; then export SELFSPEC_MASK_ID="${SELFSPEC_MASK_ID:-59282}"; fi
-else
-  # causal: a plain autoregressive server; drop any inherited self-spec switches.
-  while IFS= read -r var; do unset "$var"; done < <(compgen -e SELFSPEC_ || true)
-fi
+# GLM-OCR's <|mask|> token id. A checkpoint's block_diffusion.json names its own mask_id, which the
+# server prefers (MODEL_CONTRACT.md, "How self-spec finds the mask id"); this is only the fallback.
+GLM_OCR_MASK_TOKEN_ID=59282
 
 # FAST=1: runtime optimizations from the patch; they are meant to change speed only, not outputs
 # (compare against FAST=0 if in doubt). Any single switch can still be overridden from the environment.
 #   both modes: GLM ViT as CUDA graphs per patch count, bf16 pixel transport, single-threaded CPU ops
-#               in the server, two tokenizer worker processes (one when API_KEY is set; see above)
+#               in the server
 #   self-spec:  attention without custom masks, M-RoPE delta cache fix, GPU-side commit, host-side
 #               lengths, positions on the device, next round's draft launched ahead of the bookkeeping
 if [ "$FAST" = 1 ]; then
   export SS_GLM_VIT_GRAPH_MAXM="${SS_GLM_VIT_GRAPH_MAXM:-2048}" SS_GLM_PV_BF16="${SS_GLM_PV_BF16:-1}"
   export OMP_NUM_THREADS="$SERVER_THREADS" MKL_NUM_THREADS="$SERVER_THREADS" TORCH_NUM_THREADS="$SERVER_THREADS"
-  if [ "$MODE" = self-spec ]; then
+fi
+
+if [ "$MODE" = self-spec ]; then
+  # Block-diffusion self-speculative decoding: the diffusion head drafts K = bd_size + 1 = 33 tokens per
+  # round and the AR path verifies them; needs the SELFSPEC_DIFFUSION choice from the patch and page
+  # size 1. Request sampling settings, penalties and grammars need no switch here (README.md, "What
+  # self-spec reproduces"). Self-spec differs from causal decoding by bf16 near-ties and, at the default
+  # SELFSPEC_POS_OFFSET=1, by the position layout.
+  ARGS+=(--speculative-algorithm SELFSPEC_DIFFUSION --speculative-num-draft-tokens "$DRAFT" --page-size 1)
+  # SELFSPEC_POS_OFFSET=1 puts every generated token one RoPE position after where causal decoding and
+  # training put it: the layout GravityOCR's published results were produced with. 0 = the causal layout.
+  export SELFSPEC_FULLDRAFT="${SELFSPEC_FULLDRAFT:-1}" SELFSPEC_POS_OFFSET="${SELFSPEC_POS_OFFSET:-1}"
+  if [ ! -f "$CKPT/block_diffusion.json" ]; then
+    export SELFSPEC_MASK_ID="${SELFSPEC_MASK_ID:-$GLM_OCR_MASK_TOKEN_ID}"
+  fi
+  if [ "$FAST" = 1 ]; then
     export SELFSPEC_FASTATTN="${SELFSPEC_FASTATTN:-1}" SELFSPEC_MROPE_FIX="${SELFSPEC_MROPE_FIX:-1}" \
            SELFSPEC_FAST_COMMIT="${SELFSPEC_FAST_COMMIT:-1}" SELFSPEC_HOSTLEN="${SELFSPEC_HOSTLEN:-1}" \
            SELFSPEC_DEV_POS="${SELFSPEC_DEV_POS:-1}" SELFSPEC_DRAFT_AHEAD="${SELFSPEC_DRAFT_AHEAD:-1}"
   fi
+else
+  # causal: a plain autoregressive server; drop any inherited self-spec switches.
+  while IFS= read -r var; do unset "$var"; done < <(compgen -e SELFSPEC_ || true)
 fi
 ARGS+=(${EXTRA[@]+"${EXTRA[@]}"})
-# SGLang merges a YAML file wherever a literal '--config' token appears in its argv. The checks above
-# keep it out; refuse anyway if one got through, before the launcher adds its own.
+# SGLang merges a YAML file wherever a literal '--config' token appears in its argv. The value checks
+# above keep it out of every value they check. A Hub snapshot path (CKPT after snapshot_download) is
+# only checked to be a directory, so refuse here anyway, before the launcher adds its own.
 for a in "${ARGS[@]}"; do
   [ "$a" != --config ] || die 2 "'--config' reached the server arguments through a launcher value; refusing"
 done
 
 # ---- keys --------------------------------------------------------------------------------------
-# With one tokenizer worker SGLang enforces keys. The launcher then always sets a random admin key
-# that it never prints, so SGLang's management endpoints (weight reloads from a caller-chosen path,
-# profiling, cache control, LoRA loading, ...) refuse every caller; API_KEY, when set, guards the
-# other endpoints. Both reach SGLang in a mode-0600 YAML file read through --config, written with shell
-# builtins only, so neither appears on a command line. A detached watcher deletes the file's private
-# temp dir when the server process exits. SGLang logs its full server_args, keys included, at INFO on
-# startup: keep the server log private, or add EXTRA_ARGS="--log-level warning".
-if [ "$WORKERS" = 1 ]; then
-  admin=$(od -vAn -N32 -tx1 /dev/urandom) || die 1 "could not read /dev/urandom for the admin key"
-  admin="${admin//[[:space:]]/}"
-  [[ $admin =~ ^[0-9a-f]{64}$ ]] || die 1 "could not generate the admin key"
-  keydir=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/gravityocr-serve.XXXXXX")
-  ( umask 077
+# The launcher always sets a random admin key that it never prints, so SGLang's management endpoints
+# (weight reloads from a caller-chosen path, profiling, cache control, LoRA loading, ...) refuse every
+# caller, whatever the number of tokenizer workers; API_KEY, when set, guards the other endpoints.
+# Both reach SGLang through --config, which names a FIFO (mode 0600, in a private mode-0700 temp dir):
+# they appear on no command line and in no environment, and never touch disk. A detached writer
+# (double fork: no descendant of the server, so SGLang's exit-time kill_process_tree cannot reach it)
+# blocks until SGLang opens the FIFO, which it does once, at startup; the keys then pass through the
+# kernel pipe buffer and the writer removes the directory. If the server exits without opening it (a
+# startup failure, a signal), a guard notices within a second and releases the writer, which removes
+# the directory just the same.
+for t in mkfifo sleep; do command -v "$t" >/dev/null || die 1 "$t not found: it hands the keys to SGLang"; done
+admin=$(od -vAn -N32 -tx1 /dev/urandom) || die 1 "could not read /dev/urandom for the admin key"
+admin="${admin//[[:space:]]/}"
+[[ $admin =~ ^[0-9a-f]{64}$ ]] || die 1 "could not generate the admin key"
+keydir=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/gravityocr-serve.XXXXXX") || die 1 "could not create a private temp dir"
+keyfifo=$keydir/server.yaml
+if ! mkfifo -m 600 "$keyfifo"; then rm -rf -- "$keydir"; die 1 "could not create the key FIFO in $keydir"; fi
+( ( set +e; trap '' HUP INT TERM PIPE
+    # guard: once the server process ($$ after exec) is gone, open the FIFO read-write (that never
+    # blocks) every second until the writer has removed it; this releases a writer still waiting for
+    # a reader, however late it got there
+    ( while [ -p "$keyfifo" ]; do
+        kill -0 "$$" 2>/dev/null || : <>"$keyfifo"
+        sleep 1
+      done ) &
     { printf "admin-api-key: '%s'\n" "$admin"
       if [ -n "$API_KEY" ]; then printf "api-key: '%s'\n" "${API_KEY//\'/\'\'}"; fi
-    } > "$keydir/server.yaml" )
-  unset admin API_KEY
-  ARGS+=(--config "$keydir/server.yaml")
-  ( trap '' HUP INT TERM; while kill -0 "$$" 2>/dev/null; do sleep 2; done; rm -rf -- "$keydir" ) \
-    </dev/null >/dev/null 2>&1 &
-  if ! is_loopback "$SERVE_HOST"; then
-    echo "[serve] note: listening on $SERVE_HOST; every request must send 'Authorization: Bearer <API_KEY>'." \
-         "Authenticated clients can still make the server fetch http(s) image URLs and read local image" \
-         "files, so put a proxy that only forwards data: image URLs in front if clients are not trusted." >&2
-  fi
-else
-  echo "[serve] note: $WORKERS tokenizer workers: SGLang enforces no keys in this mode, so its management" \
-       "endpoints are open to every user on this host. On a shared host set API_KEY or TOKENIZER_WORKERS=1." >&2
+    } > "$keyfifo"   # fails with EPIPE when the guard released it: nobody left to deliver to
+    rm -f -- "$keyfifo"
+    wait   # for the guard; a regular file its last open may have created goes with the directory
+    rm -rf -- "$keydir" ) </dev/null >/dev/null 2>&1 & )
+unset admin API_KEY
+ARGS+=(--config "$keyfifo")
+if ! is_loopback "$SERVE_HOST"; then
+  echo "[serve] note: listening on $SERVE_HOST; every request must send 'Authorization: Bearer <API_KEY>'." \
+       "Authenticated clients can still make the server fetch http(s) image URLs and read local image" \
+       "files, so put a proxy that only forwards data: image URLs in front if clients are not trusted." >&2
+fi
+
+if [ "$WORKERS" -gt 1 ]; then
+  echo "[serve] note: $WORKERS tokenizer workers (TOKENIZER_WORKERS; the default is 1). This patched SGLang checks" \
+       "API_KEY and the admin key in every worker, so the management endpoints stay locked; upstream SGLang" \
+       "v0.5.10 enforces no keys with more than one worker." >&2
 fi
 
 echo "[serve] MODE=$MODE FAST=$FAST GPU=$GPU DP=$DP SERVE_HOST=$SERVE_HOST PORT=$PORT SERVED_NAME=$SERVED_NAME CKPT=$CKPT"

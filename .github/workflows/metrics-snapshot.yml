@@ -77,4 +77,4 @@ jobs:
               "" \
               "Definitions: \`docs/metrics/README.md\`. Numbers are aggregate; individuals are not measured." \
               "" \
-              "**This needs a period review.** Add \`docs/metrics/reviews/${period}.md\` to this PR before merging -- what was measured, what it showed, what was decided. A snapshot without one is a number nobody acted on, which is the gap Lv3 asks about.")"
+              "**This needs a period review.** Add (or update) \`docs/metrics/reviews/${period}.md\` in this PR before merging -- what was measured, what it showed, what was decided. A snapshot without one is a number nobody acted on, which is the gap Lv3 asks about.")"

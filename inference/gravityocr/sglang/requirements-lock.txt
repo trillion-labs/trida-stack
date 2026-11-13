@@ -4,14 +4,18 @@
 # setup.sh installs exactly these pins, with --no-deps --no-build and nothing re-resolved, in two
 # steps, then installs SGLang itself, editable, from upstream sgl-project/sglang at BASE_COMMIT.txt
 # with gravityocr_selfspec.patch applied:
-#   1. every pin except sglang and the four +cu129 builds, from https://pypi.org/simple only;
-#   2. the four +cu129 builds, from https://download.pytorch.org/whl/cu129 only.
+#   1. every pin except sglang and the four +cu128 builds, from https://pypi.org/simple only;
+#   2. the four +cu128 builds, from https://download.pytorch.org/whl/cu128 only;
+#   3. SGLang, built --offline --no-build-isolation with the build backend pinned here (setuptools,
+#      setuptools-scm, vcs-versioning, wheel, packaging), so the build fetches nothing.
 # setup.sh enforces the two sources: it passes the index explicitly and ignores uv config files and
 # uv's index environment variables. The pins carry no hashes, so a source is trusted by its URL.
-# A single install across both indexes would pick torch 2.9.1+cu129 for "torch==2.9.1". This lock,
+# A single install across both indexes would pick torch 2.9.1+cu128 for "torch==2.9.1". This lock,
 # like the GPU-validated env it starts from (below), uses the PyPI torch 2.9.1 build. The lock itself
-# raises 11 pins above that env. A fresh setup.sh run with it on H100 (2026-10-30) gave the same greedy
-# outputs as that env on 100 OCR crops, in self-spec and causal mode.
+# raises 11 pins above that env and takes the four PyTorch-index builds as +cu128 builds of the same
+# versions (that env has +cu129 ones; see the end of this header). A fresh setup.sh run with this lock
+# on H100 (2026-11-12) gave the same greedy outputs as that env on 100 OCR crops, in self-spec and
+# causal mode, and torchaudio, torchvision and torchao import.
 #
 # Why sglang==0.5.10 is listed although PyPI's sglang is never installed: the resolver needs SGLang's
 # dependency metadata (it is what pins torch 2.9.1, transformers 5.3.0 and flashinfer-python
@@ -21,28 +25,35 @@
 #
 # Named *-lock.txt rather than .lock so syft's requirements cataloger matches it.
 #
-# Generated 2026-10-30 with uv 0.11.27, run in this directory:
+# Generated with uv 0.11.27, run in this directory:
 #   uv pip compile requirements.in \
 #     --override overrides.txt \
 #     -c validated-freeze.txt \
+#     --exclude-newer 2026-10-30T12:00:00Z \
 #     --python-version 3.12 \
 #     --python-platform x86_64-manylinux_2_28 \
-#     --extra-index-url https://download.pytorch.org/whl/cu129 \
+#     --extra-index-url https://download.pytorch.org/whl/cu128 \
 #     --index-strategy unsafe-best-match \
 #     --no-build \
 #     --no-emit-index-url \
 #     --no-header \
 #     -o requirements-lock.txt
 #
-# validated-freeze.txt is not committed. It is the pip freeze of the GPU-validated server env
-# (env/sglang_venv_freeze.txt in github.com/trillion-labs/GravityOCR at 4ab5d54) minus the 11
-# packages that requirements.in floors; the "-c validated-freeze.txt" annotations below come from it.
-# To re-resolve later, run the same command with "-c requirements-lock.txt" in its place: with
-# requirements.in and overrides.txt unchanged it reproduces these pins.
+# validated-freeze.txt, committed next to this file, is the pip freeze of the GPU-validated server
+# env (env/sglang_venv_freeze.txt in github.com/trillion-labs/GravityOCR at 4ab5d54) minus every
+# package that requirements.in floors with ">=", with torchao, torchaudio, torchcodec and torchvision
+# as +cu128 builds of the frozen versions; the "-c validated-freeze.txt" annotations below come
+# from it. --exclude-newer fixes the resolution date, so the floored packages and the build backend,
+# which the freeze does not pin, resolve to the releases of that date: the command above reproduces
+# everything below this header byte for byte. Move the cutoff only on purpose, and review the pins
+# that change.
 #
 # Python 3.12 (not trida's 3.10): filelock 4.2.4, pillow 13 and multidict 7.2 need >= 3.11.
-# Resolution needs the cu129 index (with unsafe-best-match) only for torchao, torchaudio, torchcodec
-# and torchvision. torch itself is the PyPI 2.9.1 build (CUDA 12.8 runtime).
+# Resolution needs the cu128 index (with unsafe-best-match) only for torchao, torchaudio, torchcodec
+# and torchvision. torch itself is the PyPI 2.9.1 build (CUDA 12.8 runtime), and the four builds must
+# match it: torchaudio refuses to import when its CUDA differs from torch's. With the +cu129 builds of
+# the validated env, `import torchaudio` failed and SGLang dropped the models that import it
+# (MiDashengLM) at startup; OCR never uses torchaudio.
 aiohappyeyeballs==2.6.2
     # via
     #   -c validated-freeze.txt
@@ -516,8 +527,11 @@ packaging==26.2
     #   flashinfer-python
     #   huggingface-hub
     #   modelscope
+    #   setuptools-scm
     #   sglang
     #   transformers
+    #   vcs-versioning
+    #   wheel
 pandas==3.0.3
     # via
     #   -c validated-freeze.txt
@@ -705,7 +719,10 @@ setuptools==84.2.1
     # via
     #   -r requirements.in
     #   modelscope
+    #   setuptools-scm
     #   torch
+setuptools-scm==10.3.4
+    # via -r requirements.in
 sglang==0.5.10
     # via -r requirements.in
 sglang-kernel==0.4.1
@@ -769,6 +786,7 @@ tokenizers==0.22.2
 torch==2.9.1
     # via
     #   -c validated-freeze.txt
+    #   -r requirements.in
     #   compressed-tensors
     #   flash-attn-4
     #   flashinfer-python
@@ -789,21 +807,21 @@ torch-memory-saver==0.0.9
     # via
     #   -c validated-freeze.txt
     #   sglang
-torchao==0.17.0+cu129
+torchao==0.17.0+cu128
     # via
     #   -c validated-freeze.txt
     #   --override overrides.txt
     #   sglang
-torchaudio==2.9.1+cu129
+torchaudio==2.9.1+cu128
     # via
     #   -c validated-freeze.txt
     #   sglang
-torchcodec==0.11.1+cu129
+torchcodec==0.11.1+cu128
     # via
     #   -c validated-freeze.txt
     #   --override overrides.txt
     #   sglang
-torchvision==0.24.1+cu129
+torchvision==0.24.1+cu128
     # via
     #   -c validated-freeze.txt
     #   sglang
@@ -885,6 +903,8 @@ uvloop==0.22.1
     # via
     #   -c validated-freeze.txt
     #   sglang
+vcs-versioning==2.6.0
+    # via setuptools-scm
 watchfiles==1.2.0
     # via
     #   -c validated-freeze.txt
@@ -893,6 +913,8 @@ wcwidth==0.8.2
     # via
     #   -c validated-freeze.txt
     #   prompt-toolkit
+wheel==0.48.0
+    # via -r requirements.in
 xgrammar==0.1.32
     # via
     #   -c validated-freeze.txt

@@ -170,14 +170,23 @@ def test_tool_call_values_are_typed_by_the_schema():
     assert sp.finish()[1][0]["function"] == split_turn(raw, thinking=False, tools=TOOLS)[2][0]["function"]
 
 
-def test_http_requests_cannot_name_server_files():
+def test_requests_never_name_files(tmp_path):
     pytest.importorskip("PIL")
-    for path in ("/etc/hosts", "/nonexistent/file.png", "file:///etc/hosts"):
+    from PIL import Image
+    from decide_request import open_image
+    png = tmp_path / "a.png"
+    Image.new("RGB", (8, 8), "red").save(png)
+    # the parser never touches the filesystem: an existing image file is refused like a missing one, and the error
+    # names no path, so it says nothing about which files exist
+    for path in (str(png), "file://" + str(png), "/nonexistent/file.png", "/etc/hosts"):
         with pytest.raises(RequestError) as e:
-            parse({**REQ, "image": path}, allow_paths=False)
-        assert "file" not in str(e.value) and "/" not in str(e.value)   # same answer whether or not the path exists
-    with pytest.raises(RequestError, match="no file at"):   # Python callers may still pass paths
-        parse({**REQ, "image": "/nonexistent/file.png"})
+            parse({**REQ, "image": path})
+        assert str(tmp_path) not in str(e.value) and "/etc" not in str(e.value) and "nonexistent" not in str(e.value)
+        with pytest.raises(RequestError):
+            parse(REQ, image=path)
+    # Python callers open the file themselves and pass the image
+    assert parse(REQ, image=open_image(png)).image.size == (8, 8)
+    assert open_image("file://" + str(png)).size == (8, 8)
 
 
 def test_decide_endpoint_parses_without_paths():
@@ -188,8 +197,8 @@ def test_decide_endpoint_parses_without_paths():
     class Engine:
         ckpt = "/ckpt/m"
 
-        async def adecide(self, request, image=None, temperature=None, reasoning=False, allow_paths=True):
-            parse(request, image, allow_paths)
+        async def adecide(self, request, image=None, temperature=None, reasoning=False):
+            parse(request, image)
             return {"answers": {}}
 
     pytest.importorskip("PIL")
@@ -316,3 +325,12 @@ def test_chat_sampling_values():
         r = client.post("/v1/chat/completions", json={**MSG, **bad})
         assert r.status_code == 400 and next(iter(bad)) in r.text
     assert client.post("/v1/chat/completions", json={"messages": []}).status_code == 400
+
+
+def test_mlx_copy_of_the_request_contract_is_identical():
+    # inference/zoro-1/mlx ships its own copy (it installs without this repo's torch stack); the MLX suite also pins
+    # it, but CI runs only this job, so an edit to one copy alone fails here.
+    from pathlib import Path
+    here = Path(__file__).resolve().parent
+    assert (here / "mlx/trida_mlx/decide_request.py").read_bytes() == (here / "decide_request.py").read_bytes(), \
+        "copy inference/zoro-1/decide_request.py to inference/zoro-1/mlx/trida_mlx/decide_request.py"

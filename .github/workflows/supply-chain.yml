@@ -82,9 +82,10 @@ jobs:
 
   fetch-recipe:
     name: Third-party fetch recipe
-    # Needs network and clones an upstream repository, so it runs weekly rather than
-    # on every push. The recipes ARE the install path for both two-stream code paths:
-    # if upstream moves, nobody can build.
+    # Needs network and fetches upstream repositories, so it runs weekly rather than
+    # on every push. The recipes ARE the install path for both two-stream code paths and
+    # for the GravityOCR server (SGLang at a pinned commit + gravityocr_selfspec.patch):
+    # if upstream moves, or the patch stops applying, nobody can build.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
