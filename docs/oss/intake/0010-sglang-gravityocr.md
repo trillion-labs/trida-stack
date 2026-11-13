@@ -157,7 +157,7 @@ certifi), so that only the findings above remain.
 ## Origin and licence of our code
 
 Everything under `inference/gravityocr/` was taken from the GravityOCR repository
-(github.com/trillion-labs/GravityOCR, commit `1c60368`), whose copyright holder, Trillion
+(github.com/trillion-labs/GravityOCR, commit `d6278f7`), whose copyright holder, Trillion
 Labs, also holds the copyright in this repository.
 
 | what | in GravityOCR | here |

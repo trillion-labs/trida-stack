@@ -890,6 +890,23 @@ def test_is_plain_truth_table():
     assert not sampling.is_plain(si(), True)
 
 
+def test_is_plain_reads_greedy_and_logit_bias_from_the_requests():
+    """filter_batch keeps is_all_greedy and a logit_bias tensor after the request that set them has left: with the requests
+    given, a batch that is greedy again without logit_bias returns to the plain round."""
+    def req(top_k=1, bias=None):
+        return types.SimpleNamespace(sampling_params=types.SimpleNamespace(top_k=top_k, logit_bias=bias))
+
+    stale = types.SimpleNamespace(is_all_greedy=False, penalizer_orchestrator=types.SimpleNamespace(is_required=False),
+                                  logit_bias=torch.zeros(2, 4), has_custom_logit_processor=False)
+    assert not sampling.is_plain(stale, False), "without requests the batch-level fields decide"
+    assert sampling.is_plain(stale, False, [req(), req()])
+    assert not sampling.is_plain(stale, False, [req(), req(top_k=40)])
+    assert not sampling.is_plain(stale, False, [req(), req(bias={"5": 0.0})])
+    assert not sampling.is_plain(stale, True, [req(), req()])
+    pen = types.SimpleNamespace(**{**vars(stale), "penalizer_orchestrator": types.SimpleNamespace(is_required=True)})
+    assert not sampling.is_plain(pen, False, [req(), req()])
+
+
 # =============================================================================================== custom logit processors
 class _RecordingNoRepeat:
     """bans every token already in origin_input_ids + output_ids (a function of the request's ids, like SGLang's processors)."""
@@ -1108,6 +1125,96 @@ def test_fulldraft_bitmask_starts_from_all_allowed_rows_with_a_reused_buffer():
     assert bool((mask[5:8] == -1).all()), "rows past the rejected draft token are left all-allowed"
 
 
+def _upstream_update_regex_vocab_mask(grammars, vocab_size, bs):
+    """SamplingBatchInfo.update_regex_vocab_mask of SGLang v0.5.10 (sampling/sampling_batch_info.py), minus the device move."""
+    first = next(g for g in grammars if g)
+    mask = first.allocate_vocab_mask(vocab_size=vocab_size, batch_size=bs, device="cpu")
+    for i, g in enumerate(grammars):
+        if g and not g.finished and not g.is_terminated():
+            g.fill_vocab_mask(mask, i)
+    return mask
+
+
+def test_a0_mask_after_a_verify_is_all_allowed_for_rows_without_a_live_grammar():
+    """llguidance's allocator hands a0's mask the rows the previous verify wrote (request 0's chain): without the reset, the plain
+    request 1 would be masked by request 0's grammar state after (a0, d1). clear_cached_vocab_mask resets exactly those rows."""
+    K = 4
+    g = CachedBufferToyGrammar()
+    g.accept_token(2)                                   # request 0: JSON-like constraint, next id must be odd (or 1)
+    reqs = [types.SimpleNamespace(grammar=g), types.SimpleNamespace(grammar=None)]
+    vt = torch.tensor([[3, 4, 5, 6], [7, 8, 9, 10]])
+    sampling.fulldraft_bitmask(reqs, vt, V_G, traverse_tree)   # round t's verify fills rows 0..K-1 of the cached buffer
+    grammars = [r.grammar for r in reqs]
+
+    stale = _upstream_update_regex_vocab_mask(grammars, V_G, 2).clone()
+    assert not bool((stale[1] == -1).all()), "negative control: the unreset row 1 is a stale verify row"
+
+    sampling.fulldraft_bitmask(reqs, vt, V_G, traverse_tree)
+    sampling.clear_cached_vocab_mask(grammars, V_G, 2, "cpu")
+    mask = _upstream_update_regex_vocab_mask(grammars, V_G, 2)
+    assert torch.equal(mask[0], _fresh_mask([2])), "the live grammar's row is its own state"
+    assert bool((mask[1] == -1).all()), "the request without a grammar is unconstrained"
+
+    done = CachedBufferToyGrammar()
+    done.accept_token(2)
+    done.finished = True
+    reqs = [types.SimpleNamespace(grammar=done), types.SimpleNamespace(grammar=g)]
+    sampling.fulldraft_bitmask(reqs, vt, V_G, traverse_tree)
+    sampling.clear_cached_vocab_mask([done, g], V_G, 2, "cpu")
+    mask = _upstream_update_regex_vocab_mask([done, g], V_G, 2)
+    assert bool((mask[0] == -1).all()), "a finished grammar's row is all-allowed"
+    assert torch.equal(mask[1], _fresh_mask([2]))
+    sampling.clear_cached_vocab_mask([None, None], V_G, 2, "cpu")   # no grammar: nothing to clear, no error
+
+
+def test_clear_cached_vocab_mask_resets_the_rows_generate_token_bitmask_reuses():
+    """SELFSPEC_FULLDRAFT=0 verify rows go through the stock generate_token_bitmask, which writes only the rows of requests with a
+    grammar into the first grammar's buffer."""
+    K = 4
+    g = CachedBufferToyGrammar()
+    g._buf = torch.zeros((2 * K, (V_G + 31) // 32), dtype=torch.int32)   # every token disallowed: left over from an earlier call
+    sampling.clear_cached_vocab_mask([None, g], V_G, 2 * K, "cpu")
+    assert bool((g._buf == -1).all())
+
+
+@needs_sglang
+def test_a0_mask_reset_with_the_real_update_regex_vocab_mask():
+    """The same with SGLang's own SamplingBatchInfo.update_regex_vocab_mask on llguidance's allocation rule."""
+    from sglang.srt.sampling.sampling_batch_info import SamplingBatchInfo
+
+    K = 4
+    g = CachedBufferToyGrammar()
+    g.accept_token(2)
+    g.move_vocab_mask = lambda m, device: m             # instance attributes: called unbound, as the static methods are
+    g.apply_vocab_mask = lambda logits, vocab_mask: None
+    reqs = [types.SimpleNamespace(grammar=g), types.SimpleNamespace(grammar=None)]
+    vt = torch.tensor([[3, 4, 5, 6], [7, 8, 9, 10]])
+    sampling.fulldraft_bitmask(reqs, vt, V_G, traverse_tree)
+    si = types.SimpleNamespace(grammars=[g, None], vocab_size=V_G, temperatures=torch.ones(2, 1), device="cpu",
+                               vocab_mask=None, apply_mask_func=None)
+    sampling.clear_cached_vocab_mask(si.grammars, si.vocab_size, len(si.temperatures), si.device)
+    SamplingBatchInfo.update_regex_vocab_mask(si)
+    assert torch.equal(si.vocab_mask[0], _fresh_mask([2]))
+    assert bool((si.vocab_mask[1] == -1).all())
+
+
+@needs_sglang
+def test_startup_refuses_unsupported_grammar_and_sampling_backends():
+    from sglang.srt.speculative import selfspec_diffusion_worker as w
+
+    def args(**kw):
+        base = dict(speculative_accept_threshold_single=1.0, speculative_accept_threshold_acc=1.0, grammar_backend=None,
+                    sampling_backend="flashinfer")
+        return types.SimpleNamespace(**{**base, **kw})
+
+    w._check_sampling_support(args())
+    w._check_sampling_support(args(sampling_backend="pytorch", grammar_backend="llguidance"))
+    with pytest.raises(ValueError, match="--sampling-backend ascend"):
+        w._check_sampling_support(args(sampling_backend="ascend"))
+    with pytest.raises(ValueError, match="--grammar-backend outlines"):
+        w._check_sampling_support(args(grammar_backend="outlines"))
+
+
 @needs_sglang
 def test_fulldraft_bitmask_with_real_xgrammar():
     """The same property with SGLang's XGrammarGrammar and its real traverse_tree (regex grammar over a toy vocabulary)."""
@@ -1193,9 +1300,15 @@ def test_worker_plain_gate_and_a0_sampler(monkeypatch):
     W = SelfSpecDiffusionWorker
     plain_si = types.SimpleNamespace(is_all_greedy=True, penalizer_orchestrator=types.SimpleNamespace(is_required=False),
                                      logit_bias=None, has_custom_logit_processor=False)
-    assert W._plain(types.SimpleNamespace(sampling_info=plain_si, has_grammar=False, return_logprob=False))
-    assert not W._plain(types.SimpleNamespace(sampling_info=plain_si, has_grammar=True, return_logprob=False))
-    assert not W._plain(types.SimpleNamespace(sampling_info=plain_si, has_grammar=False, return_logprob=True))
+    reqs = [types.SimpleNamespace(sampling_params=types.SimpleNamespace(top_k=1, logit_bias=None))]
+    assert W._plain(types.SimpleNamespace(sampling_info=plain_si, has_grammar=False, return_logprob=False, reqs=reqs))
+    assert not W._plain(types.SimpleNamespace(sampling_info=plain_si, has_grammar=True, return_logprob=False, reqs=reqs))
+    assert not W._plain(types.SimpleNamespace(sampling_info=plain_si, has_grammar=False, return_logprob=True, reqs=reqs))
+    # the batch's requests decide greedy / logit_bias: a stale batch-level is_all_greedy=False (filter_batch keeps it) is ignored
+    stale_si = types.SimpleNamespace(**{**vars(plain_si), "is_all_greedy": False})
+    assert W._plain(types.SimpleNamespace(sampling_info=stale_si, has_grammar=False, return_logprob=False, reqs=reqs))
+    sampled = [types.SimpleNamespace(sampling_params=types.SimpleNamespace(top_k=40, logit_bias=None))]
+    assert not W._plain(types.SimpleNamespace(sampling_info=plain_si, has_grammar=False, return_logprob=False, reqs=sampled))
     events = []
 
     class Orch:
@@ -1204,7 +1317,7 @@ def test_worker_plain_gate_and_a0_sampler(monkeypatch):
         def cumulate_output_tokens(self, ids):
             events.append(("cumulate", ids.tolist()))
 
-    si = types.SimpleNamespace(penalizer_orchestrator=Orch())
+    si = types.SimpleNamespace(penalizer_orchestrator=Orch(), grammars=None)
 
     class MR:
         def _preprocess_logits(self, lo, s):

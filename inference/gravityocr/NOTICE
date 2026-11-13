@@ -68,7 +68,7 @@ Launcher, client and tests — serve.sh, ocr_request.py, test_gravityocr_*.py
 
 The patch, the new files and the launcher are also published in
 https://github.com/trillion-labs/GravityOCR. The patch here is byte-identical to
-the copy published there at commit 1c60368, and the new files differ from
+the copy published there at commit d6278f7, and the new files differ from
 GravityOCR's only by the licence header at their top: changes to them are made in
 GravityOCR first. Comments in the new files that mention "natcache",
 src/fast_sampling.py or docs/SGLANG_SELFSPEC_IMPL.md refer to that repository.

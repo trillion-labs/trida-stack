@@ -307,6 +307,10 @@ def test_worker_without_keys_fails_closed(server, monkeypatch):
         ((None, ADMIN), "/configure_logging", None, 401),
         ((None, ADMIN), "/configure_logging", "wrong-key", 401),
         ((None, ADMIN), "/configure_logging", ADMIN, 200),
+        # /set_trace_level is an admin route too (upstream v0.5.10 left it at the normal level)
+        ((None, ADMIN), "/set_trace_level?level=0", None, 401),
+        ((API, ADMIN), "/set_trace_level?level=0", API, 401),
+        ((None, ADMIN), "/set_trace_level?level=0", ADMIN, 200),
         # no keys: upstream behaviour (no auth)
         ((None, None), "/v1/models", None, 200),
         ((None, None), "/configure_logging", None, 200),
