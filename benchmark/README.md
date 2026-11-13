@@ -13,6 +13,7 @@ benchmark/
 ├── bfcl_v4/          # Berkeley Function-Calling Leaderboard v4 (tool use)
 ├── functionchat/     # FunctionChat-Bench (Korean tool use; LLM-judge)
 ├── ko_agentbench/    # Ko-AgentBench (Korean agent, L1–L7; LLM-judge)
+├── gravityocr/       # GravityOCR OCR eval on docr-ko-eval: setup.sh once, then run.sh (OmniDocBench metrics)
 ├── tau2/             # τ²-bench (multi-turn tool use w/ simulated user; pass^k)
 ├── swe_bench/        # agentic software-engineering benchmark (scaffold)
 └── terminal_bench/   # agentic terminal benchmark — Hard subset (scaffold)
