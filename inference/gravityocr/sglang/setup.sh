@@ -144,6 +144,10 @@ expected_tree=$(export GIT_INDEX_FILE=$SCRATCH/index
                   && git -C "$SGLANG_SRC" apply --cached "$PATCH" \
                   && git -C "$SGLANG_SRC" write-tree) \
   || die "could not build $BASE + gravityocr_selfspec.patch in a scratch index"
+# git diff skips files whose index entry is marked --assume-unchanged or --skip-worktree: refuse those.
+flagged=$(git -C "$SGLANG_SRC" ls-files -v | grep -E '^[a-zS] ' | cut -c3- | head -n 20 || true)
+[ -z "$flagged" ] || die "files in $SGLANG_SRC are marked --assume-unchanged or --skip-worktree, so they cannot be compared:" \
+  "${flagged//$'\n'/ }"
 if ! git -C "$SGLANG_SRC" diff --quiet "$expected_tree" --; then
   die "the tracked files in $SGLANG_SRC differ from $BASE + gravityocr_selfspec.patch:" \
     "$(git -C "$SGLANG_SRC" diff --stat "$expected_tree" -- | tail -n 20)"
@@ -163,6 +167,11 @@ log "copied ${#new_files[@]} new files into $SGLANG_SRC/python"
 extra=$(comm -13 <(printf '%s\n' "${new_files[@]}") \
                  <(git -C "$SGLANG_SRC" ls-files --others --exclude-standard -- python | sort))
 [ -z "$extra" ] || die "untracked files in $SGLANG_SRC/python that are neither upstream nor ours:" "${extra//$'\n'/ }"
+# Ignored files count too, except those three: a stray extension module (*.so) or build/ directory under
+# python/ would be imported in place of the .py beside it, or shipped by the editable install.
+ignored=$(git -C "$SGLANG_SRC" ls-files --others --ignored --exclude-standard -- python \
+            | grep -vE '(^|/)__pycache__/|\.egg-info/|^python/sglang/_version\.py$' || true)
+[ -z "$ignored" ] || die "ignored files in $SGLANG_SRC/python that are neither upstream nor ours:" "${ignored//$'\n'/ }"
 log "checkout verified: $BASE + gravityocr_selfspec.patch + ${#new_files[@]} new files, byte for byte"
 exclude_file=$(git -C "$SGLANG_SRC" rev-parse --git-path info/exclude)
 case "$exclude_file" in /*) ;; *) exclude_file=$SGLANG_SRC/$exclude_file ;; esac
