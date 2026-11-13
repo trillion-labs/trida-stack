@@ -383,6 +383,7 @@ def _reasoning_engine(finish="stop", context_length=16384, text="Check it."):
     engine = object.__new__(DecideEngine)
     engine.ckpt, engine.tok, engine.proc = "zoro-1", Tok(), None
     engine.context_length, engine.reasoning_temperature, engine._stops = context_length, 0.6, []
+    engine.decision_max_state, engine.decision_max_row, engine.reasoning_token_limit = 7552, 8192, 4096
     engine.text_T, engine.image_T, engine.engine = 1.0, 1.0, Backend()
 
     async def logits(enc, image):
@@ -484,3 +485,46 @@ def test_reasoning_budget_reserves_prompt_space():
     assert engine.engine.calls == 0
     assert client.post("/v1/decide", json={"request": REQ, "reasoning": True,
                                         "max_reasoning_tokens": 4}).status_code == 200
+
+
+def test_extended_limits_keep_full_state_and_reasoning_with_strict_metadata():
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+
+    text = "because " * 1000
+    engine = _reasoning_engine(context_length=32768, text=text)
+    engine.decision_max_state = engine.decision_max_row = 16384
+    engine.reasoning_token_limit = 8192
+    request = {**REQ, "state": "x" * 4438}
+    client = TestClient(create_app(engine))
+    response = client.post("/v1/decide", json={"request": request, "reasoning": True,
+                                             "max_reasoning_tokens": 8192})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answers_source"] == "reasoned" and not body["reasoning_trimmed"]
+    assert "cut" not in body and body["reasoning"] == text.strip()
+    expected = parse(with_reasoning(request, text.strip())).state
+    row = engine.scored.rows[0]["ids"]
+    q = row.index(engine.tok.ids[SPECIAL[1]])
+    assert engine.tok.decode(row[1:q]) == expected
+    assert len(row) <= 16384
+    assert client.post("/v1/decide", json={"request": request, "reasoning": True,
+                                         "max_reasoning_tokens": 8193}).status_code == 400
+
+
+@pytest.mark.parametrize("state,row,context,budget", [
+    (16384, 8192, 32768, 8192), (16384, 16384, 8192, 8192),
+    (0, 8192, 32768, 8192), (7552, 8192, 32768, 8193),
+    (True, 8192, 32768, 8192),
+])
+def test_invalid_server_limits_are_rejected_before_loading_model(state, row, context, budget):
+    from decide_request import validate_decision_limits
+    with pytest.raises(RequestError):
+        validate_decision_limits(state, row, context, budget)
+
+
+def test_extended_encoder_still_rejects_rows_over_its_limit():
+    request = {"state": "x" * 12000, "questions": {
+        "q": {"type": "noul", "instructions": "q" * 5000}}}
+    with pytest.raises(RequestError, match="16384 per question"):
+        parse(request).encode(CharTok(), max_state=16384, max_branch=16384)

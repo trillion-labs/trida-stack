@@ -137,7 +137,12 @@ class TridaProviderTest(unittest.TestCase):
         config = configuration("trida:zoro-1", base_url=self.config.base_url, trida_reasoning=True)
         self.assertEqual(config.max_output_tokens, 2048)
         self.assertEqual(configuration("openai:model").max_output_tokens, 64000)
-        with self.assertRaisesRegex(ValueError, "4096"):
+        self.assertEqual(configuration("trida:zoro-1", base_url=self.config.base_url,
+                                       trida_reasoning=True, max_output_tokens=8192).max_output_tokens, 8192)
+        with self.assertRaisesRegex(ValueError, "8192"):
+            configuration("trida:zoro-1", base_url=self.config.base_url,
+                          trida_reasoning=True, max_output_tokens=8193)
+        with self.assertRaisesRegex(ValueError, "8192"):
             configuration("trida:zoro-1", base_url=self.config.base_url,
                           trida_reasoning=True, max_output_tokens=64000)
 

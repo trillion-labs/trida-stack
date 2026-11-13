@@ -26,8 +26,8 @@ index 8ac4b8f..6b86ddd 100644
      def applicable_settings(self):
 +        if self.max_output_tokens is None:
 +            self.max_output_tokens = 2048 if self.provider == "trida" else 64000
-+        if self.provider == "trida" and self.trida_reasoning and self.max_output_tokens > 4096:
-+            raise ValueError("Trida reasoning budget must not exceed 4096 tokens")
++        if self.provider == "trida" and self.trida_reasoning and self.max_output_tokens > 8192:
++            raise ValueError("Trida reasoning budget must not exceed 8192 tokens")
 +        if self.trida_reasoning and self.provider != "trida":
 +            raise ValueError("--reasoning applies to Trida only")
          if self.provider == "typesafe" and self.model != "jev-1.13.0":
@@ -201,7 +201,7 @@ index b33e218..7407501 100644
      parser.add_argument("--base-url", help="TypeSafe endpoint override")
      parser.add_argument("--timeout", type=float, default=600, help="Request timeout in seconds")
 -    parser.add_argument("--max-output-tokens", type=int, default=64000)
-+    parser.add_argument("--max-output-tokens", type=int, help="Trida reasoning budget (default 2048, maximum 4096); other providers default 64000")
++    parser.add_argument("--max-output-tokens", type=int, help="Trida reasoning budget (default 2048, maximum 8192); other providers default 64000")
      parser.add_argument("--retry-errors", action="store_true", help="Rerun failed cases")
      parser.add_argument(
          "--dry-run", action="store_true", help="Download and check inputs without model calls or run outputs"

@@ -58,7 +58,8 @@ Pass the server root URL, without `/v1/decide`. Use the actual model and precisi
 in the model name. Direct decisions and grouped questions are the defaults.
 To reason before deciding, add `--reasoning --max-output-tokens 2048` and use a
 separate run name, such as `zoro-reasoning`. The token limit caps reasoning generation;
-the Trida default is 2,048 tokens, with a 4,096-token ceiling. The server also checks
+the Trida adapter default is 2,048 tokens, with an 8,192-token ceiling. The CUDA
+server permits up to 4,096 by default; larger requests require the opt-in below. It checks
 prompt + budget against its context length. Increase `--timeout` for slower runs.
 Unfinished, empty, or state-trimmed reasoning is recorded as a failure, even if the
 server returns direct fallback answers. Only complete, untrimmed reasoning is scored.
@@ -106,7 +107,7 @@ The adapter sends inputs unchanged, but the decision encoder:
 - Rejects rows over **8,192 tokens**, including the state, question, answer options,
   and delimiter tokens.
 
-These are hardcoded encoder limits. Increasing the server's `--context-length`
+These are the default encoder limits. Increasing the server's `--context-length`
 alone does not remove them. Two invoice cases failed on this limit in the BF16 pilot.
 
 Reasoning also shares this state budget. Both servers keep the conclusion when
@@ -114,8 +115,22 @@ only a reasoning tail fits and report `reasoning_trimmed: true`. If no reasoning
 fits, they return direct answers with `cut: "state_limit"`. This benchmark rejects
 both cases in reasoning mode; a normal generation stop alone is insufficient.
 
-Full-length evaluation requires a separate encoder/context change and
-validation with the model.
+For experimental longer-input CUDA evaluation, explicitly raise both decision
+limits and the reasoning ceiling:
+
+```bash
+python inference/zoro-1/serve_decide.py /path/to/decision-checkpoint \
+  --port 30001 --context-length 32768 --reasoning-token-limit 8192 \
+  --decision-max-state 16384 --decision-max-row 16384
+```
+
+Use benchmark options `--reasoning --max-output-tokens 8192 --questions one`.
+Both state and row limits must fit the server context. The same limits apply when
+fitting generated reasoning, and all strict completion/trimming checks stay on.
+These options change serving limits, not benchmark inputs. Longer decision inputs
+extend beyond the default training-format limits; successful execution alone does
+not establish their accuracy or calibration. Full-length coverage still requires
+model validation and may need larger limits for other cases.
 
 See [validation notes](VALIDATION.md) for the pilot evidence and review test results.
 

@@ -35,7 +35,7 @@ import time
 import torch
 import torch.nn as nn
 
-from decide_request import RequestError, MAX_IMAGE_PIXELS, VISION, fit_reasoning, image_input, parse, prompt, with_reasoning, to_answer
+from decide_request import RequestError, MAX_IMAGE_PIXELS, VISION, MAX_STATE, MAX_BRANCH, fit_reasoning, validate_decision_limits, image_input, parse, prompt, with_reasoning, to_answer
 
 END_THINK = "</think>"
 # Serving temperatures: logits are divided by T before the softmax. Fit T per checkpoint on held-out calibration
@@ -107,13 +107,17 @@ class DecideEngine:
     methods are for scripts and notebooks: each runs its coroutine to completion under a lock, so they are thread-safe
     but serialised."""
 
-    def __init__(self, ckpt, mem_fraction_static=0.8, context_length=16384, reasoning_temperature=0.6, **engine_kw):
+    def __init__(self, ckpt, mem_fraction_static=0.8, context_length=16384, reasoning_temperature=0.6,
+                 decision_max_state=MAX_STATE, decision_max_row=MAX_BRANCH, reasoning_token_limit=4096, **engine_kw):
+        validate_decision_limits(decision_max_state, decision_max_row, context_length, reasoning_token_limit)
         os.environ.setdefault("SGLANG_ENABLE_JIT_DEEPGEMM", "0")   # FP8 GEMMs: not needed for a bf16 model
         os.environ.setdefault("SGLANG_DEEPGEMM_PDL", "0")
         import sglang as sgl
         from transformers import AutoTokenizer
         self.ckpt, self.reasoning_temperature = ckpt, reasoning_temperature
         self.context_length = context_length
+        self.decision_max_state, self.decision_max_row = decision_max_state, decision_max_row
+        self.reasoning_token_limit = reasoning_token_limit
         self.tok = AutoTokenizer.from_pretrained(ckpt)
         self.proc = load_image_processor(ckpt)
         saved = torch.load(os.path.join(ckpt, "jev_head.pt"), map_location="cpu")
@@ -165,7 +169,7 @@ class DecideEngine:
         t0 = time.perf_counter()
         extra = {}
         req = parse(request, image)
-        enc = req.encode(self.tok, self.proc)
+        enc = req.encode(self.tok, self.proc, max_state=self.decision_max_state, max_branch=self.decision_max_row)
         if reasoning:
             pieces, stats = [], {}
             async for part in self._athink_events(request, max_reasoning_tokens, image=req.image):
@@ -182,13 +186,13 @@ class DecideEngine:
                 extra["cut"] = "empty"
             else:
                 image_tokens = int(enc.grid.prod(-1)[0]) // self.proc.merge_size ** 2 if enc.has_image else 0
-                fitted = fit_reasoning(request, text, self.tok, image_tokens)
+                fitted = fit_reasoning(request, text, self.tok, image_tokens, max_state=self.decision_max_state)
                 extra["reasoning_trimmed"] = fitted != text
                 if not fitted:
                     extra["cut"] = "state_limit"
                 else:
                     req = parse(with_reasoning(request, fitted), req.image)
-                    enc = req.encode(self.tok, self.proc)
+                    enc = req.encode(self.tok, self.proc, max_state=self.decision_max_state, max_branch=self.decision_max_row)
             extra["answers_source"] = "direct" if "cut" in extra else "reasoned"
         T = temperature or (self.image_T if enc.has_image else self.text_T)
         z = await self.alogits(enc, self._sized(req.image, enc.grid) if enc.has_image else None)
@@ -238,9 +242,8 @@ class DecideEngine:
 
     async def _athink_events(self, request, max_new_tokens=768, image=None):
         """Reasoning text followed by finish metadata; no shared per-request state."""
-        from decide_request import MAX_REASONING_TOKENS
-        if type(max_new_tokens) is not int or not 1 <= max_new_tokens <= MAX_REASONING_TOKENS:
-            raise RequestError(f"max_reasoning_tokens must be between 1 and {MAX_REASONING_TOKENS}")
+        if type(max_new_tokens) is not int or not 1 <= max_new_tokens <= self.reasoning_token_limit:
+            raise RequestError(f"max_reasoning_tokens must be between 1 and {self.reasoning_token_limit}")
         image_tokens = 0
         if image is None:
             text = self.tok.apply_chat_template([{"role": "user", "content": prompt(request)}], tokenize=False,

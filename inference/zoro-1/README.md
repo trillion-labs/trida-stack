@@ -159,7 +159,8 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
   - `choice`: `{key: description}`.
   - `score`: a list of levels, lowest first; the answer is the expected level.
 - **`"reasoning": true`:** the model first writes its reasoning (returned as `reasoning`), then decides with that reasoning added to the state.
-  `max_reasoning_tokens` defaults to 768 and must be between 1 and 4,096. The prompt
+  `max_reasoning_tokens` defaults to 768 and must be between 1 and the server's
+  `--reasoning-token-limit` (default 4,096; configurable up to 8,192). The prompt
   plus this budget must fit the configured context; invalid budgets return HTTP 400.
   Responses include `reasoning_stats.finish_reason`. Both CUDA and MLX use this contract:
   - `answers_source: "reasoned"` means the decision used reasoning. If only the
@@ -172,6 +173,10 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
     reasoning fits, so the returned direct answers use no reasoning.
     Clients must check these fields before treating the answers as reasoned.
   WorkflowEvals rejects every `cut` and any `reasoning_trimmed` response in reasoning mode.
+  CUDA's decision encoding defaults to `--decision-max-state 7552` and
+  `--decision-max-row 8192`. Experimental longer inputs can opt into larger limits,
+  with `1 <= state <= row <= --context-length`; reasoning fitting uses the same
+  state limit. Existing defaults and strict completion checks are unchanged.
 - **Images:** add an `image` (path, base64 or data URL) to the request.
 - **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
   - It takes `tools`; tool calls come back as `tool_calls`.
