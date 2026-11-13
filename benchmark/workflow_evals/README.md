@@ -76,7 +76,7 @@ This is a server flag, not a `run.sh` flag. The H100 pilot's `ap_00002` reasonin
 prompt used 21,306 tokens; adding the 2,048-token budget exceeds the default 16,384.
 32,768 accommodates that observed prompt and budget; a successful scored reasoning
 run at this setting has not yet been verified. Other inputs may need more room.
-The full benchmark inputs are retained. This setting does **not** raise the fixed
+The full benchmark inputs are retained. This setting does **not** raise the default
 decision-encoder limits described below.
 
 Repeat a command to resume; use a new run name when changing settings.

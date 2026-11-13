@@ -8,7 +8,7 @@ if [[ $# -lt 1 || "$1" == "--help" ]]; then
     echo "Use --allow-unverified-datasets to opt in to local evaluation of datasets with unverified licenses."
     echo "Workflows: invoice_processing, customer_service, agent_trace_observability, security_incidents"
     echo "For invoice --reasoning, start the decision server with --context-length 32768 (a server flag, not a run.sh flag)."
-    echo "This accommodates the observed reasoning prompt; fixed decision-encoder limits still apply."
+    echo "This accommodates the observed reasoning prompt; default decision-encoder limits still apply unless explicitly raised."
     exit 0
 fi
 [[ -x "$UPSTREAM/.venv/bin/python" ]] || { echo "Run $HERE/setup.sh first." >&2; exit 1; }

@@ -1,5 +1,38 @@
 # Review validation
 
+## 8K reasoning / 16K decision-input run (2026-11-13)
+
+Revision `d10db54` adds opt-in CUDA server limits while retaining the original
+defaults. Local checks passed: **187 CPU tests (2 skipped), 20 adapter/setup tests,
+43 MLX decision tests**, lint, action pins, and supply-chain checks.
+
+Ran original case `ap_00111` with per-question mode, one worker, BF16 on one H100,
+the same local checkpoint as below, context 32,768, reasoning budget/ceiling 8,192,
+and decision-state/row limits both 16,384. All 21 questions and three policies
+were selected; actual submitted states and questions were checked for exact
+equality with the original benchmark inputs. Strict adapter checks stayed enabled.
+
+**Still no valid scored reasoning case.** Eight of nine submitted questions
+completed with `finish_reason: stop`, no trimming/cut, and `answers_source:
+reasoned`. `price_basis` consumed all 8,192 reasoning tokens and returned
+`cut: length` with direct fallback answers. The adapter rejected that response,
+and upstream cancelled remaining queued questions after the failure. Case time
+was 63.26 seconds, excluding server startup. Zero agreement scores reflect the
+failed execution rather than answer accuracy.
+
+A token-level audit confirmed complete state and reasoning retention for all
+eight accepted responses. The rejected partial reasoning would occupy a
+13,231-token decision row, below 16,384; this is a hypothetical encoding, since
+the server correctly used direct answers for the unfinished generation. Its
+37,193-character trace repeatedly revisited the price-basis interpretation before
+the budget ran out. This run was blocked by generation not finishing, not by the
+new decision-row limit. Raw requests, responses, scores, and audit were retained
+outside Git. The test server and allocation were stopped afterward.
+
+Earlier per-question attempts with the original decision limits also failed:
+2,048 tokens accepted 11/12 submitted calls before `line_0_scope` hit the budget;
+4,096 accepted 8/9 before `price_basis` hit the budget. Neither completed all 21.
+
 ## 32K real-model run (2026-11-13)
 
 Ran revision `bfc550b` on one H100 80GB with stock SGLang 0.5.23,
