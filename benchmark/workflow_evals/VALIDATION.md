@@ -1,5 +1,25 @@
 # Review validation
 
+## H100 results and context guidance (documented 2026-11-13)
+
+[Guks reported CUDA results on 2026-11-12](https://github.com/trillion-labs/trida-stack/pull/89#issuecomment-6815251583)
+at `4be0443`: one H100, stock SGLang 0.5.23, torch 2.14.1+cu130, and a local
+Zoro-1 checkpoint whose `jev_head.pt` matched the release. All seven API checks
+passed, including reasoning completion, length/state-limit fallbacks, trimming,
+and invalid budgets. These are reviewer-reported results, not a local rerun.
+
+For the first four invoice cases, direct mode ran `ap_00002`; the other three
+exceeded decision-row limits. Reasoning mode ran none: the same three failed,
+and `ap_00002` needed a 21,306-token prompt plus a 2,048-token reasoning budget,
+exceeding the default 16,384-token context.
+
+The README and wrapper help now recommend server `--context-length 32768` for
+invoice reasoning. This fits that observed prompt plus budget, keeps benchmark
+inputs unchanged, and does not change the 7,551-text-token state / 8,192-token
+decision-row limits. A successful scored real-model reasoning run with the larger
+context remains unverified. Maintainer license approval and Luke's unpublished
+commits also remain pending.
+
 ## Review fixes (2026-11-12)
 
 Rebased onto `origin/main` (`a02da55`, including #88).

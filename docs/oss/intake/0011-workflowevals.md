@@ -2,6 +2,10 @@
 
 Recorded 2026-11-10 for PR #83. The integration was introduced at `9c57e86`; this record is retrospective.
 
+Continued in [PR #89](https://github.com/trillion-labs/trida-stack/pull/89).
+The register's `총점` (total score) values of **83** are evaluation scores out of
+100, not PR references; they remain unchanged.
+
 WorkflowEvals code is Apache-2.0 at [0ac3b8a](https://github.com/typesafe-ai/WorkflowEvals/blob/0ac3b8ad845429f0d8e064ecfb2430a47c5a25cb/LICENSE). It is fetched into an ignored checkout; only a connectivity/CLI patch is shipped here. Upstream scoring and workflow logic remain unchanged.
 
 | Component | Pinned revision | License evidence | Decision |
