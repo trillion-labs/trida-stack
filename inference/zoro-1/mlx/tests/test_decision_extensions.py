@@ -89,6 +89,44 @@ def test_auto_reasoning_threshold_and_cutoff(decider, monkeypatch):
     assert done["answers"] == done["reasoned"]["answers"]
 
 
+@pytest.mark.parametrize("text,ended,cut", [("unfinished", "budget", "length"),
+                                           ("", "complete", "empty"), ("", "context_limit", "state_limit")])
+def test_reasoning_cut_contract_and_usage(decider, monkeypatch, text, ended, cut):
+    tokens = 0 if ended == "context_limit" else 3
+    monkeypatch.setattr(decider, "think", lambda *a, **kw: {
+        "text": text, "ended": ended, "stats": {"new_tokens": tokens}})
+    result = decider.decide(REQ, reasoning=True, max_reasoning_tokens=8)
+    assert result["cut"] == cut and result["answers_source"] == "direct"
+    assert result["answers"] == result["direct"]["answers"]
+    assert result["usage"]["input_tokens"] == result["direct"]["usage"]["input_tokens"] > 0
+    assert result["usage"]["output_tokens"] == tokens
+
+
+def test_shared_reasoning_limit_and_conclusion_trimming(decider, monkeypatch):
+    with pytest.raises(decide_request.RequestError, match="between 1 and 4096"):
+        decider.decide(REQ, reasoning=True, max_reasoning_tokens=4097)
+    thought = "step " * 3000 + "CONCLUSION"
+    monkeypatch.setattr(decider, "think", lambda *a, **kw: {
+        "text": thought, "ended": "complete", "stats": {"new_tokens": 10}})
+    result = decider.decide(REQ, reasoning=True)
+    assert result["reasoning_trimmed"] and result["answers_source"] == "reasoned"
+    assert "cut" not in result
+    assert result["usage"]["input_tokens"] == (
+        result["direct"]["usage"]["input_tokens"] + result["reasoned"]["usage"]["input_tokens"])
+    assert result["usage"]["output_tokens"] == 10
+
+
+def test_reasoned_row_overflow_preserves_direct_answer(decider, monkeypatch):
+    req = decide_request.parse(REQ)
+    decider.context_length = max(len(row["ids"]) for row in decider.encode(req, None)) + 1
+    monkeypatch.setattr(decider, "think", lambda *a, **kw: {
+        "text": "step " * 1000, "ended": "complete", "stats": {"new_tokens": 10}})
+    result = decider.decide(REQ, reasoning=True)
+    assert result["cut"] == "state_limit" and result["reasoning_trimmed"]
+    assert result["answers_source"] == "direct" and "reasoned" not in result
+    assert result["answers"] == result["direct"]["answers"]
+
+
 def test_long_reasoning_keeps_conclusion(decider):
     text = " ".join(f"step{i} checks the jam" for i in range(3000)) + " so: facilities"
     fitted = decider.fit_reasoning(REQ, text)

@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from decide_engine import PointerHead, prefix_prompts, to_answer
-from decide_request import SPECIAL, VISION, RequestError, parse, prompt, with_reasoning
+from decide_request import fit_reasoning, SPECIAL, VISION, RequestError, parse, prompt, with_reasoning
 from serve_decide import TurnSplitter, split_turn
 
 
@@ -18,6 +18,9 @@ class CharTok:
 
     def convert_tokens_to_ids(self, t):
         return self.ids[t]
+
+    def decode(self, ids):
+        return "".join(chr(i - 100) for i in ids)
 
     def __call__(self, text, add_special_tokens=False):
         return type("Out", (), {"input_ids": [ord(c) + 100 for c in text]})()
@@ -334,3 +337,17 @@ def test_mlx_copy_of_the_request_contract_is_identical():
     here = Path(__file__).resolve().parent
     assert (here / "mlx/trida_mlx/decide_request.py").read_bytes() == (here / "decide_request.py").read_bytes(), \
         "copy inference/zoro-1/decide_request.py to inference/zoro-1/mlx/trida_mlx/decide_request.py"
+
+
+@pytest.mark.parametrize("image_tokens", [0, 32])
+def test_reasoning_fit_reserves_longest_question_row(image_tokens):
+    tok = CharTok()
+    request = {"state": "x" * 3000, "questions": {
+        "short": {"type": "noul"},
+        "long": {"type": "noul", "instructions": "q" * 1200}}}
+    parse(request).encode_rows(tok, image_tokens)
+    text = "because " * 2000 + "therefore yes"
+    fitted = fit_reasoning(request, text, tok, image_tokens)
+    assert fitted and fitted != text and fitted.endswith("therefore yes")
+    rows = parse(with_reasoning(request, fitted)).encode_rows(tok, image_tokens)
+    assert all(len(row["ids"]) <= 8192 for row in rows)

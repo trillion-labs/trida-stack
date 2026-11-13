@@ -159,6 +159,9 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
   - `choice`: `{key: description}`.
   - `score`: a list of levels, lowest first; the answer is the expected level.
 - **`"reasoning": true`:** the model first writes its reasoning (returned as `reasoning`), then decides with that reasoning added to the state.
+  Decision state and row caps must leave at least 640 tokens for a question
+  (`state <= row - 640`, `row <= context`). Reasoning fitting also reserves
+  the longest question’s actual encoded suffix before keeping the conclusion.
 - **Images:** add an `image` (path, base64 or data URL) to the request.
 - **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
   - It takes `tools`; tool calls come back as `tool_calls`.
@@ -170,6 +173,47 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
 - **From Python:** `DecideEngine(ckpt).decide(...)` / `.chat(...)` / `.chat_stream(...)`, or the `async` versions (`adecide`, `achat`, ...) on `eng.loop` ([`decide_engine.py`](decide_engine.py)).
 
 How it fits a stock engine: a request row is causal, so an option's hidden state is the last hidden state of the row cut off at that option. Each question with K options therefore becomes K+1 prefix prompts in one batched call with `return_hidden_states="last"`, and SGLang's prefix cache shares the work. The head then runs on those vectors. Checked against a transformers implementation of the same head on 200 held-out decision records, the outputs matched to within 0.1% mean probability difference.
+
+### Self-spec decisions (experimental)
+
+One diffusion engine can also serve `/v1/decide` and self-spec chat. Install the
+[diffusion backend and decision readout patch](sglang/README.md#decision-readout), then run:
+
+```bash
+python serve.py --mode decide --decision-backend self-spec --mem-fraction 0.5
+# Uses $DECIDE_PYTHON, then $SGLANG_PYTHON, then the current Python.
+```
+
+`reasoning: true` generates with self-spec before deciding. `reasoning: "auto"`
+first decides directly and reasons if any question's top probability is below
+`threshold` (default `0.7`). The shared reasoning cap defaults to 4096 tokens;
+boolean reasoning defaults to 768 and auto uses the cap. CUDA and MLX servers
+accept `--reasoning-token-limit` up to 8192. Completed reasoning is fitted to
+the state budget, retaining its conclusion and setting `reasoning_trimmed`.
+Fallback returns `answers_source: "direct"` and `cut: "length" | "empty" |
+"state_limit"`; successful reasoning returns `answers_source: "reasoned"`.
+`usage` counts scored decision-row tokens and generated reasoning tokens.
+
+This backend is **text-only and serial**. Chat and decisions share one model;
+**Chat and decisions do not overlap**: a streaming chat holds admission until
+it finishes or cancellation is acknowledged. Each K-option question requires
+K+1 serial eager prefills. Sampling is fixed by the server
+YAML (default temperature 1, top-p 0.95, top-k 20, no presence penalty).
+Conflicting chat options return HTTP 400. Use `serve_decide.py --backend self-spec
+--self-spec-config FILE` to choose a different YAML.
+
+H100 smoke measurement (5.5K-token state, three questions): self-spec direct
+judgment took 1.73 s on the first cold-cache call and 1.06–1.56 s warm. A
+completed reasoned judgment took 8.67 s with 344 generated tokens. Stock AR warm
+direct calls took 0.12–0.13 s. These are single-run observations, not a general
+speedup claim; [AR comparison and conditions](sglang/DECISION_PROBE.md#latency-and-ar-comparison).
+If abort cleanup fails, `/health` returns 503 until the server is restarted.
+
+**Parity is not yet accepted:** 38/40 independent synthetic cases passed the
+provisional probability tolerance of 0.02; two reached about 0.0205. A near-tied
+choice changed, and an auto-threshold boundary crossed. The common 0.005
+comparison is unchanged. See [validation and limits](sglang/DECISION_PROBE.md).
+This path uses the noncommercial backend described in `sglang/NOTICE`.
 
 ## Backends
 

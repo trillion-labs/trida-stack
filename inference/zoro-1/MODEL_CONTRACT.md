@@ -74,3 +74,35 @@ on stock SGLang ≥ 0.5.22, so no diffusion architecture or mask token is needed
 3. **`temperature.json`** (optional) — serving temperatures, `{"text": T, "image": T}`:
    option logits are divided by T before the softmax. Fit T on held-out data the
    checkpoint was not trained on; without the file, T = 1.
+
+### Experimental self-spec decision backend
+
+`serve_decide.py --backend self-spec` additionally requires the diffusion
+checkpoint contract above and the pinned backend with `decision_readout.patch`.
+The same backbone supplies normalized causal-prefill states to the pointer head
+and uses self-spec for chat and decision reasoning; weights are loaded once.
+`reasoning="auto"` escalates when the lowest question top probability is below
+`threshold`. Causal and self-spec reuse one reasoning path; MLX uses the same
+torch-free result/fit helpers. These include #89's conclusion-preserving
+`fit_reasoning` helper and `cut` values (`length`, `empty`, `state_limit`).
+`answers_source` identifies `direct` or `reasoned`, and `reasoning_trimmed`
+records conclusion fitting. Unfittable states/rows preserve the direct answer;
+optional `cut_detail` distinguishes context and row limits.
+
+The default reasoning cap is 4096; `--reasoning-token-limit` accepts 1..8192 on
+CUDA and MLX. Boolean reasoning defaults to 768 (within the cap); auto uses the
+configured cap. `usage.input_tokens` sums decision rows actually scored,
+including both passes when present; `usage.output_tokens` counts native
+reasoning completion tokens even on fallback. These are logical API counters,
+not all physical prefix-prefill work. This supplies the fields expected by
+#94; the `/v1/systemone` route itself is still supplied by that separate PR.
+
+This implementation is text-only, eager, one-worker, and serial. Sampling is
+fixed by the server YAML; conflicting request settings are rejected. State and
+decision-row token limits are unchanged. The provisional backend-specific
+probability tolerance is 0.02, with confidence/score checked against their own
+probabilities rather than applying that tolerance to every derived field.
+This is not an accepted parity guarantee: two of 40 independent synthetic cases
+exceeded it. See [validation](sglang/DECISION_PROBE.md).
+An abort-acknowledgement failure poisons the engine: `/health` then returns
+HTTP 503 with `ok: false` until the server is restarted.

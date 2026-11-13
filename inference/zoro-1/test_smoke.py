@@ -29,6 +29,27 @@ def test_modes_registry():
     assert serve.DEFAULT_MODEL == "trillionlabs/Zoro-1"
 
 
+def test_self_spec_decision_launcher_selects_diffusion_environment(monkeypatch):
+    monkeypatch.delenv("DECIDE_PYTHON", raising=False)
+    monkeypatch.setenv("SGLANG_PYTHON", "/diffusion/python")
+    command = serve.build_decide_command(Args(mode="decide", decision_backend="self-spec"))
+    assert command[0] == "/diffusion/python"
+    assert command[command.index("--backend") + 1] == "self-spec"
+    monkeypatch.setenv("DECIDE_PYTHON", "/override/python")
+    assert serve.build_decide_command(Args(mode="decide", decision_backend="self-spec"))[0] == "/override/python"
+
+
+def test_decision_cli_defaults_match_the_tested_memory_budget():
+    import subprocess
+    for backend, fraction in (("causal", "0.8"), ("self-spec", "0.5")):
+        result = subprocess.run([sys.executable, str(HERE / "serve.py"), "dummy/model", "--mode", "decide",
+                                 "--decision-backend", backend, "--dry-run"], capture_output=True, text=True, check=True)
+        assert f"--mem-fraction {fraction}" in result.stdout
+    help_text = subprocess.run([sys.executable, str(HERE / "serve.py"), "--help"],
+                               capture_output=True, text=True, check=True).stdout
+    assert "parity not accepted (38/40 at 0.02)" in " ".join(help_text.split())
+
+
 def test_self_spec_is_the_card_setting():
     text = (CONFIGS / serve.MODES["self-spec"][1]).read_text()
     assert "block_size: 15" in text and "gen_block_size: 8" in text and "mask_id: 248077" in text

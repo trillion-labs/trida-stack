@@ -311,7 +311,8 @@ class _Worker(threading.Thread):
             DECIDER = Decider.load(ENGINE, DEFAULTS.get("decision_text_temperature"),
                                    DEFAULTS.get("decision_image_temperature"),
                                    context_length=DEFAULTS["context_length"],
-                                   cache_mb=DEFAULTS.get("decision_cache_mb", 1024))
+                                   cache_mb=DEFAULTS.get("decision_cache_mb", 1024),
+                                   reasoning_token_limit=DEFAULTS.get("reasoning_token_limit", 4096))
         except BaseException as e:  # noqa: BLE001
             self.error = e
             self.ready.set()
@@ -726,6 +727,8 @@ def main(argv=None):
     ap.add_argument("--no-fused-gdn", action="store_true")
     ap.add_argument("--decision-cache-mb", type=float, default=1024,
                     help="decision state cache budget in MiB; 0 disables cross-request reuse")
+    ap.add_argument("--reasoning-token-limit", type=int, default=4096,
+                    help="shared decision reasoning budget cap (1..8192; default 4096)")
     ap.add_argument("--decision-text-temperature", type=float, default=None,
                     help="divide the pointer head's logits by this for text decisions (default: the checkpoint's "
                          "temperature.json, else 1.52 from the Zoro-1 card)")
@@ -745,6 +748,7 @@ def main(argv=None):
                     enable_thinking=not a.no_think, context_length=a.context_length,
                     served_name=a.served_model_name, log_requests=a.log_requests,
                     decision_cache_mb=a.decision_cache_mb,
+                    reasoning_token_limit=a.reasoning_token_limit,
                     decision_text_temperature=a.decision_text_temperature,
                     decision_image_temperature=a.decision_image_temperature,
                     tool_call_gate=a.tool_call_gate, loop_guard=a.loop_guard,

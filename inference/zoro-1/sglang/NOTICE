@@ -23,6 +23,11 @@ Patch — two_stream_diffusion.patch
   Adds the two-stream Gated DeltaNet block-end readout and block-diffusion
   decode algorithms that serve a Qwen3.5 two-stream checkpoint, as a diff
   against the HybridDiffusion base commit above. Pure code; no model weights.
+
+Optional overlay — decision_readout.patch
+  Adds normalized causal-prefill hidden-state export for the experimental
+  single-engine decision server. Applied after two_stream_diffusion.patch.
+  It modifies the same noncommercial backend; no model weights are included.
 ------------------------------------------------------------------------------
 
 Because the HybridDiffusion base is distributed under the PolyForm Noncommercial
