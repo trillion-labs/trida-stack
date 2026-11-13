@@ -168,4 +168,4 @@ grep -q "^! Undefined control sequence" "$check/t.log" 2>/dev/null \
 rm -rf "$check"
 
 log "done. Run the evaluation with:"
-log "  EVAL_HOME=$EVAL_HOME MODEL=<checkpoint or Hub id> DATASET=<save_to_disk dir> bash $HERE/run.sh"
+log "  EVAL_HOME=$EVAL_HOME MODEL=<checkpoint or Hub id> bash $HERE/run.sh"

@@ -10,20 +10,22 @@
 #
 # Set up once with setup.sh (it writes $EVAL_HOME/env.sh, which run.sh reads), then:
 #
-#     MODEL=trillionlabs/GravityOCR-KO DATASET=/data/docr-ko-eval-v2 bash run.sh
-#     MODEL=/ckpt/my_checkpoint DATASET=/data/docr-ko-eval-v2 MODE=causal CONCURRENCY="1 8 64" bash run.sh
-#     ENDPOINT=http://127.0.0.1:30000/v1 DATASET=/data/docr-ko-eval-v2 bash run.sh   # use a running server
-#     bash run.sh MODEL=... DATASET=...                                              # KEY=VALUE arguments work too
+#     MODEL=trillionlabs/GravityOCR-KO bash run.sh                   # DATASET defaults to trillionlabs/gravityocr-dev
+#     MODEL=/ckpt/my_checkpoint MODE=causal CONCURRENCY="1 8 64" bash run.sh
+#     MODEL=... DATASET=/data/my-eval bash run.sh                     # a local datasets.save_to_disk directory
+#     ENDPOINT=http://127.0.0.1:30000/v1 bash run.sh                  # use a running server
+#     bash run.sh MODEL=...                                           # KEY=VALUE arguments work too
 #
 # Settings (environment or KEY=VALUE arguments):
 #   MODEL          checkpoint dir or Hub id (required unless ENDPOINT is set)
-#   DATASET        datasets.save_to_disk directory with dev / test splits (required)
+#   DATASET        Hub dataset id or datasets.save_to_disk directory (default trillionlabs/gravityocr-dev, the
+#                  dev split of docr-ko-eval-v2; it is private: log in with `hf auth login` or set HF_TOKEN)
 #   OUT            output directory (default runs/<model>-<mode>-<YYYYmmdd-HHMMSS>)
 #   MODE           self-spec (default) | causal
 #   CONCURRENCY    concurrency levels, space-separated (default 128)
 #   WARMUP         1 (default): one crop per task, then one full pass at the first level, both discarded.
 #                  The first high-concurrency pass on a fresh server is ~2x slower; 0 skips the warm-up
-#   SPLITS         splits to score (default "dev test")
+#   SPLITS         splits to score (default: every split in DATASET)
 #   SCORE_LEVELS   levels whose predictions are scored (default: all of CONCURRENCY; "none" skips scoring)
 #   ENDPOINT       OpenAI base URL of a running server; run.sh then starts and stops nothing
 #   PORT           server port (default 30500)
@@ -63,12 +65,11 @@ EVAL_HOME=${EVAL_HOME:-$HOME/.gravityocr-eval}
 # shellcheck source=/dev/null
 [ ! -f "$EVAL_HOME/env.sh" ] || . "$EVAL_HOME/env.sh"
 
-: "${DATASET:?set DATASET to a datasets.save_to_disk directory}"
+DATASET=${DATASET:-trillionlabs/gravityocr-dev}
 [ -n "${ENDPOINT:-}" ] || : "${MODEL:?set MODEL to a checkpoint dir or Hub id (or ENDPOINT to a running server)}"
 MODE=${MODE:-self-spec}
 CONCURRENCY=${CONCURRENCY:-128}
 WARMUP=${WARMUP:-1}
-SPLITS=${SPLITS:-dev test}
 SCORE_LEVELS=${SCORE_LEVELS:-$CONCURRENCY}
 PORT=${PORT:-30500}
 PYTHON=${PYTHON:-python3}
@@ -81,7 +82,6 @@ case "$MODE" in self-spec|causal) ;; *) die "MODE must be self-spec or causal" ;
 NAME=$(basename "${MODEL:-endpoint}")
 OUT=${OUT:-runs/$NAME-$MODE-$(date +%Y%m%d-%H%M%S)}
 
-[ -d "$DATASET" ] || die "DATASET $DATASET is not a directory"
 [ -f "$SCORE_PY" ] || die "score.py not found at $SCORE_PY"
 if [ "$SCORE_LEVELS" != none ]; then
   [ -n "$OMNIDOCBENCH" ] && [ -d "$OMNIDOCBENCH/src/metrics" ] || die "set OMNIDOCBENCH to an OmniDocBench checkout (or run setup.sh)"
@@ -91,7 +91,7 @@ mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 log "out=$OUT model=${MODEL:-$ENDPOINT} mode=$MODE concurrency=[$CONCURRENCY] dataset=$DATASET"
 
-# ---- 1. export: save_to_disk -> data.jsonl + images/<id>.png + splits.json (the layout score.py reads) -------
+# ---- 1. export: Hub or save_to_disk -> data.jsonl + images/<id>.png + splits.json (the layout score.py reads) -------
 t0=$(now)
 "$PYTHON" - "$DATASET" "$OUT/data" <<'PY'
 import io, json, sys
@@ -100,7 +100,10 @@ import datasets
 from PIL import Image
 src, out = sys.argv[1], Path(sys.argv[2])
 (out / "images").mkdir(parents=True, exist_ok=True)
-dd = datasets.load_from_disk(src)
+# A local save_to_disk directory, else a Hub dataset id (a private one needs `hf auth login` or HF_TOKEN)
+dd = datasets.load_from_disk(src) if Path(src).is_dir() else datasets.load_dataset(src)
+if isinstance(dd, datasets.Dataset):  # one unsplit Dataset: score it whole
+    dd = {"all": dd}
 rows, split_of = [], {}
 keep = ("id", "prompt", "target", "task_type", "kind", "lang", "degradation", "width", "height", "gt_status",
         "domain", "difficulty", "source")
@@ -125,6 +128,7 @@ for r in rows:
 print(f"[run] exported {len(rows)} crops {by}, splits {sorted(set(split_of.values()))}", file=sys.stderr)
 PY
 t_export=$(now)
+SPLITS=${SPLITS:-$("$PYTHON" -c 'import json, sys; print(" ".join(sorted(set(json.load(open(sys.argv[1])).values()))))' "$OUT/data/splits.json")}
 
 # ---- 2. serve ----------------------------------------------------------------------------------------------------
 SRV=

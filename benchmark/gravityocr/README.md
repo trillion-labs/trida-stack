@@ -65,17 +65,26 @@ reused.
 ## 2. Run
 
 ```bash
-MODEL=trillionlabs/GravityOCR-KO DATASET=/data/docr-ko-eval-v2 bash benchmark/gravityocr/run.sh
+hf auth login                                          # once: the default dataset is private (or set HF_TOKEN)
+MODEL=trillionlabs/GravityOCR-KO bash benchmark/gravityocr/run.sh
 ```
+
+`DATASET` defaults to [`trillionlabs/gravityocr-dev`](https://huggingface.co/datasets/trillionlabs/gravityocr-dev),
+the 402-crop dev split of docr-ko-eval-v2, downloaded from the Hub on the first run. The Hugging Face account must
+have access to the `trillionlabs` dataset. `hf` comes with `huggingface_hub`; `uvx --from huggingface_hub hf auth login`
+works without installing it.
 
 More examples:
 
 ```bash
 # Another checkpoint, autoregressive decoding, three concurrency levels
-MODEL=/ckpt/my_checkpoint DATASET=/data/docr-ko-eval-v2 MODE=causal CONCURRENCY="1 8 64" bash benchmark/gravityocr/run.sh
+MODEL=/ckpt/my_checkpoint MODE=causal CONCURRENCY="1 8 64" bash benchmark/gravityocr/run.sh
+
+# Another dataset: a Hub dataset id or a local datasets.save_to_disk directory
+MODEL=trillionlabs/GravityOCR-KO DATASET=/data/docr-ko-eval-v2 bash benchmark/gravityocr/run.sh
 
 # Score against a server that is already running (run.sh then starts and stops nothing)
-ENDPOINT=http://127.0.0.1:30000/v1 DATASET=/data/docr-ko-eval-v2 bash benchmark/gravityocr/run.sh
+ENDPOINT=http://127.0.0.1:30000/v1 bash benchmark/gravityocr/run.sh
 ```
 
 `run.sh` reads `$EVAL_HOME/env.sh`; set `EVAL_HOME` if `setup.sh` installed somewhere other than the default.
@@ -86,7 +95,7 @@ Anything set in the environment overrides `env.sh`. `bash run.sh --help` lists e
 > toolkit is not at `/usr/local/cuda-12.8`, set `CUDA_HOME` too:
 >
 > ```bash
-> SKIP_PREFLIGHT=1 CUDA_HOME=/usr/local/cuda MODEL=... DATASET=... bash benchmark/gravityocr/run.sh
+> SKIP_PREFLIGHT=1 CUDA_HOME=/usr/local/cuda MODEL=... bash benchmark/gravityocr/run.sh
 > ```
 
 ### Settings
@@ -94,12 +103,12 @@ Anything set in the environment overrides `env.sh`. `bash run.sh --help` lists e
 | setting | default | meaning |
 |---|---|---|
 | `MODEL` | – (required) | checkpoint directory or Hub id |
-| `DATASET` | – (required) | `datasets.save_to_disk` directory with `dev` / `test` splits |
+| `DATASET` | `trillionlabs/gravityocr-dev` | Hub dataset id or `datasets.save_to_disk` directory |
 | `OUT` | `runs/<model>-<mode>-<time>` | output directory |
 | `MODE` | `self-spec` | `self-spec` (block-diffusion draft + AR verify) or `causal` (plain AR) |
 | `CONCURRENCY` | `128` | concurrency levels, space-separated |
 | `WARMUP` | `1` | one crop per task, then one full pass at the first level, both discarded (see below) |
-| `SPLITS` | `dev test` | splits to score |
+| `SPLITS` | every split in `DATASET` | splits to score |
 | `SCORE_LEVELS` | all levels | levels whose predictions are scored; `none` skips scoring |
 | `ENDPOINT` | – | OpenAI base URL of a running server |
 | `PORT` | `30500` | server port |
@@ -108,7 +117,7 @@ Anything set in the environment overrides `env.sh`. `bash run.sh --help` lists e
 Other `serve.sh` settings pass through, for example `GPU`, `MEMFRAC`, `CUDA_HOME`, `SKIP_PREFLIGHT` and `HF_HOME`.
 
 ### What one run does
-1. **Export:** reads the `save_to_disk` dataset and writes `data/data.jsonl`, `data/images/<id>.png` and
+1. **Export:** reads the dataset (Hub or `save_to_disk`) and writes `data/data.jsonl`, `data/images/<id>.png` and
    `data/splits.json`.
 2. **Serve:** starts `serve.sh` in its own process group and waits for `/v1/models`. The server is stopped when
    predictions are done, and also if the run fails or is interrupted.
@@ -148,7 +157,8 @@ averages the tasks it has and says which.
 
 ## Dataset format
 
-Any `datasets.save_to_disk` directory whose splits (`dev`, `test`) have these columns:
+A Hub dataset or a `datasets.save_to_disk` directory with these columns, in one or more splits (for example `dev`
+and `test`; a plain unsplit `Dataset` is scored as one split, `all`):
 
 | column | contents |
 |---|---|
@@ -160,13 +170,15 @@ Any `datasets.save_to_disk` directory whose splits (`dev`, `test`) have these co
 | `source` | used for the per-source breakdown |
 
 Optional columns (`kind`, `lang`, `degradation`, `source_detail`, ...) feed the extra breakdowns in
-`summary.md`. docr-ko-eval-v0, aihub479-ocr-eval-v0 and docr-ko-eval-v2 all have this layout.
+`summary.md`. gravityocr-dev, docr-ko-eval-v0, aihub479-ocr-eval-v0 and docr-ko-eval-v2 all have this layout.
 
-Datasets and checkpoints are not stored in this repository. Mount them, or pass a Hub id as `MODEL`.
+Datasets and checkpoints are not stored in this repository. Pass Hub ids as `MODEL` and `DATASET`, or mount local
+directories.
 
 ## Reference numbers
 
-GravityOCR-KO (`trillionlabs/GravityOCR-KO` @ `bc0e105`) on docr-ko-eval-v2 (402 dev / 402 test crops).
+GravityOCR-KO (`trillionlabs/GravityOCR-KO` @ `bc0e105`) on docr-ko-eval-v2 (402 dev / 402 test crops). The dev
+row is the default dataset, `trillionlabs/gravityocr-dev` (the same 402 crops).
 Setup: 1 × L40S (`SKIP_PREFLIGHT=1`), self-spec, concurrency 128, from a fresh `setup.sh` and `run.sh` with
 the defaults.
 
@@ -205,13 +217,16 @@ ENTRYPOINT ["bash", "/trida-stack/benchmark/gravityocr/run.sh"]
 ```
 
 ```bash
-docker run --gpus 1 -v /data:/data -v $HOME/.cache/huggingface:/root/.cache/huggingface -v $PWD/runs:/work/runs \
-  -e MODEL=trillionlabs/GravityOCR-KO -e DATASET=/data/docr-ko-eval-v2 gravityocr-eval
+docker run --gpus 1 -e HF_TOKEN -v $HOME/.cache/huggingface:/root/.cache/huggingface -v $PWD/runs:/work/runs \
+  -e MODEL=trillionlabs/GravityOCR-KO gravityocr-eval
+# a local dataset instead of the Hub: add -v /data:/data -e DATASET=/data/<save_to_disk dir>
 # on a non-Hopper GPU, add: -e SKIP_PREFLIGHT=1
 ```
 
 ## Troubleshooting
 
+- **The dataset download fails with 401, 404 or "Repository not found".** `trillionlabs/gravityocr-dev` is
+  private: run `hf auth login` (or set `HF_TOKEN`) with an account that can see it.
 - **Every formula scores CDM 0 with `cdm_errors=0`.** pdflatex is too old or a TeX package is missing. Run
   `setup.sh`; `run.sh`'s self-check now stops before scoring in this case.
 - **CDM went to 0 after moving `EVAL_HOME`.** The venvs hold absolute paths. Re-run `setup.sh` at the new
