@@ -18,10 +18,16 @@ def main():
                     help="GPU memory fraction for the single generation runner (default: 0.5)")
     ap.add_argument("--max-concurrency", type=int, choices=(1, 2, 4), default=4,
                     help="shared generation/capture limit (default: 4; 1 retains serial execution)")
+    ap.add_argument("--decision-max-state", type=int, default=7552)
+    ap.add_argument("--decision-max-row", type=int, default=8192)
+    ap.add_argument("--reasoning-token-limit", type=int, default=4096,
+                    help="maximum decision reasoning budget (1-8192; default: 4096)")
     a = ap.parse_args()
     import uvicorn
     from vllm_decide_engine import VllmDecideEngine
-    engine = VllmDecideEngine(a.model, a.mem_fraction, a.context_length, max_concurrency=a.max_concurrency)
+    engine = VllmDecideEngine(a.model, a.mem_fraction, a.context_length, max_concurrency=a.max_concurrency,
+                                decision_max_state=a.decision_max_state, decision_max_row=a.decision_max_row,
+                                reasoning_token_limit=a.reasoning_token_limit)
     server = uvicorn.Server(uvicorn.Config(create_app(engine, cancel_disconnected_decisions=True),
                                          host=a.host, port=a.port, loop="none"))
     try:

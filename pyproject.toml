@@ -51,6 +51,7 @@ testpaths = [
   "tools/test_chat.py",
   "tools/test_check_model_card.py",
   "tools/test_check_supply_chain.py",
+  "tools/test_check_advisories.py",
   "train/test_stream_pack.py",
   "train/test_vlm.py",
   "train/test_decision.py",

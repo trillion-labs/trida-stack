@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 
 SPECIAL = ["<|fim_prefix|>", "<|fim_middle|>", "<|box_start|>", "<|box_end|>", "<|fim_suffix|>"]  # state q opt /opt decide
 VISION = ["<|vision_start|>", "<|image_pad|>", "<|vision_end|>"]
+MAX_REASONING_TOKENS = 8192
+DEFAULT_REASONING_TOKEN_LIMIT = 4096
 MAX_STATE, MAX_BRANCH = 7552, 8192   # state tokens, and state + one question, as in training
 MAX_IMAGE_PIXELS = 448 * 448
 MAX_OPTIONS = 255
@@ -41,6 +43,16 @@ _SPECIAL_RE = re.compile(r"<\|([A-Za-z0-9_]+)\|>")
 
 class RequestError(ValueError):
     """A request the model cannot take. The message says what is wrong and where; it is shown to whoever sent it."""
+
+
+def validate_decision_limits(max_state, max_branch, context_length, reasoning_token_limit):
+    """Server-side bounds; never let an encoder row exceed the engine context."""
+    if any(type(v) is not int for v in (max_state, max_branch, context_length, reasoning_token_limit)):
+        raise RequestError("decision and reasoning limits must be integers")
+    if not 1 <= max_state <= max_branch - 640 or max_branch > context_length:
+        raise RequestError("limits must satisfy 1 <= decision_max_state <= decision_max_row - 640 and decision_max_row <= context_length")
+    if not 1 <= reasoning_token_limit <= MAX_REASONING_TOKENS:
+        raise RequestError(f"reasoning_token_limit must be between 1 and {MAX_REASONING_TOKENS}")
 
 
 # ---- rendering ------------------------------------------------------------------------------------
@@ -110,8 +122,8 @@ class Request:
     max_image_pixels: int = MAX_IMAGE_PIXELS
     raw: dict = field(default_factory=dict, repr=False)
 
-    def encode(self, tokenizer, image_processor=None):
-        """-> Encoded. The state is cut to fit MAX_STATE (the image counts as its token count + 2); a question that
+    def encode(self, tokenizer, image_processor=None, *, max_state=MAX_STATE, max_branch=MAX_BRANCH):
+        """-> Encoded. The state is cut to fit max_state (the image counts as its token count + 2); a question that
         does not fit its row raises RequestError."""
         pixel_values = grid = None
         n = 0
@@ -119,30 +131,36 @@ class Request:
             if image_processor is None:
                 raise RequestError("the request has an image but this checkpoint has no image processor (not a VL model)")
             pixel_values, grid, n = image_input(self.image, image_processor, self.max_image_pixels, self.min_image_pixels)
-        return Encoded(self.encode_rows(tokenizer, n), pixel_values, grid)
+        return Encoded(self.encode_rows(tokenizer, n, max_state=max_state, max_branch=max_branch), pixel_values, grid)
 
-    def encode_rows(self, tokenizer, image_tokens=0):
+    def encode_rows(self, tokenizer, image_tokens=0, *, max_state=MAX_STATE, max_branch=MAX_BRANCH):
         """Torch-free serving rows, also used by MLX with its own image preprocessing."""
         image = []
         if image_tokens:
             vs, pad, ve = (tokenizer.convert_tokens_to_ids(t) for t in VISION)
             image = [vs] + [pad] * image_tokens + [ve]
-        s_id, q_id, o_id, c_id, d_id = (tokenizer.convert_tokens_to_ids(t) for t in SPECIAL)
-        state = [s_id] + image + _user(tokenizer, self.state)[: max(0, MAX_STATE - 1 - len(image))]
+        s_id = tokenizer.convert_tokens_to_ids(SPECIAL[0])
+        state = [s_id] + image + _user(tokenizer, self.state)[: max(0, max_state - 1 - len(image))]
         rows = []
         for q in self.questions:
-            instr = [q_id] + _user(tokenizer, q.instr)
-            spans = [[o_id] + _user(tokenizer, o) + [c_id] for o in q.options]
-            branch = instr + [t for sp in spans for t in sp] + [d_id]
-            if len(branch) > MAX_BRANCH - len(state):
+            instr, spans, branch = question_parts(q, tokenizer)
+            if len(branch) > max_branch - len(state):
                 raise RequestError(f"question {q.qid!r} is too long: {len(branch)} tokens of instructions and options "
-                                   f"with a {len(state)}-token state (at most {MAX_BRANCH} per question); shorten it")
+                                   f"with a {len(state)}-token state (at most {max_branch} per question); shorten it")
             ends, cursor = [], len(state) + len(instr)
             for sp in spans:
                 cursor += len(sp)
                 ends.append(cursor - 1)
             rows.append({"ids": state + branch, "decide": len(state) + len(branch) - 1, "opts": ends})
         return rows
+
+
+def question_parts(question, tokenizer):
+    """Exactly the question suffix used by encode_rows, including all delimiters."""
+    _, q_id, o_id, c_id, d_id = (tokenizer.convert_tokens_to_ids(t) for t in SPECIAL)
+    instr = [q_id] + _user(tokenizer, question.instr)
+    spans = [[o_id] + _user(tokenizer, option) + [c_id] for option in question.options]
+    return instr, spans, instr + [t for span in spans for t in span] + [d_id]
 
 
 def _user(tok, text):
@@ -279,6 +297,32 @@ def with_reasoning(request, text):
     state = request["state"]
     state = {**state, "reasoning": text} if isinstance(state, dict) else {"situation": state, "reasoning": text}
     return {**request, "state": state}
+
+
+def fit_reasoning(request, text, tokenizer, image_tokens=0, *, max_state=MAX_STATE, max_branch=MAX_BRANCH):
+    """Keep the reasoning's conclusion within the encoder's state budget.
+
+    Preserve the original state; return an empty string when it leaves no room for
+    reasoning. Callers must report any trimming and use direct answers if empty.
+    image_tokens counts image patches, excluding the two vision delimiters.
+    """
+    longest = max(len(question_parts(q, tokenizer)[2]) for q in parse(request).questions)
+    room = min(max_state, max_branch - longest) - 1 - (image_tokens + 2 if image_tokens else 0)
+
+    def fits(candidate):
+        return len(_user(tokenizer, render(with_reasoning(request, candidate)["state"]))) <= room
+
+    if fits(text):
+        return text
+    ids = _user(tokenizer, text)
+    lo, hi = 0, len(ids) + 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if fits("…" + tokenizer.decode(ids[-mid:])):
+            lo = mid
+        else:
+            hi = mid
+    return "…" + tokenizer.decode(ids[-lo:]) if lo else ""
 
 
 # ---- response formatting (shared by SGLang and MLX) ------------------------------------------------

@@ -56,10 +56,13 @@ jobs:
         run: |
           pip-audit -r requirements.txt -f json -o audit-core.json || true
           pip-audit -r inference/zoro-1/requirements.txt -f json -o audit-inference.json || true
+          pip-audit --no-deps --disable-pip -r inference/zoro-1/vllm/requirements-decide-lock.txt -f json -o audit-vllm-decide.json || true
       - name: Enforce the exception policy
         run: |
           python tools/check_advisories.py --pip-audit audit-core.json
           python tools/check_advisories.py --pip-audit audit-inference.json
+          test -s audit-vllm-decide.json
+          python tools/check_advisories.py --pip-audit audit-vllm-decide.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: always()
         with:

@@ -212,6 +212,8 @@ def bare_engine():
     engine._execution_lock = asyncio.Lock()
     engine._worker_identity = {"pid": 12, "model_id": 34}
     engine.max_concurrency = 1
+    engine.decision_max_state, engine.decision_max_row = 7552, 8192
+    engine.reasoning_token_limit = 4096
     return engine
 
 
@@ -312,7 +314,7 @@ def test_selected_hidden_states_follow_option_order():
 
 @pytest.mark.parametrize("text,finish,cut", [
     ("unfinished", "length", "length"), ("", "stop", "empty"),
-    ("x" * 8000, "stop", "state_limit"), ("yes, the invoice is valid", "stop", None),
+    ("x" * 8000, "stop", None), ("yes, the invoice is valid", "stop", None),
 ])
 def test_reasoning_fallback_keeps_original_state(text, finish, cut):
     engine = bare_engine()
@@ -332,6 +334,8 @@ def test_reasoning_fallback_keeps_original_state(text, finish, cut):
     assert answer["reasoning"] == text
     original = parse(REQUEST).encode(engine.tok).rows[0]["ids"]
     assert (seen[0] == original) == bool(cut)
+    if len(text) > 7552:
+        assert answer["reasoning_trimmed"] is True
 
 
 @pytest.mark.parametrize("budget", [0, True, 4097])
@@ -480,3 +484,24 @@ def test_http_forwards_requested_reasoning_budget():
         "request": REQUEST, "reasoning": True, "max_reasoning_tokens": 1})
     assert response.status_code == 200
     assert captured == [(REQUEST, True, 1)]
+
+
+def test_vllm_uses_shared_reasoning_implementation():
+    from decide_engine import DecideEngine
+    assert backend.VllmDecideEngine.adecide is DecideEngine.adecide
+
+
+def test_vllm_long_question_reasoning_reserves_row_budget():
+    engine = bare_engine()
+    seen = []
+    async def stream(*args, **kwargs):
+        yield "because " * 2000 + "therefore yes", {"finish_reason": "stop"}
+    async def logits(enc, image):
+        seen.extend(enc.rows)
+        return [torch.tensor([0.0, 1.0])]
+    engine._astream, engine.alogits = stream, logits
+    request = {"state": "x" * 3000, "questions": {
+        "q": {"type": "noul", "instructions": "q" * 1200}}}
+    answer = asyncio.run(engine.adecide(request, reasoning=True))
+    assert answer["reasoning_trimmed"] and answer["answers_source"] == "reasoned"
+    assert all(len(row["ids"]) <= 8192 for row in seen)

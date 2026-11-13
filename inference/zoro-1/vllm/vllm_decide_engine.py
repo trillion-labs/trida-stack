@@ -9,15 +9,13 @@ from contextlib import aclosing
 import os
 from pathlib import Path
 import threading
-import time
 import uuid
 
 import torch
 
 from decide_engine import (DecideEngine, PointerHead, END_THINK, load_image_processor,
                            serving_temperatures)
-from decide_request import (MAX_STATE, MAX_BRANCH, VISION, RequestError, _user, parse, prompt,
-                            render, with_reasoning, to_answer)
+from decide_request import MAX_STATE, MAX_BRANCH, VISION, validate_decision_limits
 
 
 def row_prompt(row, image_pad, image=None):
@@ -77,13 +75,17 @@ class VllmDecideEngine(DecideEngine):
     """Reuse the decision contract and chat formatting; replace only engine execution."""
 
     def __init__(self, ckpt, mem_fraction=0.5, context_length=16384, reasoning_temperature=0.6,
-                 max_concurrency=4):
+                 max_concurrency=4, decision_max_state=MAX_STATE, decision_max_row=MAX_BRANCH,
+                 reasoning_token_limit=4096):
         if not 0 < mem_fraction < 1:
             raise ValueError("mem_fraction must be > 0 and < 1")
         if type(context_length) is not int or context_length < MAX_BRANCH:
             raise ValueError(f"context_length must be at least {MAX_BRANCH} to fit decision rows")
         if type(max_concurrency) is not int or max_concurrency not in (1, 2, 4):
             raise ValueError("max_concurrency must be 1, 2, or 4")
+        validate_decision_limits(decision_max_state, decision_max_row, context_length, reasoning_token_limit)
+        self.decision_max_state, self.decision_max_row = decision_max_state, decision_max_row
+        self.reasoning_token_limit = reasoning_token_limit
         from transformers import AutoTokenizer
         self.ckpt, self.reasoning_temperature = ckpt, reasoning_temperature
         self.context_length = context_length
@@ -193,51 +195,6 @@ class VllmDecideEngine(DecideEngine):
             with torch.no_grad():
                 logits.append(self.head(h[-1:], h[:-1], torch.zeros(len(h) - 1, dtype=torch.long)))
         return logits
-
-    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768):
-        t0 = time.perf_counter()
-        req = parse(request, image)
-        enc = req.encode(self.tok, self.proc)
-        extra = {}
-        if reasoning:
-            if type(max_reasoning_tokens) is not int or not 1 <= max_reasoning_tokens <= 4096:
-                raise RequestError("max_reasoning_tokens must be between 1 and 4096")
-            messages = [{"role": "user", "content": prompt(request)}]
-            kw = {}
-            if req.image is not None:
-                messages[0]["content"] = [{"type": "image"}, {"type": "text", "text": prompt(request)}]
-                kw["image_data"] = self._sized(req.image, enc.grid)
-            text = self.tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            ids = self.tok(text).input_ids
-            image_tokens = int(enc.grid.prod(-1)[0]) // self.proc.merge_size ** 2 if enc.has_image else 0
-            if len(ids) + max(0, image_tokens - 1) + max_reasoning_tokens > self.context_length:
-                raise RequestError("reasoning prompt plus budget exceeds server context length")
-            params = {"max_new_tokens": max_reasoning_tokens, "temperature": self.reasoning_temperature,
-                      "top_p": 0.95, "top_k": 20, "stop_token_ids": self._stops}
-            pieces, meta = [], {}
-            async for piece, meta in self._astream(ids, params, **kw):
-                pieces.append(piece.replace(END_THINK, ""))
-            text = "".join(pieces).strip()
-            extra = {"reasoning": text, "reasoning_ms": round((time.perf_counter() - t0) * 1000, 1),
-                     "reasoning_stats": {"finish_reason": self._finish(meta),
-                                         "completion_tokens": meta.get("completion_tokens", 0)},
-                     "reasoning_trimmed": False}
-            combined = with_reasoning(request, text)
-            if self._finish(meta) == "length":
-                extra["cut"] = "length"
-            elif not text:
-                extra["cut"] = "empty"
-            elif len(_user(self.tok, render(combined["state"]))) + 1 + (image_tokens + 2 if image_tokens else 0) > MAX_STATE:
-                # Preserve the original input and never silently score shortened reasoning.
-                extra.update(cut="state_limit", reasoning_trimmed=True)
-            else:
-                req = parse(combined, req.image)
-                enc = req.encode(self.tok, self.proc)
-            extra["answers_source"] = "direct" if "cut" in extra else "reasoned"
-        T = temperature or (self.image_T if enc.has_image else self.text_T)
-        z = await self.alogits(enc, self._sized(req.image, enc.grid) if enc.has_image else None)
-        answers = {q.qid: to_answer(q, torch.softmax(zq / T, -1).tolist()) for q, zq in zip(req.questions, z)}
-        return {"answers": answers, "timing_ms": round((time.perf_counter() - t0) * 1000, 1), **extra}
 
     def shutdown(self):
         if self.generating is not None:

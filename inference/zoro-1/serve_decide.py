@@ -277,13 +277,21 @@ def main():
     ap.add_argument("--port", type=int, default=30001)
     ap.add_argument("--mem-fraction", type=float, default=0.8)
     ap.add_argument("--context-length", type=int, default=16384)
+    ap.add_argument("--decision-max-state", type=int, default=7552,
+                    help="state token limit including delimiters; default 7552")
+    ap.add_argument("--decision-max-row", type=int, default=8192,
+                    help="complete decision-row token limit; default 8192")
+    ap.add_argument("--reasoning-token-limit", type=int, default=4096,
+                    help="maximum requested reasoning budget, up to 8192; default 4096")
     a = ap.parse_args()
     if not a.model:
         ap.error("give a decision checkpoint (positional) or set TRIDA_DECIDE_MODEL")
     import uvicorn
 
     from decide_engine import DecideEngine
-    engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length)
+    engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length,
+                          decision_max_state=a.decision_max_state, decision_max_row=a.decision_max_row,
+                          reasoning_token_limit=a.reasoning_token_limit)
     # The HTTP server runs on the engine's own event loop, so concurrent requests batch in the engine.
     server = uvicorn.Server(uvicorn.Config(create_app(engine), host=a.host, port=a.port, loop="none"))
     engine.loop.run_until_complete(server.serve())

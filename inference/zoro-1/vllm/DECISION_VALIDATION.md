@@ -266,3 +266,62 @@ On this node the optional FlashInfer sampler failed to compile because its CUDA
 headers and compiler were incompatible. The server defaults to vLLM's PyTorch
 sampler, without changing temperature, top-k, or top-p. No model tuning or
 benchmark-input changes were made.
+
+
+## PR review follow-up (2026-11-13)
+
+The following timings and probability comparisons are from
+[guks’s review of a29d996](https://github.com/trillion-labs/trida-stack/pull/93),
+using the same H100 and local checkpoint. These were not collected by our new
+regression tests. Both implementations read K+1 prefixes, but SGLang batches them
+and reuses its prefix cache; vLLM runs them sequentially without prefix caching.
+
+| Request (one five-option question) | vLLM | SGLang |
+|---|---:|---:|
+| 2K-token state | 0.41 s | 0.07 s |
+| 7.5K-token state, first request | 0.94 s | 0.33 s |
+| Same long request, repeated | 0.94 s | 0.06–0.09 s |
+| Four long requests in parallel (wall time) | 3.56 s | 0.15 s |
+
+These costs compound with questions and options. We retain sequential prefixes
+for this experimental implementation; parallelising prefixes would change batch
+composition and needs fresh numerical and cancellation checks. Prefix caching
+also requires chunked prefill for this model’s Mamba cache, which is outside the
+validated configuration. Chat and captures share the same semaphore: four open
+streams can starve decisions until a slot is released.
+
+The review’s maximum probability gaps were 0.0036 (short text), 0.0080 (2K),
+0.0016 (image) and **0.0222 (7.5K)**. The earlier 0.012 result remains an observation
+of that smaller probe, not an upper bound. The 0.01 acceptance target is unchanged
+and still unmet. Four concurrent copies differed from serial by up to 0.0049.
+
+The installed vLLM 0.32.0 code enables a 4-GiB processor cache by default
+(`config/multimodal.py`) and stores vision outputs by multimodal hash in
+`v1/worker/gpu/mm/encoder_cache.py`; the scheduler can evict those outputs.
+This establishes that caches exist, not the number of vision forwards in our
+sequential K+1 path. Image correctness was tested; cross-prefix cache reuse has
+not been instrumented, so no one-vision-forward claim is made.
+
+### Shared reasoning and dependency checks
+
+The vLLM override of `adecide` is removed. It inherits the same SGLang reasoning
+path and conclusion-preserving helper as #89, including configurable limits,
+longest-question space reservation, and the shared cut/source/trim fields. CPU
+regressions exercise completed, trimmed, unfinished and empty reasoning, and
+assert that the shared implementation is used.
+
+`requirements-decide-lock.txt` captures all 198 packages from the tested Linux
+x86_64 / Python 3.12 environment; `uv pip check` passes. CI scans it without
+resolving a different platform’s dependency graph. A local pip-audit 2.7.3 scan
+found two setuptools advisories at 80.10.2:
+
+- PYSEC-2026-3447 already has a recorded repository exception (source-distribution
+  building on macOS; this serving environment is Linux).
+- **GHSA-xmj3-9gf7-h52w** concerns legacy wheel installation on Windows. Its fixed
+  version, 84.1.0, conflicts with vLLM’s Python 3.12 requirement of setuptools <81.
+  An attempted upgrade failed `uv pip check` and was reverted before the GPU test.
+  No new exception is recorded or approved; maintainer disposition is pending.
+
+The advisory gate now matches exceptions per advisory and its aliases, rather
+than allowing an exception for one package advisory to cover every other finding
+on that package. The newly discovered advisory therefore remains a CI blocker.
