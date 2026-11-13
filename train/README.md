@@ -118,7 +118,7 @@ fp32 noise — `train/tools/decision_parity_*.py`).
   their scale. decision rows run with the plain causal kernels (doc-isolated), never the `[x0 ; xt]` two-stream ones.
 - **Data:** kev's training sets (`decision-v7` train, `night2/dates_unknowable`, `round15/joint`); `--decision_max_state`
   (default 7,552), `--decision_max_tokens` per micro-batch, `--decision_p_none_pair` (0.25).
-- **Output:** each checkpoint also gets `jev_head.pt`; `train/tools/export_kev_checkpoint.py` writes kev's full-weight
+- **Output:** each checkpoint also gets `jev_head.pt`; `train/tools/export_decision_checkpoint.py` writes kev's full-weight
   layout so `kev.benchmark --run` / `kev.serve --run` score and serve it.
 
 ## Flags that matter

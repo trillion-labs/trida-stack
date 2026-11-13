@@ -136,7 +136,7 @@ optional image) and typed *questions*, it returns calibrated probabilities inste
 scheme (`train/data/decision.py` / `train/models/decision.py`): a small **pointer head** on the clean causal stream scores each option's
 `</opt>` state against the question's `<decide>` state. Each optimizer step runs the usual SFT
 micro-batches, then `--decision_micro_per_step` decision micro-batches whose loss is added with weight
-`--decision_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_kev_checkpoint.py`
+`--decision_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_decision_checkpoint.py`
 exports kev's layout. Details: [`train/README.md`](train/README.md#typed-decision-training-decisionpy).
 
 ### Images (vision-language checkpoints)
@@ -235,7 +235,7 @@ train/                   AR -> diffusion SFT trainer    (entry: train.py -> trai
   distributed.py             distributed setup and FSDP sharding
   optimizer.py, checkpoint.py optimizer updates, saving and resume
   train.py                   training helpers and main()
-  tools/                     export_kev_checkpoint.py, compose_vl_checkpoint.py, parity/FSDP checks
+  tools/                     export_decision_checkpoint.py, compose_vl_checkpoint.py, parity/FSDP checks
   getting_started.ipynb      training tutorial
   block_gated_delta_rule/    fetch recipe for the block-causal gated-delta Triton kernels
                              (PolyForm-NC upstream, NOT vendored -- run fetch_kernels.sh first)

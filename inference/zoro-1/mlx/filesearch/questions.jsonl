@@ -13,7 +13,7 @@
 {"id": "q13", "lang": "ko", "question": "비상업 라이선스라 저장소에 포함하지 않은 gated-delta Triton 커널은 어떻게 받아 와?", "gold": ["train/block_gated_delta_rule/fetch_kernels.sh", "train/block_gated_delta_rule/README.md"]}
 {"id": "q14", "lang": "en", "question": "Where is the complementary masking of the block-diffusion training loss implemented?", "gold": ["train/hf_block_diffusion.py", "train/hf_block_diffusion_hybrid.py"]}
 {"id": "q15", "lang": "en", "question": "How do I add a vision encoder to a checkpoint that was trained on text only?", "gold": ["train/tools/compose_vl_checkpoint.py"]}
-{"id": "q16", "lang": "en", "question": "How do I export a trained checkpoint so kev can benchmark and serve it?", "gold": ["train/tools/export_kev_checkpoint.py", "scripts/export_kev_checkpoint.py"]}
+{"id": "q16", "lang": "en", "question": "How do I export a trained checkpoint so kev can benchmark and serve it?", "gold": ["train/tools/export_decision_checkpoint.py", "scripts/export_decision_checkpoint.py"]}
 {"id": "q17", "lang": "en", "question": "Where are multi-turn conversations packed into fixed-length training rows?", "gold": ["train/data/text_sft_data.py"]}
 {"id": "q18", "lang": "ko", "question": "결정(decision) 손실 가중치 같은 학습 명령줄 옵션은 어디서 정의돼?", "gold": ["train/cli.py"]}
 {"id": "q19", "lang": "en", "question": "How should I report a security vulnerability without opening a public issue?", "gold": ["SECURITY.md"]}

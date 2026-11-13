@@ -6,7 +6,7 @@
 """Export a Decision-trained checkpoint (train.py --decision_data) to kev's full-weight checkpoint layout, so kev's own tools
 score and serve it: `kev.benchmark --run <out>`, `kev.serve --run <out>`.
 
-    python scripts/export_kev_checkpoint.py --ckpt <save_dir>/step_N --out <dir> [--temperature T]
+    python scripts/export_decision_checkpoint.py --ckpt <save_dir>/step_N --out <dir> [--temperature T]
 
 Writes the text backbone (a flat Qwen3_5ForCausalLM config + `model.*` shards; a VL checkpoint's vision tower is
 dropped, kev reads text only), the tokenizer, and `head.pt` in kev's Meta format (kev/checkpoint.py): weights="full",
