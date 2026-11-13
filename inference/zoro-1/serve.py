@@ -157,9 +157,12 @@ def _install(tmp, out, work, out_is_complete):
 
 
 def build_decide_command(args):
-    python = os.environ.get("DECIDE_PYTHON", sys.executable)
+    backend = getattr(args, "decision_backend", "causal")
+    python = os.environ.get("DECIDE_PYTHON", os.environ.get("SGLANG_PYTHON", sys.executable)
+                            if backend == "self-spec" else sys.executable)
+    extra = ["--backend", "self-spec"] if backend == "self-spec" else []
     return [python, str(Path(__file__).parent / "serve_decide.py"), args.model, "--host", args.host,
-            "--port", str(args.port), "--mem-fraction", str(args.mem_fraction)] + args.passthrough
+            "--port", str(args.port), "--mem-fraction", str(args.mem_fraction)] + extra + args.passthrough
 
 
 def build_command(args):
@@ -199,10 +202,13 @@ def main():
     ap.add_argument("--mode", choices=list(MODES) + [DECIDE_MODE], default="self-spec",
                     help="decode mode (default self-spec, b15_g8); decide serves typed decisions and chat "
                          "(serve_decide.py)")
+    ap.add_argument("--decision-backend", choices=["causal", "self-spec"], default="causal",
+                    help="--mode decide: causal (stock SGLang) or self-spec (patched diffusion fork)")
     ap.add_argument("--port", type=int, default=30000)
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--tp", type=int, default=1, help="tensor-parallel size (1 = one full model per GPU)")
-    ap.add_argument("--mem-fraction", type=float, default=0.8)
+    ap.add_argument("--mem-fraction", type=float, default=None,
+                    help="static memory fraction (default 0.8; self-spec decisions 0.5)")
     ap.add_argument("--max-running", type=int, default=32)
     ap.add_argument("--cuda-graph-bs", default="1 2 4 8")
     ap.add_argument("--dtype", default="bfloat16")
@@ -221,6 +227,10 @@ def main():
     ap.add_argument("passthrough", nargs="*",
                     help="extra flags forwarded verbatim to sglang.launch_server (serve_decide.py for decide)")
     args = ap.parse_args()
+    if args.decision_backend != "causal" and args.mode != DECIDE_MODE:
+        ap.error("--decision-backend requires --mode decide")
+    if args.mem_fraction is None:
+        args.mem_fraction = 0.5 if args.mode == DECIDE_MODE and args.decision_backend == "self-spec" else 0.8
     if args.model is None and args.mode == DECIDE_MODE:
         args.model = os.environ.get("TRIDA_DECIDE_MODEL")   # Zoro-1 carries jev_head.pt, so the default works too
     if args.model is None:

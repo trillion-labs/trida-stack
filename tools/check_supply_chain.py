@@ -33,6 +33,7 @@ QUOTING_FILES = [
     "train/block_gated_delta_rule/README.md",
     "train/block_gated_delta_rule/VENDORED.md",
     "inference/zoro-1/sglang/README.md",
+    "inference/zoro-1/sglang/DECISION_PROBE.md",
     "inference/zoro-1/vllm/vllm_native_diffusion/KERNELS.md",
     "docs/supply-chain/asset-register.csv",
     "docs/supply-chain/README.md",

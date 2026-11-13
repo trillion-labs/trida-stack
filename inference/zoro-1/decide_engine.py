@@ -122,10 +122,14 @@ class DecideEngine:
         self.image_pad = self.tok.convert_tokens_to_ids(VISION[1])
         self._stops = [self.tok.convert_tokens_to_ids(t) for t in (END_THINK, "<|im_end|>")]
         self._lock = threading.Lock()
-        engine_kw.setdefault("sampling_backend", "pytorch")
-        self.engine = sgl.Engine(model_path=ckpt, return_hidden_states_mode="last", mem_fraction_static=mem_fraction_static,
-                                 context_length=context_length, log_level="warning", **engine_kw)
+        self.engine = self._build_engine(ckpt, mem_fraction_static, context_length, engine_kw)
         self.loop = self.engine.loop
+
+    def _build_engine(self, ckpt, mem_fraction_static, context_length, engine_kw):
+        import sglang as sgl
+        engine_kw.setdefault("sampling_backend", "pytorch")
+        return sgl.Engine(model_path=ckpt, return_hidden_states_mode="last", mem_fraction_static=mem_fraction_static,
+                                 context_length=context_length, log_level="warning", **engine_kw)
 
     # ---- sync wrappers ------------------------------------------------------------------------------
 

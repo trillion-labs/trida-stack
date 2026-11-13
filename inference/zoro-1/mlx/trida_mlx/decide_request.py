@@ -121,6 +121,10 @@ class Request:
             pixel_values, grid, n = image_input(self.image, image_processor, self.max_image_pixels, self.min_image_pixels)
         return Encoded(self.encode_rows(tokenizer, n), pixel_values, grid)
 
+    def state_token_count(self, tokenizer, image_tokens=0):
+        """State length before truncation, including escaped user text and delimiters."""
+        return 1 + (image_tokens + 2 if image_tokens else 0) + len(_user(tokenizer, self.state))
+
     def encode_rows(self, tokenizer, image_tokens=0):
         """Torch-free serving rows, also used by MLX with its own image preprocessing."""
         image = []

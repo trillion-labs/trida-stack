@@ -14,11 +14,15 @@ Usage:
   python serve_decide.py /path/to/decision-checkpoint --port 30001     # or $TRIDA_DECIDE_MODEL
   python serve.py /path/to/decision-checkpoint --mode decide           # the same, through serve.py
 
-Needs stock SGLang >= 0.5.22 (Apache-2.0) plus fastapi and uvicorn in the same environment; see README "Decisions".
+Defaults to stock SGLang >= 0.5.22 (Apache-2.0). --backend self-spec selects the experimental
+noncommercial diffusion backend with decision_readout.patch: text-only, serial admission,
+fixed YAML sampling. See README "Decisions". Both need fastapi and uvicorn.
 A decision checkpoint is a Trida checkpoint with jev_head.pt (MODEL_CONTRACT.md); an optional temperature.json sets
-its serving temperatures. Generation here is causal decoding; the two-stream decode modes are serve.py's others.
+its serving temperatures. The default uses causal decoding; the optional backend uses self-spec generation.
 """
 import argparse
+import asyncio
+from contextlib import aclosing, suppress
 import json
 import os
 import re
@@ -147,13 +151,17 @@ def _num(body, key, default, cast):
 
 
 def create_app(engine):
-    from fastapi import Body, FastAPI, HTTPException
-    from fastapi.responses import StreamingResponse
+    from fastapi import Body, FastAPI, HTTPException, Request
+    from fastapi.responses import JSONResponse, StreamingResponse
 
     from decide_request import RequestError
 
     name = os.path.basename(os.path.normpath(engine.ckpt))
     app = FastAPI(title="Trida decisions")
+
+    @app.exception_handler(RequestError)
+    async def request_error(_request, exc):
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
 
     @app.get("/health")
     def health():
@@ -164,12 +172,42 @@ def create_app(engine):
         return {"object": "list", "data": [{"id": name, "object": "model", "created": 0, "owned_by": "trida"}]}
 
     @app.post("/v1/decide")
-    async def decide(body: dict = Body(...)):
+    async def decide(http_request: Request, body: dict = Body(...)):
         if "request" not in body:
             raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float}")
         try:
             # the image, if any, is in the request (base64 or a data URL): requests never name server files
-            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")))
+            reasoning = body.get("reasoning", False)
+            if not isinstance(reasoning, bool) and reasoning != "auto":
+                raise RequestError('reasoning must be a boolean or "auto"')
+            auto = getattr(engine, "supports_auto_reasoning", False)
+            if reasoning == "auto" and not auto:
+                raise RequestError('reasoning="auto" requires the self-spec backend')
+            options = {}
+            if "max_reasoning_tokens" in body:
+                budget = _num(body, "max_reasoning_tokens", 768, int)
+                if budget < 1:
+                    raise RequestError("max_reasoning_tokens must be positive")
+                options["max_reasoning_tokens"] = budget
+            if "threshold" in body:
+                if not auto:
+                    raise RequestError("threshold requires the self-spec backend")
+                options["threshold"] = _num(body, "threshold", 0.7, float)
+            work = engine.adecide(body["request"], None, body.get("temperature"), reasoning, **options)
+            if not auto:
+                return await work
+            task = asyncio.create_task(work)
+            try:
+                while not task.done():
+                    await asyncio.wait({task}, timeout=0.05)
+                    if not task.done() and await http_request.is_disconnected():
+                        raise HTTPException(499, "client disconnected")
+                return task.result()
+            finally:
+                if not task.done():
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
         except RequestError as e:
             raise HTTPException(400, str(e)) from e
 
@@ -179,10 +217,13 @@ def create_app(engine):
         if not isinstance(messages, list) or not messages:
             raise HTTPException(400, "messages must be a non-empty list")
         thinking = (body.get("chat_template_kwargs") or {}).get("enable_thinking")
+        sampling = getattr(engine, "sampling", {"temperature": 0.6, "top_p": 0.95, "top_k": 20})
         kw = dict(tools=body.get("tools"), max_new_tokens=_num(body, "max_tokens", 2048, int),
-                  temperature=_num(body, "temperature", 0.6, float), top_p=_num(body, "top_p", 0.95, float),
-                  top_k=_num(body, "top_k", 20, int), presence_penalty=_num(body, "presence_penalty", 0.0, float),
+                  temperature=_num(body, "temperature", sampling["temperature"], float), top_p=_num(body, "top_p", sampling["top_p"], float),
+                  top_k=_num(body, "top_k", sampling["top_k"], int), presence_penalty=_num(body, "presence_penalty", 0.0, float),
                   enable_thinking=thinking)
+        if getattr(engine, "supports_auto_reasoning", False):
+            engine.validate_chat(messages, **kw)
         cid, created = f"chatcmpl-{uuid.uuid4().hex[:24]}", int(time.time())
         thinks = thinking is not False
 
@@ -196,12 +237,13 @@ def create_app(engine):
                     return f"data: {json.dumps(c)}\n\n"
                 yield chunk({"role": "assistant"})
                 split, stats = TurnSplitter(thinks, kw["tools"]), {}
-                async for piece in engine.achat_stream(messages, **kw):
-                    if isinstance(piece, dict):
-                        stats = piece
-                        continue
-                    for field, text in split.feed(piece):
-                        yield chunk({field: text})
+                async with aclosing(engine.achat_stream(messages, **kw)) as stream:
+                    async for piece in stream:
+                        if isinstance(piece, dict):
+                            stats = piece
+                            continue
+                        for field, text in split.feed(piece):
+                            yield chunk({field: text})
                 rest, calls = split.finish(stats.get("finish_reason") == "length")
                 for field, text in rest:
                     yield chunk({field: text})
@@ -237,18 +279,34 @@ def main():
                     help="decision checkpoint directory (with jev_head.pt); default $TRIDA_DECIDE_MODEL")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=30001)
-    ap.add_argument("--mem-fraction", type=float, default=0.8)
+    ap.add_argument("--mem-fraction", type=float, default=None,
+                    help="static memory fraction (default 0.8 for causal, 0.5 for self-spec)")
     ap.add_argument("--context-length", type=int, default=16384)
+    ap.add_argument("--backend", choices=["causal", "self-spec"], default="causal",
+                    help="self-spec: experimental text-only server; parity is not yet accepted")
+    ap.add_argument("--self-spec-config", help="self-spec YAML; fixes sampling for every generation request")
     a = ap.parse_args()
     if not a.model:
         ap.error("give a decision checkpoint (positional) or set TRIDA_DECIDE_MODEL")
+    if a.mem_fraction is None:
+        a.mem_fraction = 0.5 if a.backend == "self-spec" else 0.8
     import uvicorn
 
-    from decide_engine import DecideEngine
-    engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length)
+    if a.backend == "self-spec":
+        from self_spec_decide_engine import SelfSpecDecideEngine
+        engine = SelfSpecDecideEngine(a.model, mem_fraction_static=a.mem_fraction,
+                                      context_length=a.context_length, config=a.self_spec_config)
+    else:
+        if a.self_spec_config:
+            ap.error("--self-spec-config requires --backend self-spec")
+        from decide_engine import DecideEngine
+        engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length)
     # The HTTP server runs on the engine's own event loop, so concurrent requests batch in the engine.
     server = uvicorn.Server(uvicorn.Config(create_app(engine), host=a.host, port=a.port, loop="none"))
-    engine.loop.run_until_complete(server.serve())
+    try:
+        engine.loop.run_until_complete(server.serve())
+    finally:
+        engine.shutdown()
 
 
 if __name__ == "__main__":   # sglang.Engine spawns its workers, which re-import this file

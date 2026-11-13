@@ -74,3 +74,20 @@ on stock SGLang ≥ 0.5.22, so no diffusion architecture or mask token is needed
 3. **`temperature.json`** (optional) — serving temperatures, `{"text": T, "image": T}`:
    option logits are divided by T before the softmax. Fit T on held-out data the
    checkpoint was not trained on; without the file, T = 1.
+
+### Experimental self-spec decision backend
+
+`serve_decide.py --backend self-spec` additionally requires the diffusion
+checkpoint contract above and the pinned backend with `decision_readout.patch`.
+The same backbone supplies normalized causal-prefill states to the pointer head
+and uses self-spec for chat and decision reasoning; weights are loaded once.
+`reasoning="auto"` escalates when the lowest question top probability is below
+`threshold`. Incomplete or oversized reasoning preserves the direct answer.
+
+This implementation is text-only, eager, one-worker, and serial. Sampling is
+fixed by the server YAML; conflicting request settings are rejected. State and
+decision-row token limits are unchanged. The provisional backend-specific
+probability tolerance is 0.02, with confidence/score checked against their own
+probabilities rather than applying that tolerance to every derived field.
+This is not an accepted parity guarantee: two of 40 independent synthetic cases
+exceeded it. See [validation](sglang/DECISION_PROBE.md).

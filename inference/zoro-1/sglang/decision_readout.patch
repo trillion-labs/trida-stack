@@ -1,0 +1,90 @@
+--- a/eval/sglang/srt/layers/logits_processor.py
++++ b/eval/sglang/srt/layers/logits_processor.py
+@@ -327,6 +327,7 @@
+ 
+ 
+ class LogitsProcessor(nn.Module):
++    trida_decision_readout_version = 1
+     def __init__(
+         self,
+         config,
+@@ -397,7 +398,17 @@
+ 
+         # Diffusion LLM only.
+         if logits_metadata.forward_mode.is_dllm_extend():
+-            return self._get_dllm_logits(hidden_states, lm_head, logits_metadata)
++            output = self._get_dllm_logits(hidden_states, lm_head, logits_metadata)
++            # Preserve the ordinary self-spec decode/cleanup path.
++            # The head needs normalized prompt states, not draft/verify states.
++            if logits_metadata.capture_hidden_mode.need_capture():
++                lengths = logits_metadata.extend_seq_lens
++                if lengths is None or bool((lengths <= 0).any()):
++                    raise RuntimeError("decision readout requires nonempty whole-prompt prefill")
++                last = torch.cumsum(lengths, dim=0) - 1
++                output.hidden_states = hidden_states[last].detach().clone()
++                output.trida_decision_end_ids = input_ids[last].detach().cpu().tolist()
++            return output
+ 
+         # Get the last hidden states and last logits for the next token prediction
+         (
+--- a/eval/sglang/srt/dllm/mixin/scheduler.py
++++ b/eval/sglang/srt/dllm/mixin/scheduler.py
+@@ -63,6 +63,27 @@
+         new_batch = self._create_dllm_batch(can_run_list, forward_mode)
+         return new_batch
+ 
++    def _capture_trida_decision_prefill(self, batch, result):
++        states = result.logits_output.hidden_states
++        for i, req in enumerate(batch.reqs):
++            if not req.return_hidden_states or req.hidden_states:
++                continue
++            if not getattr(result.logits_output, "trida_decision_prefill", False):
++                continue
++            if states is None or states.shape[0] != len(batch.reqs):
++                raise RuntimeError("decision readout hidden-state batch mismatch")
++            end_ids = result.logits_output.trida_decision_end_ids
++            lengths = result.logits_output.trida_decision_seq_lens
++            if end_ids[i] != req.origin_input_ids[-1] or lengths[i] != len(req.origin_input_ids):
++                raise RuntimeError("decision readout captured the wrong prompt endpoint")
++            req.hidden_states.append(states[i:i + 1].float().cpu().tolist())
++            if os.environ.get("TRIDA_DECISION_READOUT_AUDIT") == "1":
++                import torch
++                exported = torch.tensor(req.hidden_states[-1], dtype=torch.float32)
++                if not torch.equal(exported, states[i:i + 1].float().cpu()):
++                    raise RuntimeError("decision readout export changed hidden states")
++                print("trida_decision_readout_verified", lengths[i], end_ids[i], flush=True)
++
+     def _process_dllm_critical_inline(
+         self: Scheduler,
+         batch: ScheduleBatch,
+@@ -79,6 +100,8 @@
+ 
+         if result.copy_done is not None:
+             result.copy_done.synchronize()
++
++        self._capture_trida_decision_prefill(batch, result)
+ 
+         self.token_to_kv_pool_allocator.free_group_begin()
+ 
+--- a/eval/sglang/srt/dllm/algorithm/hybrid_diffusion_self_spec.py
++++ b/eval/sglang/srt/dllm/algorithm/hybrid_diffusion_self_spec.py
+@@ -730,6 +730,8 @@
+             forward_batch.dllm_top_p = self.top_p
+             forward_batch.dllm_temperature = self.temperature
+             out = model_runner.forward(forward_batch, pp_proxy_tensors=None)
++            out.logits_output.trida_decision_prefill = True
++            out.logits_output.trida_decision_seq_lens = forward_batch.seq_lens.detach().cpu().tolist()
+             forward_batch.dllm_return_argmax_only = False
+             forward_batch.dllm_return_topk_probs = False
+             full_logits = out.logits_output.full_logits
+--- a/eval/sglang/srt/managers/scheduler_output_processor_mixin.py
++++ b/eval/sglang/srt/managers/scheduler_output_processor_mixin.py
+@@ -428,6 +428,8 @@
+             _t_output_start = time.perf_counter()
+         if result.copy_done is not None:
+             result.copy_done.synchronize()
++
++        self._capture_trida_decision_prefill(batch, result)
+ 
+         self.token_to_kv_pool_allocator.free_group_begin()
+ 

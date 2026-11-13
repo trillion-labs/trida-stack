@@ -171,6 +171,34 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
 
 How it fits a stock engine: a request row is causal, so an option's hidden state is the last hidden state of the row cut off at that option. Each question with K options therefore becomes K+1 prefix prompts in one batched call with `return_hidden_states="last"`, and SGLang's prefix cache shares the work. The head then runs on those vectors. Checked against a transformers implementation of the same head on 200 held-out decision records, the outputs matched to within 0.1% mean probability difference.
 
+### Self-spec decisions (experimental)
+
+One diffusion engine can also serve `/v1/decide` and self-spec chat. Install the
+[diffusion backend and decision readout patch](sglang/README.md#decision-readout), then run:
+
+```bash
+python serve.py --mode decide --decision-backend self-spec --mem-fraction 0.5
+# Uses $DECIDE_PYTHON, then $SGLANG_PYTHON, then the current Python.
+```
+
+`reasoning: true` generates with self-spec before deciding. `reasoning: "auto"`
+first decides directly and reasons if any question's top probability is below
+`threshold` (default `0.7`). `max_reasoning_tokens` defaults to 768, or up to
+8192 for auto within the server context. Unfinished, empty, or oversized
+reasoning falls back to the direct answer and returns `cut`.
+
+This backend is **text-only and serial**. Chat and decisions share one model;
+requests wait while another request generates. Sampling is fixed by the server
+YAML (default temperature 1, top-p 0.95, top-k 20, no presence penalty).
+Conflicting chat options return HTTP 400. Use `serve_decide.py --backend self-spec
+--self-spec-config FILE` to choose a different YAML.
+
+**Parity is not yet accepted:** 38/40 independent synthetic cases passed the
+provisional probability tolerance of 0.02; two reached about 0.0205. A near-tied
+choice changed, and an auto-threshold boundary crossed. The common 0.005
+comparison is unchanged. See [validation and limits](sglang/DECISION_PROBE.md).
+This path uses the noncommercial backend described in `sglang/NOTICE`.
+
 ## Backends
 
 Two ways to run the decode kernels behind `serve.py`'s API — pick one.
