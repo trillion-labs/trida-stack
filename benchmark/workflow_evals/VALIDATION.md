@@ -1,5 +1,36 @@
 # Review validation
 
+## 32K real-model run (2026-11-13)
+
+Ran revision `bfc550b` on one H100 80GB with stock SGLang 0.5.23,
+torch 2.14.1+cu130, BF16 weights, server context 32,768, and the same local
+`rl-head-i11/iter_300` checkpoint used in Guks's test. Its `jev_head.pt` SHA-256 is
+`1e406f44fd66191cc16bbddf02213182a0e8403ee98ae971fedf8f72a294d9db`.
+This identifies the tested local copy; the full released backbone was not
+independently compared with Hugging Face.
+
+Inputs, questions, policies, saved references, and upstream scoring were unchanged.
+The normal wrapper ran the first four invoice cases at a 2,048-token reasoning
+budget. Two additional smoke cases were selected through upstream's existing
+`plan(case_ids=...)` API for their shorter state or fewer questions, not to estimate
+benchmark accuracy.
+
+| Cases | Reasoning budget | Result |
+|---|---|---|
+| `ap_00000`, `ap_00001`, `ap_00003` | 2,048 | HTTP 400: decision rows still exceed 8,192 tokens |
+| `ap_00002` | 2,048 | Context check passed; adapter rejected `cut: "length"` |
+| `ap_00271` | 2,048 | Adapter rejected `cut: "length"` |
+| `ap_00271` | 4,096 | HTTP 400: reasoning-added state makes `line_0_scope` exceed the row limit |
+| `ap_00111` | 2,048 and 4,096 | Adapter rejected `cut: "length"` at both budgets |
+
+**No case produced a valid completed reasoning result.** Upstream counts errors
+as wrong and emitted zero agreement values; these reflect execution failures,
+not evidence of answer quality. The larger context resolves the observed prompt-budget refusal, but does
+not establish a successful reasoning evaluation within the remaining limits.
+An earlier parallel smoke attempt was interrupted by test-server cleanup; its
+transport error is excluded above and the case was rerun in its own allocation.
+All three test allocations and their server processes were stopped afterward.
+
 ## H100 results and context guidance (documented 2026-11-13)
 
 [Guks reported CUDA results on 2026-11-12](https://github.com/trillion-labs/trida-stack/pull/89#issuecomment-6815251583)
