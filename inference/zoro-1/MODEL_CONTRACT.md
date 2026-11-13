@@ -53,6 +53,14 @@ no changes.
 
 ## Decision checkpoints (`serve_decide.py`)
 
+The [vLLM decision server](vllm/README.md#typed-decisions-stock-vllm-0320)
+uses the same checkpoint head, token-row encoder, and answer formats described
+below. It runs on stock vLLM 0.32.0 and does not use the diffusion plugin.
+Its single generation runner handles decisions, reasoning, and chat from one
+copy of the backbone. A worker extension captures prefix hidden states before
+the vocabulary projection. Generation and capture share up to four execution
+slots by default; `--max-concurrency 1` retains serial execution.
+
 The decision server has its own, smaller contract. It serves a checkpoint causally
 on stock SGLang ≥ 0.5.22, so no diffusion architecture or mask token is needed:
 

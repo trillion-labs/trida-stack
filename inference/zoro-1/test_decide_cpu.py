@@ -197,7 +197,7 @@ def test_decide_endpoint_parses_without_paths():
     class Engine:
         ckpt = "/ckpt/m"
 
-        async def adecide(self, request, image=None, temperature=None, reasoning=False):
+        async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768):
             parse(request, image)
             return {"answers": {}}
 
