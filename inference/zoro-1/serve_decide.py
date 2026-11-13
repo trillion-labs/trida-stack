@@ -165,6 +165,9 @@ def create_app(engine):
 
     @app.get("/health")
     def health():
+        if getattr(engine, "_failed", False):
+            return JSONResponse(status_code=503, content={"ok": False, "model": name,
+                                                         "error": "engine cleanup failed; restart required"})
         return {"ok": True, "model": name}
 
     @app.get("/v1/models")
@@ -182,19 +185,19 @@ def create_app(engine):
                 raise RequestError('reasoning must be a boolean or "auto"')
             auto = getattr(engine, "supports_auto_reasoning", False)
             if reasoning == "auto" and not auto:
-                raise RequestError('reasoning="auto" requires the self-spec backend')
+                raise RequestError('this backend does not support reasoning="auto"')
             options = {}
-            if "max_reasoning_tokens" in body:
+            if body.get("max_reasoning_tokens") is not None:
                 budget = _num(body, "max_reasoning_tokens", 768, int)
                 if budget < 1:
                     raise RequestError("max_reasoning_tokens must be positive")
                 options["max_reasoning_tokens"] = budget
             if "threshold" in body:
                 if not auto:
-                    raise RequestError("threshold requires the self-spec backend")
+                    raise RequestError("this backend does not support threshold")
                 options["threshold"] = _num(body, "threshold", 0.7, float)
             work = engine.adecide(body["request"], None, body.get("temperature"), reasoning, **options)
-            if not auto:
+            if not getattr(engine, "cancel_disconnected_decisions", False):
                 return await work
             task = asyncio.create_task(work)
             try:
@@ -222,7 +225,7 @@ def create_app(engine):
                   temperature=_num(body, "temperature", sampling["temperature"], float), top_p=_num(body, "top_p", sampling["top_p"], float),
                   top_k=_num(body, "top_k", sampling["top_k"], int), presence_penalty=_num(body, "presence_penalty", 0.0, float),
                   enable_thinking=thinking)
-        if getattr(engine, "supports_auto_reasoning", False):
+        if hasattr(engine, "validate_chat"):
             engine.validate_chat(messages, **kw)
         cid, created = f"chatcmpl-{uuid.uuid4().hex[:24]}", int(time.time())
         thinks = thinking is not False
@@ -285,6 +288,10 @@ def main():
     ap.add_argument("--backend", choices=["causal", "self-spec"], default="causal",
                     help="self-spec: experimental text-only server; parity is not yet accepted")
     ap.add_argument("--self-spec-config", help="self-spec YAML; fixes sampling for every generation request")
+    ap.add_argument("--decision-max-state", type=int, default=7552)
+    ap.add_argument("--decision-max-row", type=int, default=8192)
+    ap.add_argument("--reasoning-token-limit", type=int, default=4096,
+                    help="shared reasoning budget cap (1..8192; default 4096)")
     a = ap.parse_args()
     if not a.model:
         ap.error("give a decision checkpoint (positional) or set TRIDA_DECIDE_MODEL")
@@ -295,12 +302,16 @@ def main():
     if a.backend == "self-spec":
         from self_spec_decide_engine import SelfSpecDecideEngine
         engine = SelfSpecDecideEngine(a.model, mem_fraction_static=a.mem_fraction,
-                                      context_length=a.context_length, config=a.self_spec_config)
+                                      context_length=a.context_length, config=a.self_spec_config,
+                                      decision_max_state=a.decision_max_state, decision_max_row=a.decision_max_row,
+                                      reasoning_token_limit=a.reasoning_token_limit)
     else:
         if a.self_spec_config:
             ap.error("--self-spec-config requires --backend self-spec")
         from decide_engine import DecideEngine
-        engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length)
+        engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length,
+                              decision_max_state=a.decision_max_state, decision_max_row=a.decision_max_row,
+                              reasoning_token_limit=a.reasoning_token_limit)
     # The HTTP server runs on the engine's own event loop, so concurrent requests batch in the engine.
     server = uvicorn.Server(uvicorn.Config(create_app(engine), host=a.host, port=a.port, loop="none"))
     try:

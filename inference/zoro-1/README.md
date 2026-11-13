@@ -183,15 +183,28 @@ python serve.py --mode decide --decision-backend self-spec --mem-fraction 0.5
 
 `reasoning: true` generates with self-spec before deciding. `reasoning: "auto"`
 first decides directly and reasons if any question's top probability is below
-`threshold` (default `0.7`). `max_reasoning_tokens` defaults to 768, or up to
-8192 for auto within the server context. Unfinished, empty, or oversized
-reasoning falls back to the direct answer and returns `cut`.
+`threshold` (default `0.7`). The shared reasoning cap defaults to 4096 tokens;
+boolean reasoning defaults to 768 and auto uses the cap. CUDA and MLX servers
+accept `--reasoning-token-limit` up to 8192. Completed reasoning is fitted to
+the state budget, retaining its conclusion and setting `reasoning_trimmed`.
+Fallback returns `answers_source: "direct"` and `cut: "length" | "empty" |
+"state_limit"`; successful reasoning returns `answers_source: "reasoned"`.
+`usage` counts scored decision-row tokens and generated reasoning tokens.
 
 This backend is **text-only and serial**. Chat and decisions share one model;
-requests wait while another request generates. Sampling is fixed by the server
+**Chat and decisions do not overlap**: a streaming chat holds admission until
+it finishes or cancellation is acknowledged. Each K-option question requires
+K+1 serial eager prefills. Sampling is fixed by the server
 YAML (default temperature 1, top-p 0.95, top-k 20, no presence penalty).
 Conflicting chat options return HTTP 400. Use `serve_decide.py --backend self-spec
 --self-spec-config FILE` to choose a different YAML.
+
+H100 smoke measurement (5.5K-token state, three questions): self-spec direct
+judgment took 1.73 s on the first cold-cache call and 1.06–1.56 s warm. A
+completed reasoned judgment took 8.67 s with 344 generated tokens. Stock AR warm
+direct calls took 0.12–0.13 s. These are single-run observations, not a general
+speedup claim; [AR comparison and conditions](sglang/DECISION_PROBE.md#latency-and-ar-comparison).
+If abort cleanup fails, `/health` returns 503 until the server is restarted.
 
 **Parity is not yet accepted:** 38/40 independent synthetic cases passed the
 provisional probability tolerance of 0.02; two reached about 0.0205. A near-tied

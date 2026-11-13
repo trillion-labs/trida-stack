@@ -5,25 +5,21 @@ Admission is serial, including streamed generation and cancellation cleanup.
 """
 import asyncio
 from contextlib import aclosing
-import math
 from pathlib import Path
-import time
 import uuid
 
 import torch
 
-from decide_engine import DecideEngine, END_THINK, _strip_end, prefix_prompts
-from decide_request import MAX_STATE, RequestError, parse, prompt, with_reasoning
-
-
-def top_probability(answer):
-    return max(answer["noul"], 1 - answer["noul"]) if answer["type"] == "noul" else max(answer["probabilities"].values())
+from decide_engine import DecideEngine, _strip_end, prefix_prompts
+from decide_request import MAX_STATE, MAX_BRANCH, DEFAULT_REASONING_TOKEN_LIMIT, RequestError
 
 
 class SelfSpecDecideEngine(DecideEngine):
-    supports_auto_reasoning = True
+    cancel_disconnected_decisions = True
 
-    def __init__(self, ckpt, mem_fraction_static=0.5, context_length=16384, config=None):
+    def __init__(self, ckpt, mem_fraction_static=0.5, context_length=16384, config=None,
+                 decision_max_state=MAX_STATE, decision_max_row=MAX_BRANCH,
+                 reasoning_token_limit=DEFAULT_REASONING_TOKEN_LIMIT):
         self.context_length = context_length
         self.config = Path(config) if config else Path(__file__).parent / "configs/zoro1_self_spec_b15_g8.yaml"
         import yaml
@@ -35,12 +31,9 @@ class SelfSpecDecideEngine(DecideEngine):
         self._admission = asyncio.Lock()
         self._failed = False
         super().__init__(ckpt, mem_fraction_static, context_length,
-                         reasoning_temperature=self.sampling["temperature"])
-
-    def decide(self, request, image=None, temperature=None, reasoning=False,
-               max_reasoning_tokens=None, threshold=0.7):
-        return self._run(self.adecide(request, image, temperature, reasoning,
-                                      max_reasoning_tokens, threshold))
+                         reasoning_temperature=self.sampling["temperature"],
+                         decision_max_state=decision_max_state, decision_max_row=decision_max_row,
+                         reasoning_token_limit=reasoning_token_limit)
 
     def _build_engine(self, ckpt, mem_fraction_static, context_length, engine_kw):
         import sglang as sgl
@@ -160,67 +153,14 @@ class SelfSpecDecideEngine(DecideEngine):
             return [self.head(states[start + n - 1:start + n], states[start:start + n - 1],
                               torch.zeros(n - 1, dtype=torch.long)) for start, n in spans]
 
-    async def adecide(self, request, image=None, temperature=None, reasoning=False,
-                      max_reasoning_tokens=None, threshold=0.7):
-        if not isinstance(reasoning, bool) and reasoning != "auto":
-            raise RequestError('reasoning must be a boolean or "auto"')
-        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
-            raise RequestError("threshold must be between 0 and 1")
-        if temperature is not None and (isinstance(temperature, bool) or not isinstance(temperature, (int, float))
-                                        or not math.isfinite(temperature) or temperature <= 0):
-            raise RequestError("temperature must be finite and positive")
-        budget = max_reasoning_tokens if max_reasoning_tokens is not None else (8192 if reasoning == "auto" else 768)
-        if not isinstance(budget, int) or isinstance(budget, bool) or budget < 1:
-            raise RequestError("max_reasoning_tokens must be a positive integer")
-        req = parse(request, image)
+    def _encode_decision(self, req):
         if req.image is not None:
             raise RequestError("self-spec decision serving currently supports text only")
-        start = time.perf_counter()
-        direct = await super().adecide(request, temperature=temperature)
-        if reasoning is False:
-            return direct
-        qid, top = min(((qid, top_probability(a)) for qid, a in direct["answers"].items()), key=lambda x: x[1])
-        result = {**direct, "direct": direct, "escalated": reasoning is True or top < threshold,
-                  "threshold": threshold}
-        if reasoning == "auto":
-            result["lowest"] = {"question": qid, "top_probability": top}
-        if result["escalated"]:
-            result["reason"] = (f"reasoned because top probability was {top:.4g} (question {qid}), below {threshold}"
-                                if reasoning == "auto" else "reasoning requested")
-            rendered = self.tok.apply_chat_template([{"role": "user", "content": prompt(request)}],
-                                                    tokenize=False, add_generation_prompt=True)
-            ids = self.tok(rendered).input_ids
-            available = self.context_length - len(ids)
-            if available < 1 or (max_reasoning_tokens is not None and budget > available):
-                result["cut"] = "reasoning prompt and budget exceed the server context; using the direct answer"
-                result["timing_ms"] = round((time.perf_counter() - start) * 1000, 1)
-                return result
-            if max_reasoning_tokens is None:
-                budget = min(budget, available)
-            self._check_generation(ids, {"max_new_tokens": budget})
-            thought_start = time.perf_counter()
-            out = await self._generate(ids, {**self.sampling, "max_new_tokens": budget,
-                                             "skip_special_tokens": False, "stop_token_ids": self._stops})
-            raw = out["text"]
-            finish = out["meta_info"].get("finish_reason") or {}
-            complete = END_THINK in raw or (isinstance(finish, dict) and finish.get("matched") == self._stops[0])
-            text = raw.split(END_THINK, 1)[0].replace("<think>", "").strip()
-            result.update(reasoning=text, reasoning_ms=round((time.perf_counter() - thought_start) * 1000, 1))
-            if not complete or not text:
-                result["cut"] = "reasoning did not finish; using the direct answer"
-            else:
-                augmented = with_reasoning(request, text)
-                # Do not silently truncate appended reasoning out of the state.
-                if parse(augmented).state_token_count(self.tok) > MAX_STATE:
-                    result["cut"] = "reasoning exceeds the decision state limit; using the direct answer"
-                else:
-                    try:
-                        result["reasoned"] = await super().adecide(augmented, temperature=temperature)
-                        result["answers"] = result["reasoned"]["answers"]
-                    except RequestError:
-                        result["cut"] = "reasoning exceeds the decision row limit; using the direct answer"
-        result["timing_ms"] = round((time.perf_counter() - start) * 1000, 1)
-        return result
+        return super()._encode_decision(req)
+
+    async def _reasoning_chunks(self, ids, params, **kw):
+        out = await self._generate(ids, params, **kw)
+        yield out["text"], out["meta_info"]
 
     def _chat_request(self, messages, tools, max_new_tokens, temperature, top_p, top_k,
                       presence_penalty, enable_thinking):

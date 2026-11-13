@@ -45,6 +45,9 @@ def test_decision_cli_defaults_match_the_tested_memory_budget():
         result = subprocess.run([sys.executable, str(HERE / "serve.py"), "dummy/model", "--mode", "decide",
                                  "--decision-backend", backend, "--dry-run"], capture_output=True, text=True, check=True)
         assert f"--mem-fraction {fraction}" in result.stdout
+    help_text = subprocess.run([sys.executable, str(HERE / "serve.py"), "--help"],
+                               capture_output=True, text=True, check=True).stdout
+    assert "parity not accepted (38/40 at 0.02)" in " ".join(help_text.split())
 
 
 def test_self_spec_is_the_card_setting():

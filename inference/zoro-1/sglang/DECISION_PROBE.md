@@ -129,8 +129,10 @@ version before loading weights. No backend source or weights are vendored.
   token per prefix to preserve the tested KV cleanup path.
 - `reasoning: true` and `"auto"` generate with the self-spec engine. Auto first
   scores directly and escalates when the lowest top probability is below the
-  requested threshold. Unfinished/empty reasoning or a state/row overflow keeps
-  the direct answer and returns `cut`.
+  requested threshold. Both CUDA engines share the reasoning orchestration;
+  CUDA and MLX share conclusion fitting and cut/source normalization. Completed
+  reasoning is fitted to the state budget. Incomplete/empty/unfittable reasoning
+  keeps the direct answer with the canonical `cut` and `answers_source` fields.
 - All native calls share an admission lock, including streaming and abort
   acknowledgement. Native aborts are retried across tokenization/admission
   races. Failure to acknowledge within 30 seconds prevents further inference
@@ -209,7 +211,8 @@ harness, immutable case file, full results, and job logs are retained there.
 These are bounded checks; long-duration stability, images, concurrent native
 readout, distributed execution, and zero-token completion remain unvalidated.
 The implementation remains **experimental and does not close #81's parity gate**.
-Local verification: 196 CPU tests passed, two skipped; changed Python files
+Local verification after the PR review: 205 CPU tests passed, two skipped;
+53 MLX decision/server tests passed, one skipped. Changed Python files
 passed Ruff, the supply-chain check passed, and the patch applied cleanly to the
 pinned backend after the two-stream patch.
 
@@ -240,6 +243,88 @@ before and after this run. Strict tolerance remains 0.005 and the opt-in
 probability tolerance remains 0.02. The 40-case parity measurement was not
 rerun for these reasoning-only fixes; its two failures remain unresolved.
 New run artifacts are in `review-fixes/` under the same H100 task directory.
+
+## PR review: shared contract and readiness
+
+The request helpers adopt #89's `fit_reasoning` and limit validation directly;
+benchmark code from that PR is not imported. `SelfSpecDecideEngine` no longer
+implements its own `adecide`: it inherits the causal engine's shared policy and
+only replaces native generation/readout operations. MLX uses the same torch-free
+`finish_reasoning` helper. `cut` is `length`, `empty`, or `state_limit`,
+`answers_source` is `direct` or `reasoned`, and `reasoning_trimmed` records
+conclusion fitting. Optional `cut_detail` identifies context/row limits. Native
+row-limit errors after reasoning still fall back to the direct answer.
+
+All three implementations default to a 4096-token reasoning cap (768 for boolean
+reasoning, the configured cap for auto). CUDA and MLX expose
+`--reasoning-token-limit` up to 8192. `usage.input_tokens` sums the decision rows
+actually scored, including both passes, and `usage.output_tokens` uses native
+reasoning counts even on fallback. These are logical API counters, not physical
+K+1-prefill totals. This supplies #94's usage fields without adding its separate
+`/v1/systemone` endpoint here. #89 and #94 remain independently open PRs; their
+eventual handler merges still require the usual rebase/integration checks.
+
+Abort-acknowledgement failure still prevents further inference, and `/health`
+now returns 503 with `ok: false`. CPU regression tests force that timeout and
+check readiness, rather than only testing the initial healthy state. The main
+launcher's `--decision-backend` help explicitly reports experimental status and
+the incomplete 38/40 parity result.
+
+### Latency and AR comparison
+
+H100 job **5162** used the same checkpoint as above, BF16, one eager worker,
+memory fraction 0.5, context 16384, and temperature 1 / top-p 0.95 / top-k 20.
+A separate synthetic latency request was fixed before measurement: a 5500-word
+`reference` archive, an invoice state, and the same three typed questions as the
+earlier smoke request. Encoded rows are 5537, 5550, and 5555 tokens. This is a
+new performance fixture; the original smoke and 40-case inputs were untouched.
+
+**Chat and decisions do not overlap.** A streaming chat holds admission for its
+entire generation/abort acknowledgement, and each question requires K+1 serial
+prefills. The self-spec backend's first cold-cache direct call took **1.731 s**;
+the next two warm calls took **1.559 and 1.064 s**. A completed 512-budget
+reasoned call took **8.673 s**, generating 344 tokens (5.677 s reasoning wall
+time). It includes direct and reasoned scoring passes.
+
+Stock AR control job **5165** used the same checkpoint, request and sampling,
+but the actual stock last-state API with batched prefixes (maximum 16 running
+requests). Stock uses SGLang 0.5.23 / PyTorch 2.14.1 and its default attention
+backend; self-spec uses the pinned diffusion fork / PyTorch 2.9.1 and FlashInfer.
+Both have CUDA graphs and overlap scheduling disabled. Stock's first cold-cache
+direct call took 10.022 s, including the first long-shape compilation; warm calls
+took **0.133 and 0.117 s**. Cold numbers are not steady-state latency claims.
+
+| Backend | Budget | Actual reasoning tokens | Reasoning wall s | Wall tok/s | Total HTTP s | Answer source / cut |
+|---|---:|---:|---:|---:|---:|---|
+| Stock AR | 128 | 128 | 5.287 | 24.2 | 5.654 | direct / length |
+| Self-spec | 128 | 128 | 2.359 | 54.3 | 3.470 | direct / length |
+| Stock AR | 512 | 38 | 1.195 | 31.8 | 1.991 | reasoned |
+| Self-spec | 512 | 344 | 5.677 | 60.6 | 8.673 | reasoned |
+| Stock AR | 1024 | 157 | 4.779 | 32.9 | 5.336 | reasoned |
+| Self-spec | 1024 | 196 | 2.897 | 67.7 | 5.783 | reasoned |
+
+Reasoning wall time includes rendering, tokenization, prefill, and generation;
+this is not decode-only throughput. These are single observations per budget,
+and sampling produced different lengths. **There is no general end-to-end
+speedup claim:** stock warm direct decisions were much faster, and total time
+depends on the generated length and serial readout costs. No interpretation of
+these timings changes the failed parity result or model accuracy claims.
+
+An earlier same-fork AR control in job 5162 exported full prefill states and
+selected the last state on CPU. Its roughly 13 s warm direct latency is dominated
+by full-state export and is not used as the serving comparison. The stock
+FlashInfer attempt (5164) failed on incompatible CUDA compiler/header versions;
+5165 used the previously working stock default path without changing the environment.
+
+HTTP regression job **5166** passed the same smoke inputs plus canonical
+cut/source/usage and budget-cap checks, completed reasoning, mixed clients,
+and cancellation recovery (SSE 1.019 s, decision 0.995 s). It ended with zero
+native requests and a successful cache flush. Readiness returned 503 when
+poisoned in the latency checks; no scheduler/idle-leak errors appeared in the
+successful runs. Artifacts, harnesses and the fixed latency request are in
+`pr96-review/` under the H100 task directory. Input SHA256 checks passed for all
+three fixtures before/after measurement. No benchmark inputs or tolerances were
+changed, and the 40-case parity suite was not rerun for this contract change.
 
 ## Reproduce
 
@@ -283,8 +368,8 @@ The stored inputs, reference/candidate JSON, comparison JSON, and Slurm logs
 remain outside the repository. Earlier unsuccessful diagnostics are retained
 there; they are not successful parity tests.
 
-Next decision: agree on a numerically controlled validation setup before adding
-reasoning/auto; the current 0.005 contract remains unmet. Image support,
+Experimental reasoning/auto serving is implemented; strict parity remains unmet.
+Image support,
 zero-token cleanup, and mixed requests remain separate validation gates.
 The patched backend retains the existing
 PolyForm Noncommercial restriction; see `NOTICE`.

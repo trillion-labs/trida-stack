@@ -203,7 +203,8 @@ def main():
                     help="decode mode (default self-spec, b15_g8); decide serves typed decisions and chat "
                          "(serve_decide.py)")
     ap.add_argument("--decision-backend", choices=["causal", "self-spec"], default="causal",
-                    help="--mode decide: causal (stock SGLang) or self-spec (patched diffusion fork)")
+                    help="--mode decide: causal (stock SGLang) or experimental self-spec; "
+                         "self-spec parity not accepted (38/40 at 0.02), text-only and serial")
     ap.add_argument("--port", type=int, default=30000)
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--tp", type=int, default=1, help="tensor-parallel size (1 = one full model per GPU)")

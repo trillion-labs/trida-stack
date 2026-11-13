@@ -20,7 +20,9 @@ from pathlib import Path
 import mlx.core as mx
 import numpy as np
 
-from .decide_request import MAX_STATE, RequestError, SPECIAL, VISION, parse, prompt, render, to_answer, with_reasoning
+from .decide_request import (DEFAULT_REASONING_TOKEN_LIMIT, MAX_BRANCH, RequestError, SPECIAL, VISION,
+                             finish_reasoning, fit_reasoning, parse, prompt, reasoning_budget,
+                             rows_tokens, to_answer, top_probability)
 from .decode import DecodeStats, SamplingParams
 from .engine import IncrementalDetokenizer
 from .vision import image_key, preprocess
@@ -122,7 +124,9 @@ def load_head(directory, hidden_size=None):
 
 class Decider:
     def __init__(self, engine, context_length=8192, text_temperature=None, image_temperature=None,
-                 cache_mb=1024):
+                 cache_mb=1024, reasoning_token_limit=DEFAULT_REASONING_TOKEN_LIMIT):
+        reasoning_budget(None, True, reasoning_token_limit)
+        self.reasoning_token_limit = reasoning_token_limit
         self.engine, self.context_length = engine, context_length
         self.head = load_head(engine.path, engine.rt.args.hidden_size)
         self.temperatures = {"text": 1.52, "image": 1.0}
@@ -238,7 +242,7 @@ class Decider:
             cache.restore(snap)
             self._remember_state(cache)
 
-    def think(self, request, image, max_tokens, on_piece=None, mode="self-spec"):
+    def think(self, request, image, max_tokens, on_piece=None, mode="self-spec", fit_context=True):
         eng = self.engine
         content = prompt(request)
         if image:
@@ -247,8 +251,9 @@ class Decider:
             eng.render([{"role": "user", "content": content}], enable_thinking=True),
             [image] if image else None,
         )
-        if len(ids) >= self.context_length:
-            raise RequestError("reasoning prompt exceeds context length")
+        if len(ids) >= self.context_length or (not fit_context and len(ids) + max_tokens > self.context_length):
+            return {"text": "", "ended": "context_limit", "stats": {
+                "finish_reason": "context_limit", "prompt_tokens": len(ids), "new_tokens": 0}}
         detok, text, stats = IncrementalDetokenizer(eng.tokenizer), "", DecodeStats()
         gen = eng.generate_ids(
             ids, max_tokens=min(max_tokens, self.context_length - len(ids)),
@@ -272,28 +277,7 @@ class Decider:
                 "stats": stats.as_dict()}
 
     def fit_reasoning(self, request, text, image=None):
-        """Retain the conclusion when reasoning would exceed the shared state budget."""
-        tok = self.engine.tokenizer
-        image_tokens = image[1] + 2 if image else 0
-        room = MAX_STATE - 1 - image_tokens
-
-        def fits(candidate):
-            state = render(with_reasoning(request, candidate)["state"])
-            # Match the canonical encoder's escaping and tokenization.
-            from .decide_request import _user
-            return len(_user(tok, state)) <= room
-
-        if fits(text):
-            return text
-        ids = tok.encode(text, add_special_tokens=False)
-        lo, hi = 0, len(ids) + 1
-        while hi - lo > 1:
-            mid = (lo + hi) // 2
-            if fits("…" + tok.decode(ids[-mid:])):
-                lo = mid
-            else:
-                hi = mid
-        return "…" + tok.decode(ids[-lo:]) if lo else ""
+        return fit_reasoning(request, text, self.engine.tokenizer, image[1] if image else 0)
 
     def decide(
         self,
@@ -313,19 +297,13 @@ class Decider:
             )
         if not isinstance(reasoning, bool) and reasoning != "auto":
             raise RequestError('reasoning must be a boolean or "auto"')
-        if max_reasoning_tokens is None:
-            max_reasoning_tokens = 8192 if reasoning == "auto" else 768
+        fit_context = max_reasoning_tokens is None
+        max_reasoning_tokens = reasoning_budget(max_reasoning_tokens, reasoning, self.reasoning_token_limit)
         if (isinstance(threshold, bool) or not isinstance(threshold, (int, float))
                 or not math.isfinite(threshold) or not 0 <= threshold <= 1):
             raise RequestError("threshold must be between 0 and 1")
         if mode not in (None, "causal", "self-spec"):
             raise RequestError("trida_mode must be causal or self-spec")
-        if (
-            not isinstance(max_reasoning_tokens, int)
-            or isinstance(max_reasoning_tokens, bool)
-            or max_reasoning_tokens <= 0
-        ):
-            raise RequestError("max_reasoning_tokens must be a positive integer")
         if temperature is not None and (
             isinstance(temperature, bool)
             or not isinstance(temperature, (int, float))
@@ -347,17 +325,18 @@ class Decider:
                     "answers": {q.qid: to_answer(q, mx.softmax(z / t).tolist())
                                 for q, z in zip(parsed.questions, self.logits(encoded))},
                     "timing_ms": round((time.perf_counter() - start) * 1000, 1),
+                    "usage": {"input_tokens": rows_tokens(encoded), "output_tokens": 0},
                 }
 
-            if reasoning is False:
-                result = score(req, rows)
-                emit("direct", result)
-                emit("result", result)
-                return result
-
             direct = score(req, rows)
+            direct["answers_source"] = "direct"
+            if reasoning is False:
+                emit("direct", direct)
+                emit("result", direct)
+                return direct
+
             result = {**direct, "direct": direct, "escalated": reasoning is True,
-                      "threshold": threshold}
+                      "threshold": threshold, "usage": dict(direct["usage"])}
             if reasoning == "auto":
                 qid, top = min(((qid, top_probability(a)) for qid, a in direct["answers"].items()),
                                key=lambda item: item[1])
@@ -375,27 +354,24 @@ class Decider:
             thinking_start = time.perf_counter()
             thought = self.think(request, image, max_reasoning_tokens,
                                  on_piece=lambda piece: emit("piece", piece),
-                                 mode=mode or "self-spec")
+                                 mode=mode or "self-spec", fit_context=fit_context)
             result.update(reasoning=thought["text"], reasoning_stats=thought["stats"],
                           reasoning_ms=round((time.perf_counter() - thinking_start) * 1000, 1))
-            if thought["ended"] != "complete":
-                result["cut"] = "reasoning did not finish; using the direct answer"
-            else:
-                text = self.fit_reasoning(request, thought["text"], image)
-                if text != thought["text"]:
-                    result["reasoning_trimmed"] = True
-                reasoned = parse(with_reasoning(request, text), image=req.image)
+            ended = "stop" if thought["ended"] == "complete" else (
+                "context_limit" if thought["ended"] == "context_limit" else "length")
+            augmented, fields = finish_reasoning(request, thought["text"], self.engine.tokenizer,
+                                                 ended, image[1] if image else 0,
+                                                 max_branch=min(MAX_BRANCH, self.context_length))
+            result.update(fields)
+            result["usage"]["output_tokens"] = thought["stats"].get("new_tokens", 0)
+            if augmented is not None:
+                reasoned = parse(augmented, image=req.image)
                 result["reasoned"] = score(reasoned, self.encode(reasoned, image))
                 result["answers"] = result["reasoned"]["answers"]
+                result["usage"]["input_tokens"] += result["reasoned"]["usage"]["input_tokens"]
             result["timing_ms"] = round((time.perf_counter() - start) * 1000, 1)
             emit("result", result)
             return result
         finally:
             if image and image[0] not in existing_images:
                 self.engine.rt.images.pop(image[0], None)
-
-
-def top_probability(answer):
-    if answer["type"] == "noul":
-        return max(answer["noul"], 1 - answer["noul"])
-    return max(answer["probabilities"].values())

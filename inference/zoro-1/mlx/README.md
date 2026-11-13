@@ -130,9 +130,13 @@ curl -s localhost:8000/v1/decide -H 'Content-Type: application/json' -d '{
 - `reasoning` defaults to `false`; `true` generates self-spec reasoning before deciding, with
   `max_reasoning_tokens` defaulting to 768. `"auto"` first decides directly, then reasons if
   any question's top probability is below `threshold` (default 0.7). Auto reasoning uses
-  self-spec and up to 8192 tokens by default. `trida_mode` can select `causal` or `self-spec`.
+  self-spec and the shared 4096-token cap by default. `--reasoning-token-limit`
+  can raise that cap to 8192. `trida_mode` can select `causal` or `self-spec`.
   Completed reasoning is fitted to the state budget, keeping its conclusion. Incomplete
-  or looping reasoning keeps the direct answer and reports `cut`.
+  or looping reasoning keeps the direct answer and reports `cut` as `length`,
+  `empty`, or `state_limit`. `answers_source` identifies `direct` or `reasoned`;
+  `reasoning_trimmed` reports conclusion-preserving fitting. `usage` counts the
+  decision rows actually scored and generated reasoning tokens.
 - `stream: true` sends SSE data objects with `type: direct`, `type: reasoning` (text pieces),
   and `type: result`, followed by `[DONE]`. The `direct` event includes `reason` when
   reasoning will run, for progress displays. Auto results include `direct`, `escalated`, and,
