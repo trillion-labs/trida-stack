@@ -56,10 +56,23 @@ jobs:
         run: |
           pip-audit -r requirements.txt -f json -o audit-core.json || true
           pip-audit -r inference/zoro-1/requirements.txt -f json -o audit-inference.json || true
+      # The GravityOCR server environment is committed as a resolved lock for Python 3.12.
+      # --no-deps --disable-pip audits those pins as written instead of resolving them, so
+      # the runner's 3.10 does not matter. The gate reads a missing report as clean, and a
+      # scan that cannot run writes none, so a missing or empty report fails here.
+      - name: Scan the GravityOCR server lock
+        run: |
+          pip-audit -r inference/gravityocr/sglang/requirements-lock.txt --no-deps --disable-pip \
+            -f json -o audit-gravityocr-server.json || true
+          test -s audit-gravityocr-server.json || {
+            echo "pip-audit wrote no report for inference/gravityocr/sglang/requirements-lock.txt"
+            exit 1
+          }
       - name: Enforce the exception policy
         run: |
           python tools/check_advisories.py --pip-audit audit-core.json
           python tools/check_advisories.py --pip-audit audit-inference.json
+          python tools/check_advisories.py --pip-audit audit-gravityocr-server.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: always()
         with:
@@ -69,9 +82,10 @@ jobs:
 
   fetch-recipe:
     name: Third-party fetch recipe
-    # Needs network and clones an upstream repository, so it runs weekly rather than
-    # on every push. The recipes ARE the install path for both two-stream code paths:
-    # if upstream moves, nobody can build.
+    # Needs network and fetches upstream repositories, so it runs weekly rather than
+    # on every push. The recipes ARE the install path for both two-stream code paths and
+    # for the GravityOCR server (SGLang at a pinned commit + gravityocr_selfspec.patch):
+    # if upstream moves, or the patch stops applying, nobody can build.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
