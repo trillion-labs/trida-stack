@@ -175,8 +175,9 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
   WorkflowEvals rejects every `cut` and any `reasoning_trimmed` response in reasoning mode.
   CUDA's decision encoding defaults to `--decision-max-state 7552` and
   `--decision-max-row 8192`. Experimental longer inputs can opt into larger limits,
-  with `1 <= state <= row <= --context-length`; reasoning fitting uses the same
-  state limit. Existing defaults and strict completion checks are unchanged.
+  with `1 <= state <= row - 640` and `row <= --context-length`. The 640-token
+  gap reserves question space; longer questions may need a wider gap. Reasoning
+  fitting reserves the longest question's actual encoded length, including delimiters. Existing defaults and strict completion checks are unchanged.
 - **Images:** add an `image` (path, base64 or data URL) to the request.
 - **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
   - It takes `tools`; tool calls come back as `tool_calls`.

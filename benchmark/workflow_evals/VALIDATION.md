@@ -165,3 +165,22 @@ ap_00001 RequestError: question 'line_0_scope' is too long: 1482 tokens of instr
 No inputs were shortened. The invoice dataset is Apache-2.0; license evidence and
 the pending status of the other three datasets are in the
 [intake record](../../docs/oss/intake/0011-workflowevals.md).
+
+## Row-budget review follow-up (2026-11-13)
+
+Reasoning fitting now reserves the longest question's encoded suffix, including
+options and delimiters, before selecting a conclusion-preserving reasoning tail.
+Regression tests cover a 3,000-character state and 1,200-character question, with
+and without image tokens, and the HTTP response: successful trimmed reasoning
+instead of HTTP 400. Strict benchmark checks still reject that trimmed response.
+Server configuration requires at least the default 640-token gap between state
+and row caps; the longer-input example now uses 15,744 / 16,384. Questions larger
+than the gap may need a lower state cap. Existing H100 observations above retain
+the original settings; they have not been rerun or reinterpreted as passing scores.
+
+MLX now enforces the configured reasoning cap (default 4,096, opt-in up to 8,192),
+including auto mode. Local verification: 191 CPU tests passed (2 skipped), 20
+adapter/setup tests and 55 MLX decision/server tests passed (1 skipped), plus Ruff.
+Benchmark inputs, reference answers, and strict completion checks are unchanged.
+License-exception approval and the disposition of Luke's seven #83 commits remain
+maintainer decisions; this change does not grant approval or supersede that work.

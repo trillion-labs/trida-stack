@@ -292,3 +292,7 @@ compares answer keys, types, and numeric fields, and exits nonzero on mismatches
   have none); images inside system or assistant messages are dropped by the chat template contract.
 - The GGUF quants (`mradermacher/Trida2.0-4B-*GGUF`) run in llama.cpp as plain AR only; self-spec
   there would need the canvas mask and the block-end GDN readout in llama.cpp's qwen35 graph.
+
+Decision reasoning budgets are capped by `--reasoning-token-limit` (default 4096,
+configurable up to 8192). Auto reasoning uses that cap; explicit reasoning defaults
+to 768 tokens. Requests above the cap return HTTP 400.

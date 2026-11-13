@@ -493,7 +493,7 @@ def test_extended_limits_keep_full_state_and_reasoning_with_strict_metadata():
 
     text = "because " * 1000
     engine = _reasoning_engine(context_length=32768, text=text)
-    engine.decision_max_state = engine.decision_max_row = 16384
+    engine.decision_max_state, engine.decision_max_row = 15744, 16384
     engine.reasoning_token_limit = 8192
     request = {**REQ, "state": "x" * 4438}
     client = TestClient(create_app(engine))
@@ -515,7 +515,7 @@ def test_extended_limits_keep_full_state_and_reasoning_with_strict_metadata():
 @pytest.mark.parametrize("state,row,context,budget", [
     (16384, 8192, 32768, 8192), (16384, 16384, 8192, 8192),
     (0, 8192, 32768, 8192), (7552, 8192, 32768, 8193),
-    (True, 8192, 32768, 8192),
+    (True, 8192, 32768, 8192), (16384, 16384, 32768, 8192),
 ])
 def test_invalid_server_limits_are_rejected_before_loading_model(state, row, context, budget):
     from decide_request import validate_decision_limits
@@ -528,3 +528,31 @@ def test_extended_encoder_still_rejects_rows_over_its_limit():
         "q": {"type": "noul", "instructions": "q" * 5000}}}
     with pytest.raises(RequestError, match="16384 per question"):
         parse(request).encode(CharTok(), max_state=16384, max_branch=16384)
+
+
+@pytest.mark.parametrize("image_tokens", [0, 32])
+def test_reasoning_fit_reserves_longest_question_row(image_tokens):
+    tok = CharTok()
+    request = {"state": "x" * 3000, "questions": {
+        "short": {"type": "noul"},
+        "long": {"type": "noul", "instructions": "q" * 1200}}}
+    parse(request).encode_rows(tok, image_tokens)
+    text = "because " * 2000 + "therefore yes"
+    fitted = fit_reasoning(request, text, tok, image_tokens)
+    assert fitted and fitted != text and fitted.endswith("therefore yes")
+    rows = parse(with_reasoning(request, fitted)).encode_rows(tok, image_tokens)
+    assert all(len(row["ids"]) <= 8192 for row in rows)
+
+
+def test_long_question_reasoning_returns_trimmed_answer_over_http():
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+    engine = _reasoning_engine(text="because " * 2000 + "therefore yes")
+    request = {"state": "x" * 3000, "questions": {
+        "q": {"type": "noul", "instructions": "q" * 1200}}}
+    response = TestClient(create_app(engine)).post("/v1/decide", json={
+        "request": request, "reasoning": True})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reasoning_trimmed"] and body["answers_source"] == "reasoned"
+    assert all(len(row["ids"]) <= 8192 for row in engine.scored.rows)

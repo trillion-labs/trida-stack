@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 SPECIAL = ["<|fim_prefix|>", "<|fim_middle|>", "<|box_start|>", "<|box_end|>", "<|fim_suffix|>"]  # state q opt /opt decide
 VISION = ["<|vision_start|>", "<|image_pad|>", "<|vision_end|>"]
 MAX_REASONING_TOKENS = 8192
+DEFAULT_REASONING_TOKEN_LIMIT = 4096
 MAX_STATE, MAX_BRANCH = 7552, 8192   # state tokens, and state + one question, as in training
 MAX_IMAGE_PIXELS = 448 * 448
 MAX_OPTIONS = 255
@@ -48,8 +49,8 @@ def validate_decision_limits(max_state, max_branch, context_length, reasoning_to
     """Server-side bounds; never let an encoder row exceed the engine context."""
     if any(type(v) is not int for v in (max_state, max_branch, context_length, reasoning_token_limit)):
         raise RequestError("decision and reasoning limits must be integers")
-    if not 1 <= max_state <= max_branch <= context_length:
-        raise RequestError("limits must satisfy 1 <= decision_max_state <= decision_max_row <= context_length")
+    if not 1 <= max_state <= max_branch - 640 or max_branch > context_length:
+        raise RequestError("limits must satisfy 1 <= decision_max_state <= decision_max_row - 640 and decision_max_row <= context_length")
     if not 1 <= reasoning_token_limit <= MAX_REASONING_TOKENS:
         raise RequestError(f"reasoning_token_limit must be between 1 and {MAX_REASONING_TOKENS}")
 
@@ -138,13 +139,11 @@ class Request:
         if image_tokens:
             vs, pad, ve = (tokenizer.convert_tokens_to_ids(t) for t in VISION)
             image = [vs] + [pad] * image_tokens + [ve]
-        s_id, q_id, o_id, c_id, d_id = (tokenizer.convert_tokens_to_ids(t) for t in SPECIAL)
+        s_id = tokenizer.convert_tokens_to_ids(SPECIAL[0])
         state = [s_id] + image + _user(tokenizer, self.state)[: max(0, max_state - 1 - len(image))]
         rows = []
         for q in self.questions:
-            instr = [q_id] + _user(tokenizer, q.instr)
-            spans = [[o_id] + _user(tokenizer, o) + [c_id] for o in q.options]
-            branch = instr + [t for sp in spans for t in sp] + [d_id]
+            instr, spans, branch = question_parts(q, tokenizer)
             if len(branch) > max_branch - len(state):
                 raise RequestError(f"question {q.qid!r} is too long: {len(branch)} tokens of instructions and options "
                                    f"with a {len(state)}-token state (at most {max_branch} per question); shorten it")
@@ -154,6 +153,14 @@ class Request:
                 ends.append(cursor - 1)
             rows.append({"ids": state + branch, "decide": len(state) + len(branch) - 1, "opts": ends})
         return rows
+
+
+def question_parts(question, tokenizer):
+    """Exactly the question suffix used by encode_rows, including all delimiters."""
+    _, q_id, o_id, c_id, d_id = (tokenizer.convert_tokens_to_ids(t) for t in SPECIAL)
+    instr = [q_id] + _user(tokenizer, question.instr)
+    spans = [[o_id] + _user(tokenizer, option) + [c_id] for option in question.options]
+    return instr, spans, instr + [t for span in spans for t in span] + [d_id]
 
 
 def _user(tok, text):
@@ -292,14 +299,15 @@ def with_reasoning(request, text):
     return {**request, "state": state}
 
 
-def fit_reasoning(request, text, tokenizer, image_tokens=0, *, max_state=MAX_STATE):
+def fit_reasoning(request, text, tokenizer, image_tokens=0, *, max_state=MAX_STATE, max_branch=MAX_BRANCH):
     """Keep the reasoning's conclusion within the encoder's state budget.
 
     Preserve the original state; return an empty string when it leaves no room for
     reasoning. Callers must report any trimming and use direct answers if empty.
     image_tokens counts image patches, excluding the two vision delimiters.
     """
-    room = max_state - 1 - (image_tokens + 2 if image_tokens else 0)
+    longest = max(len(question_parts(q, tokenizer)[2]) for q in parse(request).questions)
+    room = min(max_state, max_branch - longest) - 1 - (image_tokens + 2 if image_tokens else 0)
 
     def fits(candidate):
         return len(_user(tokenizer, render(with_reasoning(request, candidate)["state"]))) <= room

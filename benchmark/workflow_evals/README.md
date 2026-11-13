@@ -74,8 +74,9 @@ python inference/zoro-1/serve_decide.py /path/to/decision-checkpoint \
 
 This is a server flag, not a `run.sh` flag. The H100 pilot's `ap_00002` reasoning
 prompt used 21,306 tokens; adding the 2,048-token budget exceeds the default 16,384.
-32,768 accommodates that observed prompt and budget; a successful scored reasoning
-run at this setting has not yet been verified. Other inputs may need more room.
+32,768 accommodates that observed prompt and budget. On the H100 pilot, no invoice
+case completed reasoning within 8,192 tokens; see [VALIDATION.md](VALIDATION.md).
+Other inputs may need more room.
 The full benchmark inputs are retained. This setting does **not** raise the default
 decision-encoder limits described below.
 
@@ -121,11 +122,12 @@ limits and the reasoning ceiling:
 ```bash
 python inference/zoro-1/serve_decide.py /path/to/decision-checkpoint \
   --port 30001 --context-length 32768 --reasoning-token-limit 8192 \
-  --decision-max-state 16384 --decision-max-row 16384
+  --decision-max-state 15744 --decision-max-row 16384
 ```
 
 Use benchmark options `--reasoning --max-output-tokens 8192 --questions one`.
-Both state and row limits must fit the server context. The same limits apply when
+Both state and row limits must fit the server context, and the state cap must
+leave at least 640 tokens for a question. Larger questions may need a wider gap. The same limits apply when
 fitting generated reasoning, and all strict completion/trimming checks stay on.
 These options change serving limits, not benchmark inputs. Longer decision inputs
 extend beyond the default training-format limits; successful execution alone does

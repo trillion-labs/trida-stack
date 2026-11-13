@@ -20,7 +20,7 @@ from pathlib import Path
 import mlx.core as mx
 import numpy as np
 
-from .decide_request import RequestError, SPECIAL, VISION, fit_reasoning, parse, prompt, to_answer, with_reasoning
+from .decide_request import DEFAULT_REASONING_TOKEN_LIMIT, MAX_REASONING_TOKENS, MAX_STATE, MAX_BRANCH, RequestError, SPECIAL, VISION, fit_reasoning, parse, prompt, to_answer, with_reasoning
 from .decode import DecodeStats, SamplingParams
 from .engine import IncrementalDetokenizer
 from .vision import image_key, preprocess
@@ -122,8 +122,11 @@ def load_head(directory, hidden_size=None):
 
 class Decider:
     def __init__(self, engine, context_length=8192, text_temperature=None, image_temperature=None,
-                 cache_mb=1024):
+                 cache_mb=1024, reasoning_token_limit=DEFAULT_REASONING_TOKEN_LIMIT):
         self.engine, self.context_length = engine, context_length
+        if type(reasoning_token_limit) is not int or not 1 <= reasoning_token_limit <= MAX_REASONING_TOKENS:
+            raise RequestError(f"reasoning_token_limit must be between 1 and {MAX_REASONING_TOKENS}")
+        self.reasoning_token_limit = reasoning_token_limit
         self.head = load_head(engine.path, engine.rt.args.hidden_size)
         self.temperatures = {"text": 1.52, "image": 1.0}
         path = engine.path / "temperature.json"
@@ -273,7 +276,9 @@ class Decider:
 
     def fit_reasoning(self, request, text, image=None):
         """Use the same state budget and conclusion-preserving fit as CUDA."""
-        return fit_reasoning(request, text, self.engine.tokenizer, image[1] if image else 0)
+        return fit_reasoning(request, text, self.engine.tokenizer, image[1] if image else 0,
+                             max_state=min(MAX_STATE, self.context_length),
+                             max_branch=min(MAX_BRANCH, self.context_length))
 
     def decide(
         self,
@@ -294,7 +299,7 @@ class Decider:
         if not isinstance(reasoning, bool) and reasoning != "auto":
             raise RequestError('reasoning must be a boolean or "auto"')
         if max_reasoning_tokens is None:
-            max_reasoning_tokens = 8192 if reasoning == "auto" else 768
+            max_reasoning_tokens = min(self.reasoning_token_limit, 8192 if reasoning == "auto" else 768)
         if (isinstance(threshold, bool) or not isinstance(threshold, (int, float))
                 or not math.isfinite(threshold) or not 0 <= threshold <= 1):
             raise RequestError("threshold must be between 0 and 1")
@@ -303,9 +308,9 @@ class Decider:
         if (
             not isinstance(max_reasoning_tokens, int)
             or isinstance(max_reasoning_tokens, bool)
-            or max_reasoning_tokens <= 0
+            or not 1 <= max_reasoning_tokens <= self.reasoning_token_limit
         ):
-            raise RequestError("max_reasoning_tokens must be a positive integer")
+            raise RequestError(f"max_reasoning_tokens must be between 1 and {self.reasoning_token_limit}")
         if temperature is not None and (
             isinstance(temperature, bool)
             or not isinstance(temperature, (int, float))

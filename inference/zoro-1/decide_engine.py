@@ -186,7 +186,8 @@ class DecideEngine:
                 extra["cut"] = "empty"
             else:
                 image_tokens = int(enc.grid.prod(-1)[0]) // self.proc.merge_size ** 2 if enc.has_image else 0
-                fitted = fit_reasoning(request, text, self.tok, image_tokens, max_state=self.decision_max_state)
+                fitted = fit_reasoning(request, text, self.tok, image_tokens, max_state=self.decision_max_state,
+                                       max_branch=self.decision_max_row)
                 extra["reasoning_trimmed"] = fitted != text
                 if not fitted:
                     extra["cut"] = "state_limit"
