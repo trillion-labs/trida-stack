@@ -174,9 +174,10 @@ holder, which is what [`CONTRIBUTING.md`](../../../CONTRIBUTING.md) and
 [`LICENSE_POLICY.md`](../LICENSE_POLICY.md) ("Licence of our own contributions") require of
 every contribution. GravityOCR's own copies stay MIT.
 
-- **Relicensing approved by:** OPEN, not yet recorded. Name, role and date of whoever signs off
-  for Trillion Labs; the maintainers are asked who that should be. Not inferred from the
-  commit history.
+- **Relicensing approved by:** Luke Kim (@usik-luke-trl), trida-stack maintainer, for Trillion
+  Labs, 2026-11-13 ([PR #72](https://github.com/trillion-labs/trida-stack/pull/72#issuecomment-6847262911)).
+  Every commit to the three GravityOCR source files at `1c60368` is by a Trillion Labs
+  employee, so no outside contributor's consent is needed.
 
 ## Obligations we take on
 
