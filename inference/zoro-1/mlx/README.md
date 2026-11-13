@@ -10,7 +10,7 @@ stream, no CUDA:
 | decoder | `trida_mlx/model.py`, `trida_mlx/decode.py` | `causal` (AR baseline) and **`self-spec`** (diffusion draft + exact AR verify, lossless) |
 | server | `trida_mlx/server.py` | OpenAI-compatible `/v1/chat/completions` (+ `/v1/completions`), SSE streaming, **tool calls**, reasoning split, prompt cache |
 | agent | `trida_mlx/agent.py` | a tiny tool-using agent loop against the server (files, search, calculator; opt-in shell/write) |
-| decisions | `trida_mlx/decision.py`, `trida_mlx/decide_request.py` | `/v1/decide`: typed decisions (choice / yes-no / score) through Zoro-1's pointer head, escalating to self-spec reasoning when unsure |
+| decisions | `trida_mlx/decision.py`, `trida_mlx/decide_request.py` | `/v1/systemone`: typed decisions (choice / yes-no / score) through Zoro-1's pointer head, escalating to self-spec reasoning when unsure |
 | vision | `trida_mlx/vision.py` | Qwen3.5 vision encoder + projector, image preprocessing, multimodal RoPE (checkpoints with a `vision_config`) |
 | data | `trida_mlx/datamine.py` | `trida-mlx-datamine`: the app's chats + request logs → candidate training data (preference pairs, feedback, tool use, decisions, failures, trajectories), scrubbed |
 | tools | `convert.py`, `verify.py`, `bench.py`, `profile.py` | quantize to MLX, first-contact correctness check, causal-vs-self-spec benchmark, step profile |
@@ -95,20 +95,20 @@ model and keeps the vision tower in bf16. Images go through the server as OpenAI
 
 ## Decisions (Zoro-1 pointer head)
 
-A checkpoint with `jev_head.pt` or `jev_head.safetensors` also serves `POST /v1/decide`.
-It uses the same request envelope, row encoder, and answer fields as
-[`serve_decide.py`](../serve_decide.py). The canonical `../decide_request.py` is packaged
+A checkpoint with `jev_head.pt` or `jev_head.safetensors` also serves `POST /v1/systemone`
+(TypeSafe's System One API). It uses the same envelope, row encoder, and answer fields as
+[`serve_decide.py`](../serve_decide.py); the MLX-only options `threshold`, `trida_mode` and `stream`
+are extensions here as well. `POST /v1/decide`, the earlier `{"request": {...}}` envelope, still works
+with a `Deprecation` header and goes away in the next release. The canonical `../decide_request.py` is packaged
 unchanged and pinned by a test. Both head formats load without PyTorch. Conversion
 writes an unquantized float32 `jev_head.safetensors` and preserves `temperature.json`.
 
 ```bash
-curl -s localhost:8000/v1/decide -H 'Content-Type: application/json' -d '{
-  "request": {
-    "state": {"ticket": "the printer on floor 3 is jammed again"},
-    "questions": {"team": {"type": "choice", "instructions": "Which team handles it?",
-                           "criteria": {"it": "IT support", "facilities": "Facilities"}}}
-  },
-  "reasoning": false
+curl -s localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
+  "model": "zoro-1",
+  "state": {"ticket": "the printer on floor 3 is jammed again"},
+  "questions": {"team": {"type": "choice", "instructions": "Which team handles it?",
+                         "criteria": {"it": "IT support", "facilities": "Facilities"}}}
 }'
 ```
 
@@ -210,7 +210,7 @@ uv run pytest                 # all offline tests (~30 s)
 uv run python tests/test_tiny.py   # decoder invariants on a tiny random Qwen3.5-hybrid (CPU or GPU)
 uv run python tests/test_e2e.py    # tiny raw-HF checkpoint: loader, convert q8, prompt cache, server, parsing
 uv run pytest tests/test_vision.py  # tiny multimodal checkpoint: image input end to end
-uv run pytest tests/test_decision.py  # tiny multimodal checkpoint + random pointer head: /v1/decide
+uv run pytest tests/test_decision.py  # tiny multimodal checkpoint + random pointer head: /v1/systemone and /v1/decide
 ```
 
 Pinned: chunked prefill = one-shot; canvas clean rows = AR logits; MASK rows read the block-end GDN
@@ -222,7 +222,7 @@ with an image: greedy self-spec = greedy AR, chunked prefill = one-shot, MRoPE p
 reuse across different images, convert keeps the vision tower bit-identical, server `image_url` round trip.
 Decisions: the packaged decide_request.py equals inference/decide_request.py; branching from the shared state snapshot gives the
 same option logits as each question's full row (text and image states); escalation only when unsure,
-never on cut-off reasoning; server `/v1/decide` plain and streamed.
+never on cut-off reasoning; server `/v1/systemone` and `/v1/decide`, plain and streamed.
 On a Mac the same tests run on the GPU and therefore also cover the Metal kernel path.
 
 `uv run --with torch pytest tests/test_decision.py tests/test_decision_extensions.py`

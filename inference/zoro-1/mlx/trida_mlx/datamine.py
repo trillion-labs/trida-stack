@@ -13,7 +13,7 @@ Writes (one JSON object per line; see manifest.json for counts)
   feedback.jsonl          replies the user rated 👍 / 👎, with the conversation before them
   tool_use.jsonl          every user turn in agent mode: what the router decided, which tools were called and
                           how they ended, refused / duplicate / gated calls, and a candidate label
-  decisions.jsonl         every typed decision the server answered (tool routing, reply checks, /decide, tools):
+  decisions.jsonl         every typed decision the server answered (tool routing, reply checks, /systemone, tools):
                           state, questions, answers, reasoning; the model's own verdicts, not gold labels
   decision_labels.jsonl   decisions whose right answers the user marked in the app (a reply's "decisions"), as
                           kev's labelled records ({"state", "questions": {id: {..., "label"}}}): train.py --decision_data
@@ -288,7 +288,7 @@ def mine_logs(d: Path):
         except Exception:  # noqa: BLE001
             continue
         path, body, resp = rec.get("path", ""), rec.get("body") or {}, rec.get("response")
-        if path.endswith("/decide"):
+        if path.endswith(("/systemone", "/decide")):   # /v1/systemone's body is the request; /v1/decide wraps it
             request = body.get("request", body)
             qs = request.get("questions") or {}
             keys = set(qs)
@@ -296,7 +296,7 @@ def mine_logs(d: Path):
                     "reply_check" if keys & {"language", "request", "complete"} else
                     "ui_click" if keys & {"click", "field"} else "other")
             decisions.append({"log": f.name, "kind": kind, "state": request.get("state"), "questions": qs,
-                              "image": bool(request.get("image")), "answers": (resp or {}).get("answers"),
+                              "image": bool(request.get("image") or request.get("images")), "answers": (resp or {}).get("answers"),
                               "direct": ((resp or {}).get("direct") or {}).get("answers"),
                               "escalated": (resp or {}).get("escalated"), "reasoning": (resp or {}).get("reasoning"),
                               "cut": (resp or {}).get("cut")})

@@ -20,7 +20,7 @@ from pathlib import Path
 import mlx.core as mx
 import numpy as np
 
-from .decide_request import MAX_STATE, RequestError, SPECIAL, VISION, parse, prompt, render, to_answer, with_reasoning
+from .decide_request import MAX_STATE, RequestError, SPECIAL, VISION, parse, prompt, render, rows_tokens, to_answer, with_reasoning
 from .decode import DecodeStats, SamplingParams
 from .engine import IncrementalDetokenizer
 from .vision import image_key, preprocess
@@ -346,6 +346,7 @@ class Decider:
                 return {
                     "answers": {q.qid: to_answer(q, mx.softmax(z / t).tolist())
                                 for q, z in zip(parsed.questions, self.logits(encoded))},
+                    "usage": {"input_tokens": rows_tokens(encoded), "output_tokens": 0},
                     "timing_ms": round((time.perf_counter() - start) * 1000, 1),
                 }
 
@@ -378,6 +379,8 @@ class Decider:
                                  mode=mode or "self-spec")
             result.update(reasoning=thought["text"], reasoning_stats=thought["stats"],
                           reasoning_ms=round((time.perf_counter() - thinking_start) * 1000, 1))
+            result["usage"] = {"input_tokens": direct["usage"]["input_tokens"],
+                               "output_tokens": thought["stats"].get("new_tokens", 0)}
             if thought["ended"] != "complete":
                 result["cut"] = "reasoning did not finish; using the direct answer"
             else:
@@ -387,6 +390,7 @@ class Decider:
                 reasoned = parse(with_reasoning(request, text), image=req.image)
                 result["reasoned"] = score(reasoned, self.encode(reasoned, image))
                 result["answers"] = result["reasoned"]["answers"]
+                result["usage"]["input_tokens"] += result["reasoned"]["usage"]["input_tokens"]
             result["timing_ms"] = round((time.perf_counter() - start) * 1000, 1)
             emit("result", result)
             return result
