@@ -103,3 +103,11 @@ Accelerate, SGLang, optionally vLLM, and for inference/zoro-1/mlx Apple MLX and 
 benchmark/ (EleutherAI lm-evaluation-harness, BFCL, tau2-bench, FunctionChat,
 KoAgentBench, SWE-bench, Terminal-Bench) are dependencies, not redistributed here.
 See COMPLIANCE.md for the full inventory and licenses.
+
+WorkflowEvals — TypeSafe AI
+  https://github.com/typesafe-ai/WorkflowEvals
+  Apache License 2.0; pinned 0ac3b8ad845429f0d8e064ecfb2430a47c5a25cb.
+  Fetched at setup time; our patch adds Trida transport and CLI configuration.
+  Invoice dataset: typesafe/evalsafe-invoice-processing, Apache-2.0.
+  Three other evalsafe datasets have unverified licenses. Local evaluation
+  requires explicit opt-in; no dataset contents are distributed here. See docs/oss/intake/0011-workflowevals.md.

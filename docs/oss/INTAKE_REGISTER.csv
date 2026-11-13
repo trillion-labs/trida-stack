@@ -7,3 +7,8 @@
 0006,Qwen3.5-4B (베이스),as released,외부유입,Apache-2.0,83,채택,,2026-10-13,2027-10-13,intake/0006-qwen35-4b.md
 0007,torch,2.11.0,외부유입,BSD-3-Clause,85,채택,정확 고정 — 드라이버/CUDA 변경 시 재검토,2026-10-13,2027-10-13,intake/0007-torch.md
 0008,transformers,">=4.57,<5",외부유입,Apache-2.0,84,조건부 채택,체크포인트 remote code가 5.x에서 비호환 — 상한 유지,2026-10-13,2027-04-13,intake/0008-transformers.md
+0011,WorkflowEvals,0ac3b8ad845429f0d8e064ecfb2430a47c5a25cb,수정포함,Apache-2.0,83,채택,선택적 벤치마크; 고정 SHA와 라이선스 유지,2026-11-10,2027-11-10,intake/0011-workflowevals.md
+0012,typesafe/evalsafe-invoice-processing,6beeb2d2acd65c086c835022f5f4d7434114cafc,외부유입,Apache-2.0,83,채택,,2026-11-10,2027-11-10,intake/0011-workflowevals.md
+0013,typesafe/evalsafe-customer-service,b1342f5a704587dbc465867c38c2694348ff86e4,외부유입,미확인,,보류,로컬 opt-in 예외 제안; maintainer 승인 대기; 라이선스 미확인 및 재배포 불허,2026-11-10,upstream 라이선스 명시 시,intake/0011-workflowevals.md
+0014,typesafe/evalsafe-security-incidents,fbe1ea5c69cf494157fd23f2002a0d9d9a418443,외부유입,미확인,,보류,로컬 opt-in 예외 제안; maintainer 승인 대기; 라이선스 미확인 및 재배포 불허,2026-11-10,upstream 라이선스 명시 시,intake/0011-workflowevals.md
+0015,typesafe/evalsafe-agent-trace-observability,8635540973910a92465fe2bc53e195375aa6e1a8,외부유입,미확인,,보류,로컬 opt-in 예외 제안; maintainer 승인 대기; 라이선스 미확인 및 재배포 불허,2026-11-10,upstream 라이선스 명시 시,intake/0011-workflowevals.md

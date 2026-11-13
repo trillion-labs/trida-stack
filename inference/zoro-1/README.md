@@ -159,6 +159,25 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
   - `choice`: `{key: description}`.
   - `score`: a list of levels, lowest first; the answer is the expected level.
 - **`"reasoning": true`:** the model first writes its reasoning (returned as `reasoning`), then decides with that reasoning added to the state.
+  `max_reasoning_tokens` defaults to 768 and must be between 1 and the server's
+  `--reasoning-token-limit` (default 4,096; configurable up to 8,192). The prompt
+  plus this budget must fit the configured context; invalid budgets return HTTP 400.
+  Responses include `reasoning_stats.finish_reason`. Both CUDA and MLX use this contract:
+  - `answers_source: "reasoned"` means the decision used reasoning. If only the
+    conclusion fits the state budget, `reasoning_trimmed: true` reports that trimming;
+    the full generated text is still returned as `reasoning`.
+  - `cut: "length"` (generation budget), `"empty"` (empty completed text), or
+    `"state_limit"` (no room for reasoning) means `answers` holds **direct answers**
+    and `answers_source` is `"direct"`. MLX also retains its `direct` result object.
+    `cut: "state_limit"` also sets `reasoning_trimmed: true`: none of the generated
+    reasoning fits, so the returned direct answers use no reasoning.
+    Clients must check these fields before treating the answers as reasoned.
+  WorkflowEvals rejects every `cut` and any `reasoning_trimmed` response in reasoning mode.
+  CUDA's decision encoding defaults to `--decision-max-state 7552` and
+  `--decision-max-row 8192`. Experimental longer inputs can opt into larger limits,
+  with `1 <= state <= row - 640` and `row <= --context-length`. The 640-token
+  gap reserves question space; longer questions may need a wider gap. Reasoning
+  fitting reserves the longest question's actual encoded length, including delimiters. Existing defaults and strict completion checks are unchanged.
 - **Images:** add an `image` (path, base64 or data URL) to the request.
 - **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
   - It takes `tools`; tool calls come back as `tool_calls`.
