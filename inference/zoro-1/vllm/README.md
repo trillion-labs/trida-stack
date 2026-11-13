@@ -1,4 +1,90 @@
-# vLLM native block-diffusion backend
+# vLLM serving
+
+## Typed decisions (stock vLLM 0.32.0)
+
+Serve the same `/v1/decide` request and response contract as the SGLang decision
+server, including images and `reasoning: true`:
+
+```bash
+uv venv --python 3.12 .venv-vllm-decide
+source .venv-vllm-decide/bin/activate
+uv pip sync -r inference/zoro-1/vllm/requirements-decide-lock.txt
+python inference/zoro-1/vllm/serve_decide.py /path/to/checkpoint --port 30001
+```
+
+The checkpoint must contain `jev_head.pt`. The encoder, pointer-head definition,
+answer formatting, and chat HTTP handler are shared with the SGLang path.
+One generation engine handles decisions, reasoning, and chat, loading the
+backbone **once**. Our worker extension reads the last prompt hidden state
+before the unchanged vocabulary projection. Like SGLang, a question with K
+options uses K+1 prefixes to read its option ends and `<decide>`.
+No diffusion plugin, external kernel fetch, or vLLM source patch is required.
+
+**Experimental:** HTTP end-to-end checks pass, but SGLang probability parity is
+not fully established. A reviewer’s H100 probe found a **0.0222** long-input
+probability gap (the earlier probe found 0.012), exceeding the unchanged 0.01
+target, while selected options agreed. See [validation results](DECISION_VALIDATION.md).
+
+`--mem-fraction` defaults to `0.5` for this one engine. The implementation
+uses one worker with eager execution and disables prefix caching, chunked
+prefill, and speculation. `--max-concurrency` accepts **1, 2, or 4** (default **4**),
+sharing the limit across generation and capture. Streaming chat occupies one
+slot until completion or cancellation. Four open chat streams can therefore
+block all decision captures; a busy chat load can delay each successive prefix. Use `--max-concurrency 1` for the original
+serial execution path.
+
+For concurrent capture, the extension wraps the V2 worker's `add_requests` and
+`sample` methods. Pre-armed tickets bind each capture to its native request ID
+and final-prefill logits row; normal generation rows are ignored. Missing,
+stale, or ambiguous captures are rejected. HTTP disconnects cancel decision
+work and clean up its ticket before releasing the slot. The serial fallback
+wraps `compute_logits` instead. Revalidate these internal hooks when upgrading
+vLLM; CUDA graphs, distributed execution, and higher concurrency are unsupported.
+Batching can change BF16 probabilities slightly. K+1 prefix prefills also cost
+more work than one full-row pooling pass. Within each question, prefixes run
+**sequentially** without prefix caching. A reviewer measured a 7.5K-token state
+with five options at **0.94 s** versus SGLang’s **0.33 s** cold / **0.06–0.09 s**
+warm; four parallel copies took **3.56 s** versus **0.15 s**. These are small
+H100 probes, not a throughput guarantee. See the full table in
+[validation notes](DECISION_VALIDATION.md). Long-duration stability is untested.
+
+Images accompany every prefix. Stock vLLM’s processor cache is enabled by default
+(4 GiB), and its worker caches vision outputs by image hash. We have checked those
+code paths, but have not measured vision-forward reuse across these sequential
+requests. Do not assume the image encoder runs only once per question.
+Generation defaults to vLLM's PyTorch sampler, avoiding an optional FlashInfer
+sampling-kernel build. Sampling temperature, top-k, and top-p are unchanged.
+
+```bash
+curl http://localhost:30001/v1/decide -H 'Content-Type: application/json' -d '{
+  "request": {"state": "The invoice is 120 EUR; the limit is 100 EUR.",
+              "questions": {"over_limit": {"type": "noul", "instructions": "The invoice exceeds the limit."}}},
+  "reasoning": false
+}'
+```
+
+The default context is 16,384 tokens; decision encoding retains the existing
+7,552-token state and 8,192-token row limits. `--decision-max-state`,
+`--decision-max-row`, and `--reasoning-token-limit` use the shared SGLang bounds:
+a state/row gap of at least 640 tokens and a reasoning cap of 4,096 by default,
+configurable up to 8,192. The prompt and budget must fit the context. Unfinished or empty reasoning falls back to direct
+answers with `cut` and `answers_source: "direct"`. Reasoning fitting uses the shared SGLang/MLX helper: reserve the longest
+question, preserve the original state and keep the reasoning conclusion. Partial
+reasoning is reported with `reasoning_trimmed: true`; no room yields
+`cut: "state_limit"` and direct answers. Strict benchmark clients must reject cuts
+and trimming.
+
+`/v1/chat/completions` (including streaming), `/v1/models`, and `/health` use the
+shared HTTP implementation. See [MODEL_CONTRACT.md](../MODEL_CONTRACT.md) for
+the checkpoint and question formats.
+
+The lock captures the tested **Linux x86_64 / Python 3.12** environment. CI scans
+all its pinned packages. A new setuptools advisory, **GHSA-xmj3-9gf7-h52w**, is
+awaiting maintainer disposition: its fix requires 84.1.0, while vLLM 0.32.0 on
+Python 3.12 requires setuptools <81. No new exception has been approved; the
+advisory check blocks until this is resolved. See the validation notes.
+
+## Native block-diffusion backend (vLLM 0.27.x)
 
 A self-contained **vLLM 0.27.x** backend that serves the Qwen3.5 two-stream
 **block-diffusion** checkpoint **natively**, via vLLM's in-tree `ModelState`

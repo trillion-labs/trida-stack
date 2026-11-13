@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Serve a Trida decision checkpoint: typed decisions and chat from one engine, one copy of the weights.
 
-  POST /v1/decide            {"request": {"state": ..., "questions": {...}}, "reasoning": false, "temperature": null}
+  POST /v1/decide            {"request": {"state": ..., "questions": {...}}, "reasoning": false, "temperature": null, "max_reasoning_tokens": 768}
                              -> {"answers": {qid: answer}, "timing_ms": ...} (+ "reasoning" when reasoning=true)
   POST /v1/chat/completions  OpenAI-compatible, streaming or not; `tools` supported (tool calls parsed from the
                              model's <tool_call> blocks); the thinking is returned as reasoning_content; honours
@@ -19,6 +19,7 @@ A decision checkpoint is a Trida checkpoint with jev_head.pt (MODEL_CONTRACT.md)
 its serving temperatures. Generation here is causal decoding; the two-stream decode modes are serve.py's others.
 """
 import argparse
+import asyncio
 import json
 import os
 import re
@@ -146,8 +147,40 @@ def _num(body, key, default, cast):
     return cast(v)
 
 
-def create_app(engine):
-    from fastapi import Body, FastAPI, HTTPException
+async def _decision_while_connected(coro, request):
+    """Cancel nonstreaming decision work when its HTTP client disconnects."""
+    from fastapi import HTTPException
+
+    async def disconnected():
+        while not await request.is_disconnected():
+            await asyncio.sleep(0.05)
+
+    work = asyncio.create_task(coro)
+    watch = asyncio.create_task(disconnected())
+    try:
+        done, _ = await asyncio.wait((work, watch), return_when=asyncio.FIRST_COMPLETED)
+        if work in done:
+            return await work
+        await watch
+        raise HTTPException(499, "decision client disconnected")
+    finally:
+        watch.cancel()
+        if not work.done():
+            work.cancel()
+        cleanup = asyncio.gather(work, watch, return_exceptions=True)
+        cancelled = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                cancelled = True
+        cleanup.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+
+def create_app(engine, cancel_disconnected_decisions=False):
+    from fastapi import Body, FastAPI, HTTPException, Request
     from fastapi.responses import StreamingResponse
 
     from decide_request import RequestError
@@ -164,12 +197,17 @@ def create_app(engine):
         return {"object": "list", "data": [{"id": name, "object": "model", "created": 0, "owned_by": "trida"}]}
 
     @app.post("/v1/decide")
-    async def decide(body: dict = Body(...)):
+    async def decide(http_request: Request, body: dict = Body(...)):
         if "request" not in body:
             raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float}")
         try:
+            budget = _num(body, "max_reasoning_tokens", 768, int)
             # the image, if any, is in the request (base64 or a data URL): requests never name server files
-            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")))
+            work = engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
+                                  max_reasoning_tokens=budget)
+            if cancel_disconnected_decisions:
+                return await _decision_while_connected(work, http_request)
+            return await work
         except RequestError as e:
             raise HTTPException(400, str(e)) from e
 
@@ -239,13 +277,21 @@ def main():
     ap.add_argument("--port", type=int, default=30001)
     ap.add_argument("--mem-fraction", type=float, default=0.8)
     ap.add_argument("--context-length", type=int, default=16384)
+    ap.add_argument("--decision-max-state", type=int, default=7552,
+                    help="state token limit including delimiters; default 7552")
+    ap.add_argument("--decision-max-row", type=int, default=8192,
+                    help="complete decision-row token limit; default 8192")
+    ap.add_argument("--reasoning-token-limit", type=int, default=4096,
+                    help="maximum requested reasoning budget, up to 8192; default 4096")
     a = ap.parse_args()
     if not a.model:
         ap.error("give a decision checkpoint (positional) or set TRIDA_DECIDE_MODEL")
     import uvicorn
 
     from decide_engine import DecideEngine
-    engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length)
+    engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length,
+                          decision_max_state=a.decision_max_state, decision_max_row=a.decision_max_row,
+                          reasoning_token_limit=a.reasoning_token_limit)
     # The HTTP server runs on the engine's own event loop, so concurrent requests batch in the engine.
     server = uvicorn.Server(uvicorn.Config(create_app(engine), host=a.host, port=a.port, loop="none"))
     engine.loop.run_until_complete(server.serve())

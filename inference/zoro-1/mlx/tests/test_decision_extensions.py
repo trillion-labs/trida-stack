@@ -79,7 +79,8 @@ def test_auto_reasoning_threshold_and_cutoff(decider, monkeypatch):
                           on_event=lambda kind, payload: events.append(kind))
     assert not sure["escalated"] and not calls and events == ["direct", "result"]
     uncertain = decider.decide(REQ, reasoning="auto", threshold=1)
-    assert calls and uncertain["escalated"] and "cut" in uncertain
+    assert calls and uncertain["escalated"] and uncertain["cut"] == "length"
+    assert uncertain["answers_source"] == "direct"
     assert uncertain["answers"] == uncertain["direct"]["answers"]
     assert "reasoned" not in uncertain
     monkeypatch.setattr(decider, "think", lambda *a, **k: {
@@ -87,6 +88,21 @@ def test_auto_reasoning_threshold_and_cutoff(decider, monkeypatch):
     done = decider.decide(REQ, reasoning="auto", threshold=1)
     assert done["escalated"] and "cut" not in done
     assert done["answers"] == done["reasoned"]["answers"]
+    assert done["answers_source"] == "reasoned"
+
+
+@pytest.mark.parametrize("text,cut", [("  ", "empty"), ("conclusion: facilities", "state_limit")])
+def test_reasoning_without_usable_state_returns_direct_answers(decider, monkeypatch, text, cut):
+    monkeypatch.setattr(decider, "think", lambda *a, **k: {
+        "text": text, "ended": "complete", "stats": {"finish_reason": "stop"}})
+    if cut == "state_limit":
+        monkeypatch.setattr(decider, "fit_reasoning", lambda *a, **k: "")
+    result = decider.decide(REQ, reasoning=True)
+    assert result["cut"] == cut and result["answers_source"] == "direct"
+    assert result["answers"] == result["direct"]["answers"]
+    assert "reasoned" not in result
+    if cut == "state_limit":
+        assert result["reasoning_trimmed"] is True
 
 
 def test_long_reasoning_keeps_conclusion(decider):
@@ -208,3 +224,22 @@ def test_loader_refuses_oversized_views_and_odd_zips(tmp_path):
         z.writestr("archive/version", "3")
     with pytest.raises(ValueError, match="data.pkl"):
         decision.load_torch_file(tmp_path / "empty.pt")
+
+
+@pytest.mark.parametrize("budget", [0, True, 4097, 8193])
+def test_reasoning_budget_obeys_server_cap(decider, budget):
+    with pytest.raises(decide_request.RequestError, match="between 1 and 4096"):
+        decider.decide(REQ, reasoning=True, max_reasoning_tokens=budget)
+
+
+def test_auto_reasoning_uses_configured_cap(decider, monkeypatch):
+    budgets = []
+    def think(request, image, max_tokens, **kwargs):
+        budgets.append(max_tokens)
+        return {"text": "unfinished", "ended": "budget", "stats": {"finish_reason": "length"}}
+    monkeypatch.setattr(decider, "think", think)
+    decider.decide(REQ, reasoning="auto", threshold=1)
+    decider.reasoning_token_limit = 8192
+    decider.decide(REQ, reasoning="auto", threshold=1)
+    decider.decide(REQ, reasoning=True, max_reasoning_tokens=8192)
+    assert budgets == [4096, 8192, 8192]

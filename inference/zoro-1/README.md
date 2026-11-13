@@ -129,6 +129,10 @@ Defaults: temp 1.0 / top_p 0.95 / top_k 20, no presence penalty, thinking on, `-
 
 ## Decisions
 
+For stock vLLM 0.32.0, use the [vLLM decision server](vllm/README.md#typed-decisions-stock-vllm-0320).
+It shares this API contract and uses one generation engine for decisions, reasoning, and chat.
+The instructions below use SGLang.
+
 `serve_decide.py` serves a **decision checkpoint**: one that carries a pointer head (`jev_head.pt`, see [`MODEL_CONTRACT.md`](MODEL_CONTRACT.md#decision-checkpoints-serve_decidepy)). It answers typed questions about a state with calibrated probabilities. It can also reason first and then decide, and it chats with tool calls. All three run from one in-process engine and one copy of the weights, on **stock SGLang ≥ 0.5.22** with causal decoding. No fork or patch is needed.
 
 ```bash
