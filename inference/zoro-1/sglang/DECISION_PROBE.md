@@ -373,3 +373,13 @@ Image support,
 zero-token cleanup, and mixed requests remain separate validation gates.
 The patched backend retains the existing
 PolyForm Noncommercial restriction; see `NOTICE`.
+
+### Shared row-budget follow-up
+
+The #89 review’s question-space correction is also applied here: reasoning fits
+within both the state cap and the space left by the longest encoded question.
+Server limits require the default 640-token state/row gap; larger questions may
+need a wider gap. CPU HTTP regressions exercise both causal and self-spec engines
+with a long question and confirm reported trimming instead of row-overflow failure.
+Benchmark requests and probability tolerances are unchanged. The existing H100
+results above were not rerun for this tokenizer/limit-only follow-up.

@@ -122,7 +122,7 @@ def test_reasoned_row_overflow_preserves_direct_answer(decider, monkeypatch):
     monkeypatch.setattr(decider, "think", lambda *a, **kw: {
         "text": "step " * 1000, "ended": "complete", "stats": {"new_tokens": 10}})
     result = decider.decide(REQ, reasoning=True)
-    assert result["cut"] == "state_limit" and result["cut_detail"] == "row_limit"
+    assert result["cut"] == "state_limit" and result["reasoning_trimmed"]
     assert result["answers_source"] == "direct" and "reasoned" not in result
     assert result["answers"] == result["direct"]["answers"]
 

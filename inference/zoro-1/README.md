@@ -159,6 +159,9 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
   - `choice`: `{key: description}`.
   - `score`: a list of levels, lowest first; the answer is the expected level.
 - **`"reasoning": true`:** the model first writes its reasoning (returned as `reasoning`), then decides with that reasoning added to the state.
+  Decision state and row caps must leave at least 640 tokens for a question
+  (`state <= row - 640`, `row <= context`). Reasoning fitting also reserves
+  the longest question’s actual encoded suffix before keeping the conclusion.
 - **Images:** add an `image` (path, base64 or data URL) to the request.
 - **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
   - It takes `tools`; tool calls come back as `tool_calls`.

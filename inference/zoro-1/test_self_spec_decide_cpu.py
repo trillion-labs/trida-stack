@@ -341,7 +341,7 @@ def test_reasoned_row_overflow_uses_canonical_cut_and_direct_usage(cls):
             yield "abcdefghij</think>", {"finish_reason": {"type": "stop", "matched": 50}, "completion_tokens": 10}
         e.alogits, e._reasoning_chunks = logits, chunks
         result = await e.adecide(request, reasoning=True)
-        assert result["cut"] == "state_limit" and result["cut_detail"] == "row_limit"
+        assert result["cut"] == "state_limit" and result["reasoning_trimmed"]
         assert result["answers_source"] == "direct" and "reasoned" not in result
         assert result["answers"] == result["direct"]["answers"]
         assert result["usage"] == {"input_tokens": scored[0], "output_tokens": 10}
@@ -400,3 +400,31 @@ def test_failed_engine_health_returns_unavailable():
         asyncio.run(failed_abort())
         response = client.get("/health")
         assert response.status_code == 503 and response.json()["ok"] is False
+
+
+@pytest.mark.parametrize("cls", [DecideEngine, SelfSpecDecideEngine])
+def test_long_question_reasoning_returns_trimmed_answer_over_http(cls):
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+    e = engine(cls)
+    scored = []
+    async def chunks(*args, **kwargs):
+        yield "because " * 2000 + "therefore yes</think>", {
+            "finish_reason": {"type": "stop", "matched": 50}, "completion_tokens": 32}
+    async def logits(enc, image=None):
+        scored.extend(enc.rows)
+        return [torch.tensor([0.0, 1.0])]
+    e._reasoning_chunks, e.alogits = chunks, logits
+    request = {"state": "x" * 3000, "questions": {
+        "q": {"type": "noul", "instructions": "q" * 1200}}}
+    response = TestClient(create_app(e)).post("/v1/decide", json={
+        "request": request, "reasoning": True})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reasoning_trimmed"] and body["answers_source"] == "reasoned"
+    assert all(len(row["ids"]) <= 8192 for row in scored)
+
+
+def test_equal_state_row_caps_rejected_before_model_load():
+    with pytest.raises(RequestError, match="row - 640"):
+        SelfSpecDecideEngine("/unused", decision_max_state=16384, decision_max_row=16384)
