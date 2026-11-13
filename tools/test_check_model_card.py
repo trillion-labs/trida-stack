@@ -52,3 +52,16 @@ def test_only_section_4b_is_read():
 def test_compliance_md_lists_every_watched_model():
     rows = cmc.model_rows(cmc.section_4b(cmc.COMPLIANCE.read_text()))
     assert set(cmc.MODELS) <= set(rows), "add a section 4b row for each model in MODELS"
+
+
+def test_every_derived_row_is_watched():
+    # a derived checkpoint listed in section 4b but missing from MODELS is never re-checked weekly
+    import re
+    section = cmc.section_4b(cmc.COMPLIANCE.read_text())
+    derived = set(re.findall(r"^\|\s*derived\s*\|\s*\[([^\]]+)\]", section, re.M))
+    assert derived <= set(cmc.MODELS), f"add to MODELS: {sorted(derived - set(cmc.MODELS))}"
+
+
+def test_mit_models_match_their_row():
+    rows = cmc.model_rows("| derived | [trillionlabs/GravityOCR](x) | **MIT** | public | HF |")
+    assert cmc.check("trillionlabs/GravityOCR", hf(licence="mit"), rows) == []

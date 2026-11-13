@@ -32,11 +32,13 @@ COMPLIANCE = ROOT / "COMPLIANCE.md"
 MODELS = (
     "trillionlabs/Zoro-1",   # served by inference/zoro-1/
     "trillionlabs/Zoro",     # published as trillionlabs/Trida2.0-4B, which now redirects here
+    "trillionlabs/GravityOCR",   # served by inference/gravityocr/
 )
 
 # What the licence column should say, keyed by what HF reports.
 LICENCE_LABEL = {
     "apache-2.0": "Apache-2.0",
+    "mit": "MIT",
     "other": "`other` — terms not yet published",
 }
 

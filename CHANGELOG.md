@@ -15,6 +15,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `inference/gravityocr/`: serving for `trillionlabs/GravityOCR`, a GLM-OCR-based document OCR
+  model, with self-speculative decoding. It runs on upstream SGLang v0.5.10 (Apache-2.0) plus a
+  committed patch and the seven new files the patch needs, in a separate Python 3.12
+  environment that `sglang/setup.sh` builds from a resolved lock: it applies the patch, verifies
+  the checkout byte for byte, and builds SGLang offline with the locked build backend.
+  `validated-freeze.txt` and a fixed resolution date make the lock reproducible from the repo.
+  `serve.sh` launches it (`MODE=self-spec` by default, or `causal`), binds to 127.0.0.1 by
+  default, refuses a non-loopback `SERVE_HOST` without `API_KEY`, and runs one tokenizer worker
+  unless `TOKENIZER_WORKERS` asks for more. It locks SGLang's management endpoints with a
+  fresh random admin key on every start and hands the keys over through a FIFO, so they never
+  reach a file, a command line or an environment. `EXTRA_ARGS`
+  accepts only a fixed list of logging and capacity options. `ocr_request.py` sends one crop
+  through the OpenAI-compatible API (`--task text|table|formula`, key from `$API_KEY` only,
+  redirects refused). Self-spec applies the request's sampling settings, penalties,
+  `logit_bias`, `min_tokens` and grammars as causal decoding does, and returns log
+  probabilities; the README states what it reproduces. The patch also changes four upstream
+  SGLang behaviours for every server it builds: every tokenizer worker checks the keys, `/server_info` and the logged server arguments
+  no longer contain them, the tokenizer workers' shared-memory segment is private, and a
+  single-node server's torch.distributed rendezvous runs on 127.0.0.1 with a store that listens
+  on loopback only (upstream binds it on every interface). CPU tests cover the patch and its
+  pin, `setup.sh` and the lock, the launcher, the request client, the self-spec commit,
+  sampling and grammar logic, the auth changes, the ViT graph settings, the loopback
+  rendezvous, and that the patch leaves other SGLang models and speculative algorithms as
+  upstream has them.
+  The advisory job scans the lock; the findings its SGLang, torch, transformers and diskcache
+  pins cannot fix carry exceptions in `docs/supply-chain/exceptions.md`, and the weekly
+  fetch-recipe job checks that the patch still applies at its pinned commit. None of it uses
+  the PolyForm-NC kernels.
 - Zoro-1 Chat 0.6.0: **a personal knowledge graph** learned from chats (`inference/zoro-1/mlx/app/Knowledge`,
   a standalone Swift package with its own `kg-selftest`).
   - **Learning:** after each reply, Zoro-1 decides whether there is something lasting to remember and
