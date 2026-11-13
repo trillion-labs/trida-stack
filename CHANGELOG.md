@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `POST /v1/systemone` on the SGLang decision server (`serve_decide.py`) and the MLX server: typed
+  decisions in TypeSafe's System One API 0.2.0 shape (`{"state", "model", "questions"}` ->
+  `{"model", "answers", "usage"}`, score `legend` as `{"0": level, ...}`, 422 validation errors), so
+  System One clients such as the TypeSafe SDK work unchanged. `images`, `reasoning`,
+  `max_reasoning_tokens` and `temperature` are extensions (#92).
+
 - Zoro-1 Chat 0.6.0: **a personal knowledge graph** learned from chats (`inference/zoro-1/mlx/app/Knowledge`,
   a standalone Swift package with its own `kg-selftest`).
   - **Learning:** after each reply, Zoro-1 decides whether there is something lasting to remember and
@@ -111,6 +117,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `kev.benchmark` / `kev.serve`.
 - `--fp32_master` (fp32 weights and AdamW state over bf16 compute; needed at small
   LRs) and `--adam_beta2`.
+
+### Deprecated
+
+- `POST /v1/decide` (the `{"request": {...}}` envelope) on both decision servers: it still answers, with a
+  `Deprecation` header and a `Link` to `/v1/systemone`, and will be removed in the next release.
 
 ### Changed
 

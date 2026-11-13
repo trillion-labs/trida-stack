@@ -207,6 +207,92 @@ def test_decide_endpoint_parses_without_paths():
     assert r.status_code == 400 and "/etc" not in r.text
 
 
+def test_systemone_request_maps_the_envelope():
+    from decide_request import systemone_request
+    body = {"state": REQ["state"], "model": "zoro-1", "questions": REQ["questions"], "images": [{"url": "data:x"}],
+            "reasoning": True, "max_reasoning_tokens": 64, "metadata": {"ignored": True}}
+    request, opts = systemone_request(body)
+    assert request == {**REQ, "image": "data:x"}
+    assert opts == {"reasoning": True, "max_reasoning_tokens": 64}   # unknown top-level keys are ignored
+    assert systemone_request({**body, "images": ["abc"]})[0]["image"] == "abc"
+    assert systemone_request(body, extensions=("metadata",))[1]["metadata"] == {"ignored": True}
+
+
+@pytest.mark.parametrize("bad, msg", [
+    ({"state": "s", "questions": REQ["questions"]}, "no 'model'"),
+    ({"model": "m", "questions": REQ["questions"]}, "no 'state'"),
+    ({"state": "s", "model": " ", "questions": REQ["questions"]}, "non-empty string"),
+    ({"state": "s", "model": "m", "questions": REQ["questions"], "images": ["a", "b"]}, "at most one image"),
+    ({"state": "s", "model": "m", "questions": REQ["questions"], "images": [{"detail": "low"}]}, "'images' entries"),
+    ([], "must be an object"),
+])
+def test_systemone_request_rejects(bad, msg):
+    from decide_request import systemone_request
+    with pytest.raises(RequestError, match=msg):
+        systemone_request(bad)
+
+
+def test_systemone_response_shape():
+    from decide_request import systemone_response
+    result = {"answers": {"n": {"type": "noul", "noul": 0.9},
+                          "s": {"type": "score", "score": 1.2, "legend": ["low", "high"], "confidence": 0.4,
+                                "probabilities": {"0": 0.3, "1": 0.7}}},
+              "usage": {"input_tokens": 120, "output_tokens": 7}, "timing_ms": 3.0}
+    out = systemone_response(result, "zoro-1")
+    assert out["model"] == "zoro-1" and out["usage"] == {"input_tokens": 120, "output_tokens": 7}
+    assert out["answers"]["s"]["legend"] == {"0": "low", "1": "high"}
+    assert out["answers"]["n"] == {"type": "noul", "noul": 0.9} and out["timing_ms"] == 3.0
+    assert systemone_response({"answers": {}}, "m")["usage"] == {"input_tokens": 0, "output_tokens": 0}
+
+
+class FakeDecider:
+    ckpt = "/ckpt/zoro-1"
+
+    def __init__(self):
+        self.calls = []
+
+    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768):
+        req = parse(request, image)
+        self.calls.append({"temperature": temperature, "reasoning": reasoning, "budget": max_reasoning_tokens})
+        p = {"noul": [0.2, 0.8], "choice": [0.6, 0.4], "score": [0.1, 0.9]}
+        return {"answers": {q.qid: to_answer(q, p[q.qtype][:len(q.options)] if q.qtype != "choice"
+                                             else [1 / len(q.options)] * len(q.options)) for q in req.questions},
+                "usage": {"input_tokens": 42, "output_tokens": 5 if reasoning else 0}, "timing_ms": 1.0}
+
+
+def test_systemone_endpoint():
+    engine = FakeDecider()
+    client = _client(engine)
+    questions = {**REQ["questions"], "u": {"type": "score", "instructions": "Urgency?", "criteria": ["low", "high"]}}
+    body = {"state": REQ["state"], "model": "anything", "questions": questions}
+    r = client.post("/v1/systemone", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["model"] == "zoro-1" and set(out["answers"]) == {"s", "r", "u"}
+    assert out["usage"] == {"input_tokens": 42, "output_tokens": 0}
+    assert out["answers"]["r"] == {"type": "noul", "noul": 0.8}
+    assert out["answers"]["u"]["legend"] == {"0": "low", "1": "high"}
+    assert out["answers"]["s"]["type"] == "choice" and set(out["answers"]["s"]["probabilities"]) == {"pos", "neg"}
+    r = client.post("/v1/systemone", json={**body, "reasoning": True, "max_reasoning_tokens": 64, "temperature": 0.5})
+    assert r.status_code == 200 and r.json()["usage"]["output_tokens"] == 5
+    assert engine.calls[-1] == {"temperature": 0.5, "reasoning": True, "budget": 64}
+    pytest.importorskip("PIL")
+    for bad in ({**body, "model": None}, {k: v for k, v in body.items() if k != "model"},
+                {**body, "questions": {"x": {"type": "rank"}}}, {**body, "images": ["/etc/hosts"]},
+                {**body, "max_reasoning_tokens": "many"}):
+        r = client.post("/v1/systemone", json=bad)
+        assert r.status_code == 422, (bad, r.text)
+        detail = r.json()["detail"]
+        assert isinstance(detail, list) and detail[0]["loc"] == ["body"] and detail[0]["msg"]
+        assert "/etc" not in r.text
+
+
+def test_decide_alias_is_deprecated_but_works():
+    r = _client(FakeDecider()).post("/v1/decide", json={"request": REQ})
+    assert r.status_code == 200 and set(r.json()["answers"]) == {"s", "r"}
+    assert r.headers["deprecation"] == "true" and "/v1/systemone" in r.headers["link"]
+
+
 def test_decide_rows_match_the_jev_encoder():
     # the server must score the rows decision checkpoints were trained on; inference/zoro-1/jev.py is pinned to the training
     # encoder by golden fixtures, so this ties decide_request's own encoder to it

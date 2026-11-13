@@ -35,7 +35,7 @@ import time
 import torch
 import torch.nn as nn
 
-from decide_request import MAX_IMAGE_PIXELS, VISION, image_input, parse, prompt, with_reasoning, to_answer
+from decide_request import MAX_IMAGE_PIXELS, VISION, image_input, parse, prompt, rows_tokens, with_reasoning, to_answer
 
 END_THINK = "</think>"
 # Serving temperatures: logits are divided by T before the softmax. Fit T per checkpoint on held-out calibration
@@ -160,7 +160,8 @@ class DecideEngine:
     # ---- decisions ----------------------------------------------------------------------------------
 
     async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768):
-        """-> {"answers": {qid: answer}, "timing_ms"} (+ "reasoning", "reasoning_ms" when reasoning=True)."""
+        """-> {"answers": {qid: answer}, "usage", "timing_ms"} (+ "reasoning", "reasoning_ms" when reasoning=True).
+        usage: input_tokens = the decision rows scored, output_tokens = the reasoning generated."""
         t0 = time.perf_counter()
         extra = {}
         if reasoning:
@@ -173,7 +174,9 @@ class DecideEngine:
         T = temperature or (self.image_T if enc.has_image else self.text_T)
         z = await self.alogits(enc, self._sized(req.image, enc.grid) if enc.has_image else None)
         answers = {q.qid: to_answer(q, torch.softmax(zq / T, -1).tolist()) for q, zq in zip(req.questions, z)}
-        return {"answers": answers, "timing_ms": round((time.perf_counter() - t0) * 1000, 1), **extra}
+        usage = {"input_tokens": rows_tokens(enc.rows),
+                 "output_tokens": len(self.tok(extra["reasoning"]).input_ids) if reasoning else 0}
+        return {"answers": answers, "usage": usage, "timing_ms": round((time.perf_counter() - t0) * 1000, 1), **extra}
 
     def _sized(self, image, grid):
         """The image at exactly the size the processor encodes it at (grid = patches high x wide)."""

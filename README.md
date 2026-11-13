@@ -198,20 +198,22 @@ for chat, decisions, benchmarks and the model contract.
 
 ### Decisions (`--mode decide`)
 `--mode decide` runs `serve_decide.py` on **stock SGLang ≥ 0.5.22** (no fork or patch): typed
-decisions at `POST /v1/decide`, reason-then-decide (`"reasoning": true`), and OpenAI chat with tool
-calls, from one engine and one copy of the weights.
+decisions at `POST /v1/systemone` (TypeSafe's System One API), reason-then-decide
+(`"reasoning": true`), and OpenAI chat with tool calls, from one engine and one copy of the weights.
 ```bash
-curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
-  "request": {
-    "state": {"ticket": "Order #W1 arrived broken. I want my money back."},
-    "questions": {
-      "intent": {"type": "choice", "instructions": "What does the customer want?",
-                 "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
-      "urgent": {"type": "noul", "instructions": "Should this jump the queue?"}}},
-  "reasoning": false}'
-# -> {"answers": {"intent": {"type": "choice", "choice": "refund", "probabilities": {...}},
-#                 "urgent": {"type": "noul", "noul": 0.93}}, ...}
+curl -s localhost:30001/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "zoro-1",
+  "state": {"ticket": "Order #W1 arrived broken. I want my money back."},
+  "questions": {
+    "intent": {"type": "choice", "instructions": "What does the customer want?",
+               "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
+    "urgent": {"type": "noul", "instructions": "Should this jump the queue?"}}}'
+# -> {"model": "...", "answers": {"intent": {"type": "choice", "choice": "refund", "probabilities": {...}},
+#                                 "urgent": {"type": "noul", "noul": 0.93}},
+#     "usage": {"input_tokens": ..., "output_tokens": 0}, ...}
 ```
+`POST /v1/decide`, the earlier `{"request": {...}}` envelope, still works but is deprecated and goes
+away in the next release.
 See [`inference/zoro-1/README.md#decisions`](inference/zoro-1/README.md#decisions).
 
 ### Backends
@@ -245,7 +247,7 @@ inference/               nano-inference: one small serving stack per model
     getting_started.ipynb      serving tutorial
     MODEL_CONTRACT.md          what the serving code expects from the checkpoint
     serve.py                   --mode causal | self-spec | decide; launches the server
-    serve_decide.py, decide_*.py, jev*.py   typed-decision server (/v1/decide) on stock SGLang
+    serve_decide.py, decide_*.py, jev*.py   typed-decision server (/v1/systemone) on stock SGLang
     chat.py                    OpenAI-compatible client
     eval.py / eval_ifeval.py   gsm8k / mmlu_pro / ifeval quality + throughput
     ifeval_lib/                vendored IFEval scorers

@@ -95,6 +95,18 @@ def test_shared_decision_envelope_logs(tmp_path):
     assert decisions[0]["image"]
 
 
+def test_systemone_logs(tmp_path):
+    body = {"state": "printer jam", "model": "zoro-1", "questions": {"need": {"type": "noul"}}, "images": ["data:..."]}
+    record = {"path": "/v1/systemone", "body": body,
+              "response": {"model": "zoro-1", "answers": {"need": {"type": "noul", "noul": 0.9}},
+                           "usage": {"input_tokens": 12, "output_tokens": 0}}}
+    (tmp_path / "decision.json").write_text(json.dumps(record))
+    decisions, _, _ = datamine.mine_logs(tmp_path)
+    assert decisions[0]["kind"] == "tool_routing" and decisions[0]["state"] == "printer jam"
+    assert decisions[0]["questions"] == body["questions"] and decisions[0]["image"]
+    assert decisions[0]["answers"] == record["response"]["answers"]
+
+
 # split so the repo's detect-private-key hook does not take the fake key below for a real one
 PEM = "-----{} OPENSSH " + "PRIVATE KEY-----"
 
