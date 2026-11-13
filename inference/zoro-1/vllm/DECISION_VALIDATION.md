@@ -325,3 +325,38 @@ found two setuptools advisories at 80.10.2:
 The advisory gate now matches exceptions per advisory and its aliases, rather
 than allowing an exception for one package advisory to cover every other finding
 on that package. The newly discovered advisory therefore remains a CI blocker.
+
+### H100 HTTP regression after the review fixes
+
+Slurm job **5186**, one H100 on `diffusion-compute-001`, used the same checkpoint,
+BF16, locked environment, request fixtures and sampling settings. It passed:
+
+- Direct text, image and long-input answers matched the earlier serial HTTP
+  reference at the API's four-decimal precision (maximum difference 0).
+- Actual generation/capture mixtures reached native batch sizes 2 and 4. The
+  largest probability change from this run's serial result was 0.0083; the
+  tolerance was not raised. This is a batch-composition comparison, not proof of
+  cross-backend parity.
+- SSE cancellation recovered in **0.75 s**; an HTTP decision cancelled after
+  capture admission recovered in **2.71 s**. The same worker/model remained,
+  with 142 successful captures, 0 capture failures and 0 active tickets/bindings.
+- Budgets of 1 and 512 both reached `finish_reason: "length"` on the synthetic
+  two-number question, returning `cut: "length"`, `answers_source: "direct"`, and
+  the original direct answers. A budget of 4,097 was rejected with HTTP 400.
+  This verifies failure handling, not a successful scored reasoning run.
+- Hashes of the V2 runner, input batch, sampling parameters and async engine
+  files matched before and after the run; no vLLM core files changed.
+
+Job 5185 had stopped at an incorrect test assertion that expected the model to
+finish within 512 tokens. We corrected the harness to check both completion and
+honest fallback, keeping the input and budget unchanged, then ran the complete
+HTTP regression as job 5186. Completed/trimmed reasoning paths are covered by CPU
+regressions; this GPU run did not validate a completed reasoning response.
+
+Local checks: **234 CPU tests passed (2 skipped)**, **55 MLX tests passed (1
+skipped)**, Ruff and pinned supply-chain checks passed. The advisory scan remains
+blocked by the unapproved setuptools finding above.
+
+Artifacts on the node are under
+`/mnt/vast/trillion/wonsuk/issue60-vllm-20261113/pr93-review/` (`report.json`,
+`run.log`, `run-5185.log`, `job-5186.log`, and before/after core hashes).
