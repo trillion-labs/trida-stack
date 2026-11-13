@@ -130,7 +130,7 @@ Fast-dLLM v2 방식의 블록 디퓨전 SFT를 사용합니다. 각 학습 시�
 추가합니다(`train/data/decision.py` / `train/models/decision.py`). 노이즈가 없는 인과적 스트림에 연결된 작은 **포인터 헤드**가 각 선택지의 `</opt>` 상태를
 질문의 `<decide>` 상태와 비교해 점수를 계산합니다. 각 옵티마이저 스텝에서는 일반 SFT 마이크로배치를 처리한 뒤
 `--decision_micro_per_step`개의 의사결정 마이크로배치를 처리하고, 해당 손실에 `--decision_loss_weight`를 곱해 더합니다.
-각 체크포인트에는 `jev_head.pt`가 함께 저장됩니다. `train/tools/export_kev_checkpoint.py`를 사용하면 kev 디렉터리 구조로 내보낼 수 있습니다.
+각 체크포인트에는 `jev_head.pt`가 함께 저장됩니다. `train/tools/export_decision_checkpoint.py`를 사용하면 kev 디렉터리 구조로 내보낼 수 있습니다.
 자세한 내용: [`train/README.md`](train/README.md#typed-decision-training-decisionpy).
 
 ### 이미지 입력 (비전-언어 체크포인트)

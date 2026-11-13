@@ -142,13 +142,13 @@ class DecideEngine:
                     return
             yield item
 
-    def decide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768):
+    def decide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=4096):
         return self._run(self.adecide(request, image, temperature, reasoning, max_reasoning_tokens))
 
     def logits(self, enc, image=None):
         return self._run(self.alogits(enc, image))
 
-    def think_stream(self, request, max_new_tokens=768, image=None):
+    def think_stream(self, request, max_new_tokens=4096, image=None):
         return self._iterate(self.athink_stream(request, max_new_tokens, image))
 
     def chat(self, messages, **kw):
@@ -159,7 +159,7 @@ class DecideEngine:
 
     # ---- decisions ----------------------------------------------------------------------------------
 
-    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768):
+    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=4096):
         """-> {"answers": {qid: answer}, "timing_ms"} (+ "reasoning", "reasoning_ms" when reasoning=True)."""
         t0 = time.perf_counter()
         extra = {}
@@ -210,7 +210,7 @@ class DecideEngine:
             seen = t if t.startswith(seen) else seen + t
             yield piece, chunk.get("meta_info", {})
 
-    async def athink_stream(self, request, max_new_tokens=768, image=None):
+    async def athink_stream(self, request, max_new_tokens=4096, image=None):
         """The model's reasoning about a request, streamed; stops at </think>."""
         if image is None:
             text = self.tok.apply_chat_template([{"role": "user", "content": prompt(request)}], tokenize=False,
