@@ -16,7 +16,7 @@ Usage:
   python serve.py /path/to/decision-checkpoint --mode decide           # the same, through serve.py
 
 Needs stock SGLang >= 0.5.22 (Apache-2.0) plus fastapi and uvicorn in the same environment; see README "Decisions".
-A decision checkpoint is a Trida checkpoint with jev_head.pt (MODEL_CONTRACT.md); an optional temperature.json sets
+A decision checkpoint is a Trida checkpoint with decision_head.pt or jev_head.pt (MODEL_CONTRACT.md); an optional temperature.json sets
 its serving temperatures. Generation here is causal decoding; the two-stream decode modes are serve.py's others.
 """
 import argparse
@@ -240,7 +240,7 @@ def create_app(engine):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("model", nargs="?", default=os.environ.get("TRIDA_DECIDE_MODEL"),
-                    help="decision checkpoint directory (with jev_head.pt); default $TRIDA_DECIDE_MODEL")
+                    help="decision checkpoint directory (with decision_head.pt or jev_head.pt); default $TRIDA_DECIDE_MODEL")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=30001)
     ap.add_argument("--mem-fraction", type=float, default=0.8)

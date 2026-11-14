@@ -213,7 +213,7 @@ of the prompt came from the cache.
   Every action asks first; **Allow All for This Message** skips the questions for the rest of that
   reply, except picks with probability below 0.4. **⌘⎋** stops at any time, also from the other app.
   It needs the Accessibility permission (Settings → Agent → *Allow…*; macOS asks again after a
-  rebuild of an ad-hoc-signed app) and a checkpoint with the decision head `jev_head.pt`.
+  rebuild of an ad-hoc-signed app) and a checkpoint with the decision head (`decision_head.pt`, or `jev_head.pt`).
   Folders converted before decision support lack it: Settings → Agent → *Decision head → Download*
   fetches it from `trillionlabs/Zoro-1` and restarts the server. Sending the window screenshot with
   each decision is optional and off: in the demo the element list alone completed more tasks.
