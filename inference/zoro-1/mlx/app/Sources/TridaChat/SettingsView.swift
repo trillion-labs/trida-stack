@@ -9,6 +9,7 @@ struct SettingsView: View {
             serverTab.tabItem { Label("Server", systemImage: "server.rack") }
             generationTab.tabItem { Label("Generation", systemImage: "slider.horizontal.3") }
             agentTab.tabItem { Label("Agent", systemImage: "wrench.and.screwdriver") }
+            LearningTab().tabItem { Label("Learning", systemImage: "graduationcap") }
         }
         .padding(20)
         .frame(width: 560)
@@ -144,6 +145,9 @@ struct SettingsView: View {
                     value: $state.settings.maxAgentSteps, in: 1...50)
             Divider()
             Text("Decision tools (offered when the model has a decision head: \(state.supportsDecision ? "yes" : "no")): decide_choice, decide_yes_no, pick_file, and ui_check with the UI agent. The decision model scores the options; below 0.7 it reasons once (self-spec) and decides again. Shift-⌘D opens the Decide window to try decisions by hand.")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("Ask how the agent is doing", isOn: $state.askRatings)
+            Text("Every few messages (at least 4 since the last time), a minute after a reply ends, a small card under it asks \"How's the agent doing so far?\" Bad, Good or Very good, or close it. The answers stay in your chats on this Mac; trida-mlx-rewards turns them into training rewards for Zoro-1 (online RL, phase 1: nothing is trained yet).")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Check replies with the decision model", isOn: $state.reviewReplies)
             Text("After each reply the decision model checks: the language the user asked for, does what was asked, complete, not a repeat of the previous reply, as one quick decision. If one clearly fails (P(yes) below 0.2), the model rewrites the reply once with that feedback; unsure checks are marked ? and change nothing; the draft stays visible, collapsed. Works in chat and agent mode.")

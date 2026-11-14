@@ -90,6 +90,16 @@ public enum PythonRuntime: Equatable, Sendable {
         module("trida_mlx.datamine", tool: "trida-mlx-datamine", args)
     }
 
+    /// trida_mlx.rewards: the app's chats -> per-turn rewards + judge agreement (online RL, phase 1).
+    public func rewards(_ args: [String]) -> (executable: URL, arguments: [String]) {
+        module("trida_mlx.rewards", tool: "trida-mlx-rewards", args)
+    }
+
+    /// trida_mlx.rl_train: a LoRA adapter from those rewards (online RL, phase 2).
+    public func rlTrain(_ args: [String]) -> (executable: URL, arguments: [String]) {
+        module("trida_mlx.rl_train", tool: "trida-mlx-rl-train", args)
+    }
+
     static let downloadScript = """
         import sys
         from huggingface_hub import snapshot_download

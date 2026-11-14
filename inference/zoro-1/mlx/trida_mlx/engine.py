@@ -59,11 +59,19 @@ class Engine:
 
     def __init__(self, model: str = DEFAULT_MODEL, *, mode: str = "self-spec", gen_block: Optional[int] = None,
                  prefill_chunk: int = 512, prompt_cache: bool = True, fused_gdn: bool = True,
-                 cache_slots: int = 3, max_image_pixels: int = 1024 * 1024, image_cache: int = 16):
+                 cache_slots: int = 3, max_image_pixels: int = 1024 * 1024, image_cache: int = 16,
+                 adapter: Optional[str] = None):
         from transformers import AutoTokenizer
 
         t = time.perf_counter()
         self.model, self.vision, self.cfg, self.path = load_model(model)
+        # a LoRA adapter from trida-mlx-rl-train (online RL); the decision head reads the adapted hidden states too
+        self.adapter = None
+        if adapter:
+            from .rl_train import load_adapter
+            load_adapter(self.model, adapter)
+            self.model.eval()
+            self.adapter = str(Path(adapter).expanduser())
         self.tokenizer = AutoTokenizer.from_pretrained(str(self.path))
         self.mask_id = mask_id_of(self.path, self.cfg, self.tokenizer)
         self.image_token_id = int(self.cfg.get("image_token_id", 248056))

@@ -8,6 +8,8 @@ struct Chat: Identifiable, Equatable, Codable {
     var id = UUID()
     var title: String = "New chat"
     var messages: [ChatMessage] = []
+    /// Answers to "How's the agent doing so far?" (online-RL rewards; see SessionRatings.swift).
+    var ratings: [SessionRating]? = nil
     /// When it was last saved with changes (sorts the sidebar after a restart).
     var updated = Date()
 }
@@ -143,6 +145,15 @@ final class AppState: ObservableObject {
     static let requestLogDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/Zoro-1 Chat/requests")
 
+    /// Online RL (Settings → Learning): scoring / training progress, and the LoRA adapter the server loads.
+    @Published var learning = LearningStatus()
+    @Published var adapterName: String? = UserDefaults.standard.string(forKey: "TridaChat.adapter") {
+        didSet { UserDefaults.standard.set(adapterName, forKey: "TridaChat.adapter") }
+    }
+    let learningRunner = CommandRunner()
+    /// Training steps done / planned (Learning.swift parses them from the trainer's output).
+    var trainingSteps: (done: Int, total: Int) = (0, 0)
+
     /// Agent tool: screenshot (vision models only; asks before every capture).
     @Published var allowScreenshot = UserDefaults.standard.object(forKey: "TridaChat.allowScreenshot") as? Bool ?? true {
         didSet { UserDefaults.standard.set(allowScreenshot, forKey: "TridaChat.allowScreenshot") }
@@ -217,6 +228,11 @@ final class AppState: ObservableObject {
     /// repeat) and rewrite it once when a check fails.
     @Published var reviewReplies = UserDefaults.standard.object(forKey: "TridaChat.reviewReplies") as? Bool ?? true {
         didSet { UserDefaults.standard.set(reviewReplies, forKey: "TridaChat.reviewReplies") }
+    }
+
+    /// Now and then ask "How's the agent doing so far?" under a reply (online-RL rewards; SessionRatings.swift).
+    @Published var askRatings = UserDefaults.standard.object(forKey: "TridaChat.askRatings") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(askRatings, forKey: "TridaChat.askRatings") }
     }
 
     /// Off unless asked for: the logs hold whole chats, file contents and tool output in plain text (the server
@@ -383,6 +399,7 @@ final class AppState: ObservableObject {
             // keep MLX's pool of freed buffers small (its default is close to the memory limit)
             extra += ["--mlx-cache-limit-mb", "1024"]
             if cfg.genBlock > 0 { extra += ["--gen-block", String(cfg.genBlock)] }
+            if let adapter = activeAdapterURL { extra += ["--adapter", adapter.path] }
             do {
                 try server.start(.init(runtime: runtime, model: model.url, port: cfg.port,
                                        servedName: name, extraArgs: extra))
@@ -608,10 +625,19 @@ final class AppState: ObservableObject {
     func retry() {
         guard !isGenerating, let ci = currentChatIndex else { return }
         let chatID = chats[ci].id
+        var discarded: String?   // the reply being replaced, kept on the user message (online-RL rewards)
         while let last = chats[ci].messages.last, last.role != .user {
+            if discarded == nil, last.role == .assistant, last.decide == nil, last.superseded != true,
+               !last.content.isEmpty {
+                discarded = last.editedFrom ?? last.content
+            }
             chats[ci].messages.removeLast()
         }
         guard !chats[ci].messages.isEmpty else { return }
+        if let discarded {
+            let li = chats[ci].messages.count - 1
+            chats[ci].messages[li].retried = (chats[ci].messages[li].retried ?? []) + [discarded]
+        }
         generationTask = Task { await runTurn(chatID) }
     }
 
