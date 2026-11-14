@@ -149,6 +149,9 @@ public struct ChatMessage: Identifiable, Equatable, Sendable, Codable {
     public var feedback: String? = nil
     /// The reply as the model wrote it, when the user edited it (training-data export: rejected vs chosen).
     public var editedFrom: String? = nil
+    /// User messages: replies to this message the user threw away with Regenerate (online-RL rewards: negative
+    /// samples; trida_mlx/rewards.py).
+    public var retried: [String]? = nil
     /// The typed decisions made for this reply (routing, checks, decision tools), which the user can label.
     public var decisions: [DecisionRecord]? = nil
 

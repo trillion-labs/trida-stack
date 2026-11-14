@@ -139,6 +139,7 @@ struct MessageList: View {
                         MessageView(message: m, isLast: m.id == chat.messages.last?.id, hostsMascot: m.id == host)
                             .id(m.id)
                     }
+                    SessionRatingCard(chat: chat)
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .padding(.horizontal, 24)

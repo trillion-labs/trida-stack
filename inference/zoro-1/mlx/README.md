@@ -13,6 +13,7 @@ stream, no CUDA:
 | decisions | `trida_mlx/decision.py`, `trida_mlx/decide_request.py` | `/v1/decide`: typed decisions (choice / yes-no / score) through Zoro-1's pointer head, escalating to self-spec reasoning when unsure |
 | vision | `trida_mlx/vision.py` | Qwen3.5 vision encoder + projector, image preprocessing, multimodal RoPE (checkpoints with a `vision_config`) |
 | data | `trida_mlx/datamine.py` | `trida-mlx-datamine`: the app's chats + request logs → candidate training data (preference pairs, feedback, tool use, decisions, failures, trajectories), scrubbed |
+| rewards | `trida_mlx/rewards.py` | `trida-mlx-rewards`: online-RL phase 1, the app's chats → one reward per agent turn (session ratings spread by a hindsight progress judge on the decision head, 👍/👎, edits, tool errors, failed checks, regenerations) and a report on whether the judge agrees with the user |
 | tools | `convert.py`, `verify.py`, `bench.py`, `profile.py` | quantize to MLX, first-contact correctness check, causal-vs-self-spec benchmark, step profile |
 
 Everything is built on `mlx_lm.models.qwen3_5` (weights, quantized layers, RoPE and the Metal
