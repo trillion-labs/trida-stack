@@ -107,9 +107,12 @@ class PointerHead:
 
 def load_head(directory, hidden_size=None):
     directory = Path(directory)
-    names = [directory / n for n in ("decision_head.safetensors", "jev_head.safetensors")]
-    safe = next((f for f in names if f.exists()), names[0])
-    pt = next((f for f in (directory / "decision_head.pt", directory / "jev_head.pt") if f.exists()), directory / "jev_head.pt")
+    # decision_head.* is the released name (Zoro-1 on the Hub); jev_head.* is what training writes
+    def found(ext):
+        names = [directory / f"decision_head{ext}", directory / f"jev_head{ext}"]
+        return next((f for f in names if f.exists()), names[1])
+
+    safe, pt = found(".safetensors"), found(".pt")
     if safe.exists():
         weights = mx.load(str(safe))
     elif pt.exists():

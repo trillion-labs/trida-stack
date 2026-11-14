@@ -190,7 +190,7 @@ struct SettingsView: View {
                 } else if state.modelHasDecisionHead {
                     Text("in the model folder; restart the server").foregroundStyle(.orange)
                 } else {
-                    Text("missing (jev_head.pt)").foregroundStyle(.orange)
+                    Text("missing (decision_head.pt)").foregroundStyle(.orange)
                 }
                 Spacer()
                 if !state.supportsDecision && !state.modelHasDecisionHead {

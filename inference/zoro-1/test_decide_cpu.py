@@ -337,7 +337,6 @@ def test_mlx_copy_of_the_request_contract_is_identical():
 
 
 def test_head_file_prefers_decision_head_and_falls_back(tmp_path):
-    import pytest
     with pytest.raises(FileNotFoundError):
         head_file(str(tmp_path))
     (tmp_path / "jev_head.pt").write_bytes(b"")

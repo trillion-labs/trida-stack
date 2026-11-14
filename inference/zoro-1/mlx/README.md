@@ -99,7 +99,7 @@ A checkpoint with a decision head (`decision_head.pt` / `.safetensors`, or `jev_
 It uses the same request envelope, row encoder, and answer fields as
 [`serve_decide.py`](../serve_decide.py). The canonical `../decide_request.py` is packaged
 unchanged and pinned by a test. Both head formats load without PyTorch. Conversion
-writes an unquantized float32 `jev_head.safetensors` and preserves `temperature.json`.
+writes an unquantized float32 `decision_head.safetensors` and preserves `temperature.json`.
 
 ```bash
 curl -s localhost:8000/v1/decide -H 'Content-Type: application/json' -d '{

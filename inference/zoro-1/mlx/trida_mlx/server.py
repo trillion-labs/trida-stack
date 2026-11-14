@@ -32,7 +32,7 @@ from .engine import Engine, IncrementalDetokenizer
 from .parsing import StreamSplitter, parse_tool_calls, split_reasoning, to_openai_tool_calls
 
 ENGINE: Engine = None  # set in main()
-DECIDER: Optional[Decider] = None  # set when the checkpoint has a pointer head (jev_head.pt)
+DECIDER: Optional[Decider] = None  # set when the checkpoint has a pointer head (decision_head.pt or jev_head.pt)
 DEFAULTS: dict = {}
 
 

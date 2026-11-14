@@ -15,8 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Every reader (`serve_decide.py` / `decide_engine.py`, both export scripts, training's head init, the MLX
   loader, download filter and converter) prefers `decision_head.pt` and falls back to `jev_head.pt`, which
   training still writes, so existing checkpoints load unchanged. The MLX converter now writes
-  `decision_head.safetensors`. Older MLX builds do not download `decision_head.pt` and lose `/v1/decide` on the
-  renamed Zoro-1; update them.
+  `decision_head.safetensors`, and Zoro-1 Chat's *Decision head → Download* fetches `decision_head.pt`. Older
+  MLX builds and Zoro-1 Chat apps do not download `decision_head.pt` and lose `/v1/decide` on the renamed
+  Zoro-1; update them.
 - MLX server: `tool_choice: "none"` now keeps the tool schemas in the prompt and bans `<tool_call>`
   (before, the tools were dropped from the prompt), so clients sending it (evals, Hermes) get a different
   prompt than earlier baselines.

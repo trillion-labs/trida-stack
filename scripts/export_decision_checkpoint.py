@@ -27,7 +27,6 @@ TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json", "chat_template.jin
 DTYPES = {torch.bfloat16: ("bf16", "bfloat16"), torch.float32: ("fp32", "float32")}
 
 
-
 def head_file(ckpt):
     """The checkpoint's decision head: decision_head.pt (released checkpoints, e.g. Zoro-1), or jev_head.pt (what
     training writes, and older releases)."""

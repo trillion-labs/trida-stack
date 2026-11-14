@@ -8,8 +8,8 @@
     eng.chat_stream(messages)                             # the same, streamed
     await eng.adecide(...), eng.achat(...), ...           # async versions on eng.loop: concurrent calls batch
 
-A decision checkpoint is a Trida checkpoint plus `decision_head.pt` (or `jev_head.pt`, the name training writes): a small pointer head that scores each option of a
-typed question against the question (MODEL_CONTRACT.md). It reads the last-layer hidden states at each option's end
+A decision checkpoint is a Trida checkpoint plus `decision_head.pt` (or `jev_head.pt`, the name training writes):
+a small pointer head that scores each option of a typed question against the question (MODEL_CONTRACT.md). It reads the last-layer hidden states at each option's end
 and at `<decide>` in a causal token row (decide_request.py).
 
 How this runs on a stock generation engine: the row is causal, so the hidden state at an option equals the last
@@ -47,7 +47,6 @@ def _strip_end(text, strip=True):
     for t in ("<|im_end|>", "<|endoftext|>"):
         text = text.replace(t, "")
     return text.strip() if strip else text
-
 
 
 def head_file(ckpt):
