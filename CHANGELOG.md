@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `export_kev_checkpoint.py` is renamed `export_decision_checkpoint.py`, in both places it lives
   (`scripts/` and `train/tools/`); the arguments and output (kev's checkpoint layout) are unchanged.
+- Released checkpoints name the decision head `decision_head.pt` (Zoro-1 on the Hub ships it under that name).
+  Every reader (`serve_decide.py` / `decide_engine.py`, both export scripts, training's head init, the MLX
+  loader, download filter and converter) prefers `decision_head.pt` and falls back to `jev_head.pt`, which
+  training still writes, so existing checkpoints load unchanged. The MLX converter now writes
+  `decision_head.safetensors`. Older MLX builds do not download `decision_head.pt` and lose `/v1/decide` on the
+  renamed Zoro-1; update them.
 - MLX server: `tool_choice: "none"` now keeps the tool schemas in the prompt and bans `<tool_call>`
   (before, the tools were dropped from the prompt), so clients sending it (evals, Hermes) get a different
   prompt than earlier baselines.

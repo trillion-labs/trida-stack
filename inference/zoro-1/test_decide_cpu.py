@@ -7,7 +7,7 @@ SGLang, no model download. A tiny character-level tokenizer stands in for the re
 import pytest
 import torch
 
-from decide_engine import PointerHead, prefix_prompts, to_answer
+from decide_engine import PointerHead, head_file, prefix_prompts, to_answer
 from decide_request import SPECIAL, VISION, RequestError, parse, prompt, with_reasoning
 from serve_decide import TurnSplitter, split_turn
 
@@ -334,3 +334,13 @@ def test_mlx_copy_of_the_request_contract_is_identical():
     here = Path(__file__).resolve().parent
     assert (here / "mlx/trida_mlx/decide_request.py").read_bytes() == (here / "decide_request.py").read_bytes(), \
         "copy inference/zoro-1/decide_request.py to inference/zoro-1/mlx/trida_mlx/decide_request.py"
+
+
+def test_head_file_prefers_decision_head_and_falls_back(tmp_path):
+    import pytest
+    with pytest.raises(FileNotFoundError):
+        head_file(str(tmp_path))
+    (tmp_path / "jev_head.pt").write_bytes(b"")
+    assert head_file(str(tmp_path)).endswith("jev_head.pt")
+    (tmp_path / "decision_head.pt").write_bytes(b"")
+    assert head_file(str(tmp_path)).endswith("decision_head.pt")

@@ -107,7 +107,9 @@ class PointerHead:
 
 def load_head(directory, hidden_size=None):
     directory = Path(directory)
-    safe, pt = directory / "jev_head.safetensors", directory / "jev_head.pt"
+    names = [directory / n for n in ("decision_head.safetensors", "jev_head.safetensors")]
+    safe = next((f for f in names if f.exists()), names[0])
+    pt = next((f for f in (directory / "decision_head.pt", directory / "jev_head.pt") if f.exists()), directory / "jev_head.pt")
     if safe.exists():
         weights = mx.load(str(safe))
     elif pt.exists():
@@ -309,7 +311,7 @@ class Decider:
         """Decide on the MLX worker; direct callers must hold engine.lock on its owning thread."""
         if self.head is None:
             raise RequestError(
-                "this checkpoint has no decision head (jev_head.pt or jev_head.safetensors)"
+                "this checkpoint has no decision head (decision_head.pt / .safetensors, or jev_head.pt / .safetensors)"
             )
         if not isinstance(reasoning, bool) and reasoning != "auto":
             raise RequestError('reasoning must be a boolean or "auto"')

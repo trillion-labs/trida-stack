@@ -23,9 +23,19 @@ TOKENIZER_FILES = ("tokenizer.json", "tokenizer_config.json", "chat_template.jin
 DTYPES = {torch.bfloat16: ("bf16", "bfloat16"), torch.float32: ("fp32", "float32")}
 
 
+
+def head_file(ckpt):
+    """The checkpoint's decision head: decision_head.pt (released checkpoints, e.g. Zoro-1), or jev_head.pt (what
+    training writes, and older releases)."""
+    for name in ("decision_head.pt", "jev_head.pt"):
+        if os.path.exists(os.path.join(ckpt, name)):
+            return os.path.join(ckpt, name)
+    raise FileNotFoundError(f"{ckpt} has no decision head (decision_head.pt or jev_head.pt)")
+
+
 def export(ckpt, out, temperature=1.0):
     cfg = json.load(open(os.path.join(ckpt, "config.json")))
-    head = torch.load(os.path.join(ckpt, "jev_head.pt"), map_location="cpu")
+    head = torch.load(head_file(ckpt), map_location="cpu")
     vl = "vision_config" in cfg
     prefix = "model.language_model." if vl else "model."
     tensors = {}

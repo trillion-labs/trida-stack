@@ -129,7 +129,7 @@ Defaults: temp 1.0 / top_p 0.95 / top_k 20, no presence penalty, thinking on, `-
 
 ## Decisions
 
-`serve_decide.py` serves a **decision checkpoint**: one that carries a pointer head (`jev_head.pt`, see [`MODEL_CONTRACT.md`](MODEL_CONTRACT.md#decision-checkpoints-serve_decidepy)). It answers typed questions about a state with calibrated probabilities. It can also reason first and then decide, and it chats with tool calls. All three run from one in-process engine and one copy of the weights, on **stock SGLang ≥ 0.5.22** with causal decoding. No fork or patch is needed.
+`serve_decide.py` serves a **decision checkpoint**: one that carries a pointer head (`decision_head.pt`, or `jev_head.pt` as training writes it; see [`MODEL_CONTRACT.md`](MODEL_CONTRACT.md#decision-checkpoints-serve_decidepy)). It answers typed questions about a state with calibrated probabilities. It can also reason first and then decide, and it chats with tool calls. All three run from one in-process engine and one copy of the weights, on **stock SGLang ≥ 0.5.22** with causal decoding. No fork or patch is needed.
 
 ```bash
 pip install "sglang>=0.5.22" fastapi uvicorn             # a stock SGLang env, separate from the diffusion backend's

@@ -36,7 +36,7 @@ Checkpoints trained with this repo, on Hugging Face:
 
 | model | what it is | serve it with |
 |---|---|---|
-| [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) | 4B two-stream block-diffusion model (Qwen3.5-4B), jointly trained as an agent model **and** a decision model (`jev_head.pt` pointer head). Gated: request access, then `hf auth login`. | [`inference/zoro-1/`](inference/zoro-1/): `--mode self-spec` (default) / `causal` / `decide` |
+| [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) | 4B two-stream block-diffusion model (Qwen3.5-4B), jointly trained as an agent model **and** a decision model (`decision_head.pt` pointer head). Gated: request access, then `hf auth login`. | [`inference/zoro-1/`](inference/zoro-1/): `--mode self-spec` (default) / `causal` / `decide` |
 | [![Zoro](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro-yellow)](https://huggingface.co/trillionlabs/Zoro) | 4B block-diffusion model (Qwen3.5-4B, hybrid attention), formerly `Trida2.0-4B`, with a causal head for lossless self-speculative decoding. Apache-2.0. | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) (Apple Silicon), [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) |
 
 The agentic benchmark harnesses in [`benchmark/`](benchmark/) still default to the legacy

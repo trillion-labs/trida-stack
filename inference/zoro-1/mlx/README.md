@@ -95,7 +95,7 @@ model and keeps the vision tower in bf16. Images go through the server as OpenAI
 
 ## Decisions (Zoro-1 pointer head)
 
-A checkpoint with `jev_head.pt` or `jev_head.safetensors` also serves `POST /v1/decide`.
+A checkpoint with a decision head (`decision_head.pt` / `.safetensors`, or `jev_head.pt` / `.safetensors`) also serves `POST /v1/decide`.
 It uses the same request envelope, row encoder, and answer fields as
 [`serve_decide.py`](../serve_decide.py). The canonical `../decide_request.py` is packaged
 unchanged and pinned by a test. Both head formats load without PyTorch. Conversion
