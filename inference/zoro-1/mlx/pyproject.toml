@@ -29,6 +29,7 @@ trida-mlx-bench = "trida_mlx.bench:main"
 trida-mlx-profile = "trida_mlx.profile:main"
 trida-mlx-datamine = "trida_mlx.datamine:main"
 trida-mlx-rewards = "trida_mlx.rewards:main"
+trida-mlx-rl-train = "trida_mlx.rl_train:main"
 trida-mlx-simuser = "trida_mlx.simuser:main"
 
 [dependency-groups]

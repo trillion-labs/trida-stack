@@ -145,6 +145,15 @@ final class AppState: ObservableObject {
     static let requestLogDir = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/Zoro-1 Chat/requests")
 
+    /// Online RL (Settings → Learning): scoring / training progress, and the LoRA adapter the server loads.
+    @Published var learning = LearningStatus()
+    @Published var adapterName: String? = UserDefaults.standard.string(forKey: "TridaChat.adapter") {
+        didSet { UserDefaults.standard.set(adapterName, forKey: "TridaChat.adapter") }
+    }
+    let learningRunner = CommandRunner()
+    /// Training steps done / planned (Learning.swift parses them from the trainer's output).
+    var trainingSteps: (done: Int, total: Int) = (0, 0)
+
     /// Agent tool: screenshot (vision models only; asks before every capture).
     @Published var allowScreenshot = UserDefaults.standard.object(forKey: "TridaChat.allowScreenshot") as? Bool ?? true {
         didSet { UserDefaults.standard.set(allowScreenshot, forKey: "TridaChat.allowScreenshot") }
@@ -390,6 +399,7 @@ final class AppState: ObservableObject {
             // keep MLX's pool of freed buffers small (its default is close to the memory limit)
             extra += ["--mlx-cache-limit-mb", "1024"]
             if cfg.genBlock > 0 { extra += ["--gen-block", String(cfg.genBlock)] }
+            if let adapter = activeAdapterURL { extra += ["--adapter", adapter.path] }
             do {
                 try server.start(.init(runtime: runtime, model: model.url, port: cfg.port,
                                        servedName: name, extraArgs: extra))

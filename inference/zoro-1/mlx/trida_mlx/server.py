@@ -378,6 +378,7 @@ class Handler(BaseHTTPRequestHandler):
                 "supports_vision": ENGINE.supports_vision,
                 "input_modalities": ["text", "image"] if ENGINE.supports_vision else ["text"],
                 "decision": DECIDER is not None,
+                "adapter": ENGINE.adapter,   # a LoRA adapter folder (trida-mlx-rl-train), or None
                 # generation guards this server runs with (record them with eval / speedrun results)
                 "loop_guard": bool(DEFAULTS.get("loop_guard")), "tool_call_gate": DEFAULTS.get("tool_call_gate", 0.0),
                 "decision_cache": {"max_bytes": DECIDER.cache_bytes} if DECIDER else None,
@@ -695,6 +696,8 @@ def main(argv=None):
     ap.add_argument("--mode", default="self-spec", choices=["self-spec", "causal"])
     ap.add_argument("--gen-block", type=int, default=None, help="N tokens per self-spec step (canvas 2N-1); default 4 (fastest on Apple Silicon)")
     ap.add_argument("--prefill-chunk", type=int, default=512)
+    ap.add_argument("--adapter", default=None, metavar="DIR",
+                    help="load a LoRA adapter written by trida-mlx-rl-train (online RL) on top of the model")
     ap.add_argument("--no-prompt-cache", action="store_true")
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--top-k", type=int, default=50)
@@ -752,7 +755,7 @@ def main(argv=None):
     print(f"[trida-mlx] loading {a.model} ...", flush=True)
     WORKER = _Worker(dict(model=a.model, mode=a.mode, gen_block=a.gen_block, prefill_chunk=a.prefill_chunk,
                           prompt_cache=not a.no_prompt_cache, fused_gdn=not a.no_fused_gdn,
-                          cache_slots=a.cache_slots, max_image_pixels=a.max_image_pixels))
+                          cache_slots=a.cache_slots, max_image_pixels=a.max_image_pixels, adapter=a.adapter))
     WORKER.start()
     WORKER.ready.wait()
     if WORKER.error is not None:
