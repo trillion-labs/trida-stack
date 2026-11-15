@@ -9,6 +9,7 @@ struct SettingsView: View {
             serverTab.tabItem { Label("Server", systemImage: "server.rack") }
             generationTab.tabItem { Label("Generation", systemImage: "slider.horizontal.3") }
             agentTab.tabItem { Label("Agent", systemImage: "wrench.and.screwdriver") }
+            KoreanMCPTab(hub: state.mcp).tabItem { Label("Korean MCP", systemImage: "puzzlepiece.extension") }
         }
         .padding(20)
         .frame(width: 560)

@@ -46,6 +46,7 @@ enum ToolRouter {
               + "news, prices, the latest version of something, or a web page / URL",
               tools: ["fetch_url", "find_in_page", "read_section", "open_link"]),
         Group(key: "math", description: "an exact arithmetic calculation", tools: ["calculator"]),
+        Group(key: "chart", description: "drawing a chart, graph or plot of numbers", tools: ["plot_chart"]),
         Group(key: "shell", description: "run a shell command on the Mac", tools: ["run_shell"]),
         Group(key: "decide", description: "a calibrated pick among options or a yes/no judgement the user asked for",
               tools: ["decide_choice", "decide_yes_no"]),
@@ -68,7 +69,7 @@ extension AppState {
     /// Decides which tools the latest message may use. Errors and unsure answers fall back to every tool.
     func routeTools(chatID: Chat.ID, messageID: UUID, offered: Set<String>, mode: ToolRouting,
                     progress: @escaping (String) -> Void) async -> ToolRoute {
-        let groups = ToolRouter.groups.filter { !offered.isDisjoint(with: $0.tools) }
+        let groups = (ToolRouter.groups + mcp.routerGroups).filter { !offered.isDisjoint(with: $0.tools) }
         guard mode != .off, supportsDecision, !groups.isEmpty else { return ToolRoute(allowed: nil, note: "") }
         var lines = Array(stateLines(chatID).suffix(6)).map { $0.count > 600 ? String($0.prefix(600)) + "…" : $0 }
         if lines.isEmpty { lines = ["(empty)"] }

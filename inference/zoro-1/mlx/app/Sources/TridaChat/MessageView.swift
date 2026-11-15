@@ -216,12 +216,22 @@ struct ToolRunView: View {
     let messageID: UUID
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            card
+            // a chart is the answer, not a detail: show it in the reply (ChartTool.swift)
+            if run.call.name == "plot_chart", run.status == .done, !run.result.hasPrefix("error") {
+                ChartCard(run: run)
+            }
+        }
+    }
+
+    private var card: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 6) {
                 Text(run.call.arguments)
                     .font(.system(size: 11, design: .monospaced))
                     .textSelection(.enabled)
-                if !run.images.isEmpty {
+                if !run.images.isEmpty, run.call.name != "plot_chart" {
                     HStack {
                         ForEach(Array(run.images.enumerated()), id: \.offset) { _, d in
                             Thumbnail(data: d, side: 160)

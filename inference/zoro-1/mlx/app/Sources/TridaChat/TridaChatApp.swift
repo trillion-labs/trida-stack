@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         state.startServer()
+        state.mcp.startEnabled()
         state.updateAutomation()
         // The Dock icon is the mascot, showing what the model is doing (redrawn only when that changes).
         dockTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in

@@ -134,6 +134,8 @@ final class AppState: ObservableObject {
     private var setupTask: Task<Void, Never>?
 
     let server = ServerProcess()
+    /// Korean MCP servers (Settings → Korean MCP; KoreanMCP.swift): their tools join the agent's.
+    let mcp = MCPHub()
     var generationTask: Task<Void, Never>?
     private var approvalContinuation: CheckedContinuation<Bool, Never>?
     private var startupTask: Task<Void, Never>?
@@ -433,6 +435,7 @@ final class AppState: ObservableObject {
         startupTask?.cancel()
         generationTask?.cancel()
         server.stop()
+        mcp.stopAll()
     }
 
     // MARK: - model setup
@@ -630,6 +633,11 @@ final class AppState: ObservableObject {
         if var p = tools?.systemPrompt {
             if decisionToolsActive { p += " " + DecisionTools.systemPrompt }
             if knowledge.enabled { p += " " + KnowledgeTools.systemPrompt }
+            let services = mcp.readyNames
+            if !services.isEmpty {
+                p += " Korean service tools (" + services.joined(separator: ", ") + ") look up live Korean data: "
+                    + "use them for those questions instead of answering from memory."
+            }
             if uiToolsActive { p += " " + UITools.systemPrompt(target: UIAgent.shared.targetName) }
             system = system.isEmpty ? p : p + "\n\n" + system
         }
@@ -671,9 +679,10 @@ final class AppState: ObservableObject {
         defer { removeStopMonitor() }
         let dec = decisionToolsActive
         let mem = knowledge.enabled
+        let mcpSpecs = mcp.specs
         let specs = tools.map {
             $0.specs + (dec ? DecisionTools.specs(ui: ui) : []) + (ui ? UITools.specs : [])
-                + (mem ? KnowledgeTools.specs : [])
+                + (mem ? KnowledgeTools.specs : []) + mcpSpecs + [ChartTool.spec]
         }
         let lastIsUser = chats.first { $0.id == chatID }?.messages.last?.role == .user
         // Nearly full context: summarize the earlier conversation first (see Compaction.swift).
@@ -704,6 +713,7 @@ final class AppState: ObservableObject {
         let steps = max(1, s.agentMode ? s.maxAgentSteps : 1)
         var ran: [String: Int] = [:]       // tool calls already run in this turn (name + arguments), and how often
         var webCalls = 0
+        var routerDenials = 0
         var relaxGate = false               // a call the gate held back made the reply degenerate: retried once
         let userText = chats.first { $0.id == chatID }?.messages.last { $0.role == .user && $0.decide == nil }?.content ?? ""
         // pages opened in earlier turns of this chat: opening the same URL again gets the same page (a failed search
@@ -808,10 +818,29 @@ final class AppState: ObservableObject {
             for call in calls {
                 if Task.isCancelled { return }
                 var result: String
-                if let allowed, !allowed.contains(call.name) {
-                    let text = "error: \(call.name) is not needed for this message (the tool router allowed "
-                        + (allowed.isEmpty ? "no tools" : allowed.sorted().joined(separator: ", "))
+                if let specs, !ToolRouter.names(specs).contains(call.name) {
+                    // a name the model made up (e.g. a chart series' name): say which tools exist
+                    let names = ToolRouter.names(specs).intersection(allowed ?? ToolRouter.names(specs)).sorted()
+                    let text = "error: there is no tool named \"\(call.name)\". Call one of: "
+                        + names.joined(separator: ", ") + "."
+                    setRun(chatID, reply.id, call.id) { $0.status = .done; $0.result = text }
+                    append(chatID, toolMessage(call, text))
+                    continue
+                }
+                if let allowedNow = allowed, !allowedNow.contains(call.name) {
+                    routerDenials += 1
+                    var text = "error: \(call.name) is not needed for this message (the tool router allowed "
+                        + (allowedNow.isEmpty ? "no tools" : allowedNow.sorted().joined(separator: ", "))
                         + "). Answer from the conversation, or use an allowed tool."
+                    if routerDenials >= 2 {
+                        // the model keeps reaching outside the router's pick: the pick was probably wrong
+                        // (e.g. a Korean MCP server that can't answer this), so stop restricting this turn
+                        allowed = nil
+                        text = "error: \(call.name) was blocked by the tool router, which picked "
+                            + (allowedNow.isEmpty ? "no tools" : allowedNow.sorted().joined(separator: ", "))
+                            + " for this message. Those don't seem to fit, so every tool is allowed from now on in "
+                            + "this turn: call \(call.name) again if it is the right tool."
+                    }
                     setRun(chatID, reply.id, call.id) { $0.status = .denied; $0.result = text }
                     append(chatID, toolMessage(call, text))
                     continue
@@ -866,6 +895,39 @@ final class AppState: ObservableObject {
                         run.result = output.text
                     }
                     append(chatID, toolMessage(call, output.text))
+                    continue
+                }
+                if ChartTool.names.contains(call.name) {     // the app draws it (ChartTool.swift)
+                    let output = runChartTool(call, chatID: chatID)
+                    setRun(chatID, reply.id, call.id) { run in
+                        run.status = .done
+                        run.result = output.text
+                        run.images = output.images
+                    }
+                    // the model sees its chart only when it can see images
+                    append(chatID, toolMessage(call, output.text, images: supportsVision ? output.images : []))
+                    continue
+                }
+                if let hit = mcp.lookup(call.name) {     // a Korean MCP server's tool (KoreanMCP.swift)
+                    let entry = hit.entry, tool = hit.tool
+                    if entry.ask {
+                        setRun(chatID, reply.id, call.id) { $0.status = .waitingForApproval }
+                        let ok = await requestApproval(ApprovalRequest(
+                            toolName: call.name, detail: "\(entry.name): \(tool)\n\n\(call.arguments)",
+                            caption: "Runs the \(entry.name) MCP server (third-party) on this Mac."))
+                        if !ok {
+                            setRun(chatID, reply.id, call.id) { $0.status = .denied; $0.result = "user denied" }
+                            append(chatID, toolMessage(call, "user denied"))
+                            continue
+                        }
+                    }
+                    setRun(chatID, reply.id, call.id) { $0.status = .running }
+                    let text = await mcp.call(entry, tool, arguments: call.argumentDict)
+                    setRun(chatID, reply.id, call.id) { run in
+                        run.status = .done
+                        run.result = text
+                    }
+                    append(chatID, toolMessage(call, text))
                     continue
                 }
                 let readOnlyShell = call.name == "run_shell" && autoApproveReadOnlyShell
