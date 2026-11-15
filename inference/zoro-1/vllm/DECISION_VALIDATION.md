@@ -326,6 +326,29 @@ The advisory gate now matches exceptions per advisory and its aliases, rather
 than allowing an exception for one package advisory to cover every other finding
 on that package. The newly discovered advisory therefore remains a CI blocker.
 
+### Proposed Linux-only advisory exception (approval pending)
+
+Proposed classification: `not_affected` for **GHSA-xmj3-9gf7-h52w**, limited to
+the locked Linux x86_64 / Python 3.12 decision-serving environment. This is a
+proposal, not an approved entry in `docs/supply-chain/exceptions.md`.
+
+- [The upstream advisory](https://github.com/advisories/GHSA-xmj3-9gf7-h52w)
+  describes Windows drive-qualified path handling during legacy
+  `Wheel.install_as_egg` installation. That Windows path behavior does not apply
+  to the Linux H100 environment; this is the basis for `not_affected`.
+- The documented installation uses `uv pip sync` with the full environment lock.
+  The decision-serving code does not call `install_as_egg` or install packages
+  from HTTP requests. These are additional scope checks, not a claim that every
+  dependency has been exhaustively audited.
+- Keep setuptools 80.10.2 to satisfy vLLM 0.32.0's Python 3.12 requirement
+  `setuptools>=78.1.1,<81`; the fixed 84.1.0 fails dependency validation.
+- Proposed re-review date: **2026-12-15**, or earlier if the platform, installation
+  path or dependency lock changes. Windows deployment is outside this proposal.
+- Only this advisory would be excepted; all other findings remain gated. After
+  maintainer approval, record the named approver, approval link, evidence and
+  expiry in the exception register, then rerun the advisory check. Until then,
+  the current scan failure remains in place.
+
 ### H100 HTTP regression after the review fixes
 
 Slurm job **5186**, one H100 on `diffusion-compute-001`, used the same checkpoint,
