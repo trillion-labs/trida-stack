@@ -128,8 +128,8 @@ curl -s localhost:8000/v1/decide -H 'Content-Type: application/json' -d '{
   `--decision-image-temperature` and a per-request `temperature` override them. For CUDA
   parity comparisons, explicitly select the same temperature on both servers.
 - `reasoning` defaults to `false`; `true` generates self-spec reasoning before deciding, with
-  `max_reasoning_tokens` defaulting to 768. `"auto"` first decides directly, then reasons if
-  any question's top probability is below `threshold` (default 0.7). Auto reasoning uses
+  `max_reasoning_tokens` defaulting to the configured reasoning cap. `"auto"` first decides directly, then reasons if
+  any question's top probability is below `threshold` (default 0.7). Both modes use
   self-spec and the shared 4096-token cap by default. `--reasoning-token-limit`
   can raise that cap to 8192. `trida_mode` can select `causal` or `self-spec`.
   Completed reasoning is fitted to the state budget, keeping its conclusion. Incomplete

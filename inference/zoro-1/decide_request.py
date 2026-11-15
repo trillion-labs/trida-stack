@@ -330,10 +330,10 @@ def fit_reasoning(request, text, tokenizer, image_tokens=0, *, max_state=MAX_STA
 
 
 def reasoning_budget(value, reasoning, limit=DEFAULT_REASONING_TOKEN_LIMIT):
-    """Shared request cap; auto uses the configured cap, explicit reasoning defaults to 768."""
+    """Shared request cap and default for boolean and auto reasoning."""
     if type(limit) is not int or not 1 <= limit <= MAX_REASONING_TOKENS:
         raise RequestError(f"reasoning_token_limit must be between 1 and {MAX_REASONING_TOKENS}")
-    value = min(limit, 8192 if reasoning == "auto" else 768) if value is None else value
+    value = limit if value is None else value
     if type(value) is not int or not 1 <= value <= limit:
         raise RequestError(f"max_reasoning_tokens must be between 1 and {limit}")
     return value

@@ -90,7 +90,7 @@ records conclusion fitting. Unfittable states/rows preserve the direct answer;
 optional `cut_detail` distinguishes context and row limits.
 
 The default reasoning cap is 4096; `--reasoning-token-limit` accepts 1..8192 on
-CUDA and MLX. Boolean reasoning defaults to 768 (within the cap); auto uses the
+CUDA and MLX. Boolean and auto reasoning both default to the
 configured cap. `usage.input_tokens` sums decision rows actually scored,
 including both passes when present; `usage.output_tokens` counts native
 reasoning completion tokens even on fallback. These are logical API counters,

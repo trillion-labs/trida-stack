@@ -9,11 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Decision reasoning: CUDA and MLX now use the configured reasoning cap for both
+  `reasoning: true` and `"auto"` when the budget is omitted or null (default 4096).
+  Boolean reasoning previously defaulted to 768; MLX auto previously used 8192.
+  Explicit budgets above the configured cap are rejected; the cap can be raised
+  with `--reasoning-token-limit` up to 8192.
+- MLX decision fallback: `cut` is now `length`, `empty` or `state_limit` instead of
+  free text. CUDA and MLX report `answers_source` and `reasoning_trimmed` so clients
+  can distinguish direct fallback from completed, possibly trimmed reasoning.
+- Causal `reasoning: true` computes direct answers first for fallback, adding a
+  direct pass and the `direct`, `escalated`, `threshold` and `usage` response fields.
+
 - MLX server: `tool_choice: "none"` now keeps the tool schemas in the prompt and bans `<tool_call>`
   (before, the tools were dropped from the prompt), so clients sending it (evals, Hermes) get a different
   prompt than earlier baselines.
 
 ### Added
+
+- Causal decision serving: `reasoning: "auto"` with a configurable `threshold`,
+  and logical token usage for scored decision rows and generated reasoning.
+- Decision server flags: `--decision-max-state`, `--decision-max-row` and
+  `--reasoning-token-limit`; experimental self-spec decisions via
+  `serve_decide.py --backend self-spec` or `serve.py --decision-backend self-spec`.
+  The self-spec backend is text-only and serial; probability parity is not yet accepted.
 
 - Zoro-1 Chat 0.6.0: **a personal knowledge graph** learned from chats (`inference/zoro-1/mlx/app/Knowledge`,
   a standalone Swift package with its own `kg-selftest`).

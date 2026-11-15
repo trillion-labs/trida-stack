@@ -373,7 +373,7 @@ def test_native_reasoned_row_limit_error_keeps_direct(cls):
 def test_reasoning_limit_defaults_and_explicit_opt_in():
     from decide_request import reasoning_budget
     assert reasoning_budget(None, "auto") == 4096
-    assert reasoning_budget(None, True) == 768
+    assert reasoning_budget(None, True) == 4096
     with pytest.raises(RequestError, match="between 1 and 4096"):
         reasoning_budget(4097, True)
     assert reasoning_budget(8192, True, 8192) == 8192
@@ -428,3 +428,33 @@ def test_long_question_reasoning_returns_trimmed_answer_over_http(cls):
 def test_equal_state_row_caps_rejected_before_model_load():
     with pytest.raises(RequestError, match="row - 640"):
         SelfSpecDecideEngine("/unused", decision_max_state=16384, decision_max_row=16384)
+
+
+@pytest.mark.parametrize("cls", [DecideEngine, SelfSpecDecideEngine])
+@pytest.mark.parametrize("reasoning", [True, "auto"])
+@pytest.mark.parametrize("cap,provided,expected", [
+    (4096, "omitted", 4096), (2048, None, 2048),
+    (8192, "omitted", 8192), (4096, 32, 32),
+])
+def test_http_reasoning_defaults_to_configured_cap(cls, reasoning, cap, provided, expected):
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+    e = engine(cls)
+    e.reasoning_token_limit = cap
+    calls = []
+    async def logits(enc, image=None):
+        calls.append("direct" if not calls else "reasoned")
+        return [torch.tensor([0.0, 1.0])]
+    async def chunks(ids, params, **kwargs):
+        assert calls == ["direct"]
+        assert params["max_new_tokens"] == expected
+        yield "done</think>", {"finish_reason": {"type": "stop", "matched": 50}, "completion_tokens": 4}
+    e.alogits, e._reasoning_chunks = logits, chunks
+    body = {"request": REQUEST, "reasoning": reasoning, "threshold": 1}
+    if provided != "omitted":
+        body["max_reasoning_tokens"] = provided
+    response = TestClient(create_app(e)).post("/v1/decide", json=body)
+    assert response.status_code == 200
+    result = response.json()
+    assert result["answers_source"] == "reasoned" and calls == ["direct", "reasoned"]
+    assert "cut" not in result and result["direct"]["answers"]

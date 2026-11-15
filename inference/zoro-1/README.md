@@ -158,10 +158,7 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
   - `noul`: yes/no; the answer is P(yes).
   - `choice`: `{key: description}`.
   - `score`: a list of levels, lowest first; the answer is the expected level.
-- **`"reasoning": true`:** the model first writes its reasoning (returned as `reasoning`), then decides with that reasoning added to the state.
-  Decision state and row caps must leave at least 640 tokens for a question
-  (`state <= row - 640`, `row <= context`). Reasoning fitting also reserves
-  the longest question’s actual encoded suffix before keeping the conclusion.
+- **Reasoning:** see the shared [reasoning contract](#reasoning-contract) below.
 - **Images:** add an `image` (path, base64 or data URL) to the request.
 - **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
   - It takes `tools`; tool calls come back as `tool_calls`.
@@ -174,6 +171,31 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
 
 How it fits a stock engine: a request row is causal, so an option's hidden state is the last hidden state of the row cut off at that option. Each question with K options therefore becomes K+1 prefix prompts in one batched call with `return_hidden_states="last"`, and SGLang's prefix cache shares the work. The head then runs on those vectors. Checked against a transformers implementation of the same head on 200 held-out decision records, the outputs matched to within 0.1% mean probability difference.
 
+### Reasoning contract
+
+CUDA causal, CUDA self-spec and MLX share these `/v1/decide` rules:
+
+- `reasoning: true` always reasons; `reasoning: "auto"` reasons when any
+  question's top probability is below `threshold` (default `0.7`). Both first
+  compute direct answers for fallback. This adds a direct pass even for `true`;
+  the observed stock AR warm cost was about 0.12 s before reasoning.
+- An omitted or null `max_reasoning_tokens` uses `--reasoning-token-limit`
+  (default **4096**, configurable from 1 to 8192) for both modes. An explicit
+  budget must be a positive integer no greater than that cap. Default budgets
+  fit the available context; explicit budgets that do not fit return direct
+  fallback. Reasoning is off by default.
+- Completed reasoning keeps its conclusion when fitted to the state and row
+  limits, reporting `reasoning_trimmed` and `answers_source: "reasoned"`.
+  Fitting reserves the longest encoded question. CUDA's configurable caps require
+  `state <= row - 640` and `row <= context`; larger questions may need more room.
+- Incomplete, empty or unusable reasoning returns direct answers with
+  `answers_source: "direct"` and `cut: "length"`, `"empty"` or `"state_limit"`.
+  Optional `cut_detail` distinguishes context and row limits. Clients requiring
+  complete, untrimmed reasoning must reject cuts and trimming.
+- Reasoning responses include `direct`, `escalated` and `threshold`. `usage`
+  counts all scored decision-row tokens and generated reasoning tokens, including
+  on fallback; it does not count the physical K+1 prefix executions.
+
 ### Self-spec decisions (experimental)
 
 One diffusion engine can also serve `/v1/decide` and self-spec chat. Install the
@@ -184,15 +206,8 @@ python serve.py --mode decide --decision-backend self-spec --mem-fraction 0.5
 # Uses $DECIDE_PYTHON, then $SGLANG_PYTHON, then the current Python.
 ```
 
-`reasoning: true` generates with self-spec before deciding. `reasoning: "auto"`
-first decides directly and reasons if any question's top probability is below
-`threshold` (default `0.7`). The shared reasoning cap defaults to 4096 tokens;
-boolean reasoning defaults to 768 and auto uses the cap. CUDA and MLX servers
-accept `--reasoning-token-limit` up to 8192. Completed reasoning is fitted to
-the state budget, retaining its conclusion and setting `reasoning_trimmed`.
-Fallback returns `answers_source: "direct"` and `cut: "length" | "empty" |
-"state_limit"`; successful reasoning returns `answers_source: "reasoned"`.
-`usage` counts scored decision-row tokens and generated reasoning tokens.
+The shared [reasoning contract](#reasoning-contract) also applies to this backend;
+reasoning is generated with self-spec.
 
 This backend is **text-only and serial**. Chat and decisions share one model;
 **Chat and decisions do not overlap**: a streaming chat holds admission until

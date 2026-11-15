@@ -127,12 +127,8 @@ version before loading weights. No backend source or weights are vendored.
 
 - Direct decisions use serial K+1 prefix requests, discarding one generated
   token per prefix to preserve the tested KV cleanup path.
-- `reasoning: true` and `"auto"` generate with the self-spec engine. Auto first
-  scores directly and escalates when the lowest top probability is below the
-  requested threshold. Both CUDA engines share the reasoning orchestration;
-  CUDA and MLX share conclusion fitting and cut/source normalization. Completed
-  reasoning is fitted to the state budget. Incomplete/empty/unfittable reasoning
-  keeps the direct answer with the canonical `cut` and `answers_source` fields.
+- Reasoning uses the shared orchestration and response contract described
+  [below](#pr-review-shared-contract-and-readiness), with self-spec generation.
 - All native calls share an admission lock, including streaming and abort
   acknowledgement. Native aborts are retried across tokenization/admission
   races. Failure to acknowledge within 30 seconds prevents further inference
@@ -255,8 +251,8 @@ only replaces native generation/readout operations. MLX uses the same torch-free
 conclusion fitting. Optional `cut_detail` identifies context/row limits. Native
 row-limit errors after reasoning still fall back to the direct answer.
 
-All three implementations default to a 4096-token reasoning cap (768 for boolean
-reasoning, the configured cap for auto). CUDA and MLX expose
+Boolean and auto reasoning both default to the configured cap (4096 tokens);
+omitted or null budgets use that default and fit the available context. CUDA and MLX expose
 `--reasoning-token-limit` up to 8192. `usage.input_tokens` sums the decision rows
 actually scored, including both passes, and `usage.output_tokens` uses native
 reasoning counts even on fallback. These are logical API counters, not physical
@@ -269,6 +265,13 @@ now returns 503 with `ok: false`. CPU regression tests force that timeout and
 check readiness, rather than only testing the initial healthy state. The main
 launcher's `--decision-backend` help explicitly reports experimental status and
 the incomplete 38/40 parity result.
+
+### Integration order
+
+Land **#89 first**, then rebase #96 onto the resulting `origin/main`, reconcile
+its shared serving files and rerun integration tests before merging #96. #89 is
+still open; this follow-up does not merge it or claim the cross-PR conflicts are
+resolved. Coordinate #97's default-budget change with this shared-cap default.
 
 ### Latency and AR comparison
 
@@ -383,3 +386,19 @@ need a wider gap. CPU HTTP regressions exercise both causal and self-spec engine
 with a long question and confirm reported trimming instead of row-overflow failure.
 Benchmark requests and probability tolerances are unchanged. The existing H100
 results above were not rerun for this tokenizer/limit-only follow-up.
+
+### Default-budget and documentation review (2026-11-15)
+
+Boolean and auto reasoning now both default to the configured cap (4096), matching
+#97's proposed `/v1/decide` default. New HTTP regressions check causal and self-spec
+native generation parameters for omitted, null and explicit budgets, including
+2048/4096/8192 server caps; MLX tests check both reasoning modes at those caps.
+The changelog records the client-visible defaults, fallback fields, response
+additions and flags. The README has one shared contract section and explains the
+initial direct pass; this document keeps one contract description above.
+
+Verification: **226 CPU tests passed (2 skipped)**, **59 MLX tests passed (1
+skipped)**, Ruff and pinned supply-chain checks passed. No additional H100 or
+forced-length speed comparison was run. Frozen benchmark inputs, probability
+comparison code and tolerances are unchanged; the two parity failures remain.
+#89 must still land before the integration rebase described above.

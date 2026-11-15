@@ -188,7 +188,7 @@ def create_app(engine):
                 raise RequestError('this backend does not support reasoning="auto"')
             options = {}
             if body.get("max_reasoning_tokens") is not None:
-                budget = _num(body, "max_reasoning_tokens", 768, int)
+                budget = _num(body, "max_reasoning_tokens", None, int)
                 if budget < 1:
                     raise RequestError("max_reasoning_tokens must be positive")
                 options["max_reasoning_tokens"] = budget

@@ -246,3 +246,17 @@ def test_loader_refuses_oversized_views_and_odd_zips(tmp_path):
         z.writestr("archive/version", "3")
     with pytest.raises(ValueError, match="data.pkl"):
         decision.load_torch_file(tmp_path / "empty.pt")
+
+
+@pytest.mark.parametrize("reasoning", [True, "auto"])
+@pytest.mark.parametrize("cap", [2048, 4096, 8192])
+def test_boolean_and_auto_reasoning_default_to_server_cap(decider, monkeypatch, reasoning, cap):
+    decider.reasoning_token_limit = cap
+    budgets = []
+    def think(request, image, max_tokens, **kwargs):
+        budgets.append(max_tokens)
+        return {"text": "unfinished", "ended": "budget", "stats": {"new_tokens": 1}}
+    monkeypatch.setattr(decider, "think", think)
+    result = decider.decide(REQ, reasoning=reasoning, threshold=1)
+    assert budgets == [cap]
+    assert result["cut"] == "length" and result["answers_source"] == "direct"
