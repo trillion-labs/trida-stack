@@ -52,3 +52,19 @@ def test_stream_splitter_catches_bare_calls():
     out += rest
     assert "".join(t for k, t in out if k == "content").strip() == ""
     assert [c["name"] for c in calls] == ["now", "run_shell", "run_shell"]
+
+
+def test_xml_call_whose_parameter_holds_a_named_object():
+    """A plot_chart call: the series parameter is a JSON list of {"name", "values"} objects. The call is plot_chart,
+    not a tool named after the series (the JSON fallback used to pick up the first {...} it found)."""
+    tools = [{"type": "function", "function": {"name": "plot_chart", "parameters": {"type": "object", "properties": {
+        "kind": {"type": "string"}, "x": {"type": "array"}, "series": {"type": "array"}}}}}]
+    text = ('<tool_call>\n<function=plot_chart>\n<parameter=kind>\nline\n</parameter>\n'
+            '<parameter=x>\n["11-12", "11-13"]\n</parameter>\n'
+            '<parameter=series>\n[{"name": "Close Price (KRW)", "values": [206500, 209000]}]\n</parameter>\n'
+            '</function>\n</tool_call>')
+    content, calls = parse_tool_calls(text, tools)
+    assert content == ""
+    assert [c["name"] for c in calls] == ["plot_chart"]
+    assert calls[0]["arguments"]["series"] == [{"name": "Close Price (KRW)", "values": [206500, 209000]}]
+    assert calls[0]["arguments"]["x"] == ["11-12", "11-13"]

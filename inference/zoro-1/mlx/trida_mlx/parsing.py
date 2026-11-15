@@ -89,7 +89,9 @@ def parse_tool_calls(text: str, tools=None) -> tuple[str, list]:
     order = []                                   # (position, call), so wrapped and bare calls keep their order
     for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", text, re.DOTALL):
         block = m.group(1)
-        obj = _loads_balanced(block)
+        # qwen3-coder XML first: its <parameter> values can hold JSON objects with a "name" key (a chart series,
+        # say), which the JSON fallback would take for the call itself
+        obj = None if _BARE_FN.search(block) else _loads_balanced(block)
         if isinstance(obj, dict) and "name" in obj:
             args = obj.get("arguments", obj.get("parameters", {}))
             if isinstance(args, str):
