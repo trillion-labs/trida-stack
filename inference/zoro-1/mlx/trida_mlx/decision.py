@@ -109,7 +109,12 @@ class PointerHead:
 
 def load_head(directory, hidden_size=None):
     directory = Path(directory)
-    safe, pt = directory / "jev_head.safetensors", directory / "jev_head.pt"
+    # decision_head.* is the released name (Zoro-1 on the Hub); jev_head.* is what training writes
+    def found(ext):
+        names = [directory / f"decision_head{ext}", directory / f"jev_head{ext}"]
+        return next((f for f in names if f.exists()), names[1])
+
+    safe, pt = found(".safetensors"), found(".pt")
     if safe.exists():
         weights = mx.load(str(safe))
     elif pt.exists():
@@ -296,7 +301,7 @@ class Decider:
         """Decide on the MLX worker; direct callers must hold engine.lock on its owning thread."""
         if self.head is None:
             raise RequestError(
-                "this checkpoint has no decision head (jev_head.pt or jev_head.safetensors)"
+                "this checkpoint has no decision head (decision_head.pt / .safetensors, or jev_head.pt / .safetensors)"
             )
         if not isinstance(reasoning, bool) and reasoning != "auto":
             raise RequestError('reasoning must be a boolean or "auto"')

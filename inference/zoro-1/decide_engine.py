@@ -8,8 +8,8 @@
     eng.chat_stream(messages)                             # the same, streamed
     await eng.adecide(...), eng.achat(...), ...           # async versions on eng.loop: concurrent calls batch
 
-A decision checkpoint is a Trida checkpoint plus `jev_head.pt`: a small pointer head that scores each option of a
-typed question against the question (MODEL_CONTRACT.md). It reads the last-layer hidden states at each option's end
+A decision checkpoint is a Trida checkpoint plus `decision_head.pt` (or `jev_head.pt`, the name training writes):
+a small pointer head that scores each option of a typed question against the question (MODEL_CONTRACT.md). It reads the last-layer hidden states at each option's end
 and at `<decide>` in a causal token row (decide_request.py).
 
 How this runs on a stock generation engine: the row is causal, so the hidden state at an option equals the last
@@ -48,6 +48,15 @@ def _strip_end(text, strip=True):
     for t in ("<|im_end|>", "<|endoftext|>"):
         text = text.replace(t, "")
     return text.strip() if strip else text
+
+
+def head_file(ckpt):
+    """The checkpoint's decision head: decision_head.pt (released checkpoints, e.g. Zoro-1), or jev_head.pt (what
+    training writes, and older releases)."""
+    for name in ("decision_head.pt", "jev_head.pt"):
+        if os.path.exists(os.path.join(ckpt, name)):
+            return os.path.join(ckpt, name)
+    raise FileNotFoundError(f"{ckpt} has no decision head (decision_head.pt or jev_head.pt)")
 
 
 class PointerHead(nn.Module):
@@ -121,7 +130,7 @@ class DecideEngine:
         self.reasoning_token_limit = reasoning_token_limit
         self.tok = AutoTokenizer.from_pretrained(ckpt)
         self.proc = load_image_processor(ckpt)
-        saved = torch.load(os.path.join(ckpt, "jev_head.pt"), map_location="cpu")
+        saved = torch.load(head_file(ckpt), map_location="cpu")
         self.head = PointerHead(saved["head"]["q.weight"].shape[1], saved["head_dim"]).eval()
         self.head.load_state_dict(saved["head"])
         self.text_T, self.image_T = serving_temperatures(ckpt)

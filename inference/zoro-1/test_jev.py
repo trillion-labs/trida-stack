@@ -39,5 +39,5 @@ def test_pointer_head_scores_options_against_decide():
 
 
 def test_pointer_head_state_dict_keys():
-    # The keys jev_head.pt's "head" entry holds (scripts/export_kev_checkpoint.py copies them as they are).
+    # The keys jev_head.pt's "head" entry holds (scripts/export_decision_checkpoint.py copies them as they are).
     assert sorted(PointerHead(8, dp=4).state_dict()) == ["k.bias", "k.weight", "q.bias", "q.weight"]

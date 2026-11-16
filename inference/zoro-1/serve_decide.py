@@ -3,11 +3,12 @@
 
   POST /v1/systemone         TypeSafe's System One API: {"state": ..., "model": ..., "questions": {...}}
                              -> {"model", "answers": {qid: answer}, "usage": {"input_tokens", "output_tokens"}}.
-                             Extensions: "images": [one base64 / data URL / {"url"}], "reasoning", "max_reasoning_tokens",
-                             "temperature"; the response then also carries "reasoning" and timing fields.
+                             Extensions: "images": [one base64 / data URL / {"url"}], "reasoning", "max_reasoning_tokens"
+                             (default: --reasoning-token-limit), "temperature"; the response then also carries "reasoning" and timing fields.
                              Validation errors are 422 {"detail": [{"loc", "msg", "type"}]}, as System One returns them.
   POST /v1/decide            deprecated alias, removed in the next release: {"request": {"state": ..., "questions":
-                             {...}}, "reasoning": false, "temperature": null} -> {"answers", "usage", "timing_ms"}
+                             {...}}, "reasoning": false, "temperature": null, "max_reasoning_tokens": null}
+                             -> {"answers", "usage", "timing_ms"}
   POST /v1/chat/completions  OpenAI-compatible, streaming or not; `tools` supported (tool calls parsed from the
                              model's <tool_call> blocks); the thinking is returned as reasoning_content; honours
                              max_tokens, temperature, top_p, top_k, presence_penalty and
@@ -20,7 +21,7 @@ Usage:
   python serve.py /path/to/decision-checkpoint --mode decide           # the same, through serve.py
 
 Needs stock SGLang >= 0.5.22 (Apache-2.0) plus fastapi and uvicorn in the same environment; see README "Decisions".
-A decision checkpoint is a Trida checkpoint with jev_head.pt (MODEL_CONTRACT.md); an optional temperature.json sets
+A decision checkpoint is a Trida checkpoint with decision_head.pt or jev_head.pt (MODEL_CONTRACT.md); an optional temperature.json sets
 its serving temperatures. Generation here is causal decoding; the two-stream decode modes are serve.py's others.
 """
 import argparse
@@ -257,7 +258,7 @@ def create_app(engine):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("model", nargs="?", default=os.environ.get("TRIDA_DECIDE_MODEL"),
-                    help="decision checkpoint directory (with jev_head.pt); default $TRIDA_DECIDE_MODEL")
+                    help="decision checkpoint directory (with decision_head.pt or jev_head.pt); default $TRIDA_DECIDE_MODEL")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=30001)
     ap.add_argument("--mem-fraction", type=float, default=0.8)

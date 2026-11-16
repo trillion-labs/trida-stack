@@ -136,7 +136,7 @@ def test_no_shape_skips_shaping_without_dry_run(monkeypatch):
 
 
 def test_decide_default_model_reaches_serve_decide_as_a_local_dir(monkeypatch, tmp_path):
-    # serve_decide.py opens <ckpt>/jev_head.pt, so it needs a directory, not the HF id
+    # serve_decide.py opens the decision head file in <ckpt>, so it needs a directory, not the HF id
     import types
     snap = tmp_path / "snapshot"
     snap.mkdir()

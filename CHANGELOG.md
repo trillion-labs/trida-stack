@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `export_kev_checkpoint.py` is renamed `export_decision_checkpoint.py`, in both places it lives
+  (`scripts/` and `train/tools/`); the arguments and output (kev's checkpoint layout) are unchanged.
+- Released checkpoints name the decision head `decision_head.pt` (Zoro-1 on the Hub ships it under that name).
+  Every reader (`serve_decide.py` / `decide_engine.py`, both export scripts, training's head init, the MLX
+  loader, download filter and converter) prefers `decision_head.pt` and falls back to `jev_head.pt`, which
+  training still writes, so existing checkpoints load unchanged. Zoro-1 Chat's *Decision head → Download*
+  fetches `decision_head.pt`. The MLX converter still writes `jev_head.safetensors`, so folders it converts
+  keep loading in older MLX builds. Older `serve_decide.py`, MLX builds and Zoro-1 Chat apps do not look for
+  `decision_head.pt` and lose `/v1/systemone` on the renamed Zoro-1; update them.
 - MLX server: `tool_choice: "none"` now keeps the tool schemas in the prompt and bans `<tool_call>`
   (before, the tools were dropped from the prompt), so clients sending it (evals, Hermes) get a different
   prompt than earlier baselines.
@@ -159,7 +168,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stream answers typed questions (yes/no, pick one, score) over a state. kev's
   encoding, augmentation and loss are ported. It runs alone or interleaved with SFT,
   with `--decision_head_lr_scale`, `--decision_loss_weight` and `--decision_micro_per_step`.
-  `train/tools/export_kev_checkpoint.py` exports a checkpoint to kev's layout for
+  `train/tools/export_decision_checkpoint.py` exports a checkpoint to kev's layout for
   `kev.benchmark` / `kev.serve`.
 - `--fp32_master` (fp32 weights and AdamW state over bf16 compute; needed at small
   LRs) and `--adam_beta2`.
@@ -352,7 +361,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `inference/test_jev_golden.py` checks the rows against golden fixtures from the
   training encoder (provenance in `inference/fixtures/jev_golden/PROVENANCE.md`).
   Derived from kev (Apache-2.0); attributed in `NOTICE` and `COMPLIANCE.md` §1.
-- `scripts/export_kev_checkpoint.py` — exports a checkpoint to kev's layout. The
+- `scripts/export_decision_checkpoint.py` — exports a checkpoint to kev's layout. The
   Trida2.1-4B model card points here for scoring and serving with kev's tools.
 
 - `inference/mlx/`: on-device (Apple Silicon, MLX) serving of Trida2.0-4B with lossless
