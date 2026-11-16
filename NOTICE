@@ -107,8 +107,9 @@ Two-stream Gated-DeltaNet / block-diffusion Triton kernels
     - inference/zoro-1/sglang/                 (two_stream_diffusion.patch)
     - inference/zoro-1/vllm/vllm_native_diffusion/KERNELS.md
   These kernels are required to run the two-stream training and diffusion serving
-  paths, and Trillion Labs' patches against them are derivative works also bound by
-  PolyForm Noncommercial 1.0.0. Running those paths is noncommercial-only.
+  paths. Trillion Labs' own patches against them are licensed Apache-2.0; the patched
+  kernels they produce remain under PolyForm Noncommercial 1.0.0. Running those paths
+  is noncommercial-only.
 
 ================================================================================
 Referenced, NOT bundled (installed separately)
