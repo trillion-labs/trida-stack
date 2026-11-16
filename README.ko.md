@@ -195,21 +195,22 @@ Self-speculative 디코딩은 동일한 샘플링 설정에서 **무손실**로 
 ### 의사결정 서빙 (`--mode decide`)
 
 `--mode decide`는 **기본 SGLang 배포판**(≥ 0.5.22)에서 `serve_decide.py`를 실행합니다. 별도의 포크나 패치가 필요하지 않습니다.
-단일 엔진과 동일한 모델 가중치로 `POST /v1/decide`를 통한 유형별 의사결정, 추론 후 의사결정(`"reasoning": true`),
-도구 호출이 가능한 OpenAI 호환 채팅을 모두 지원합니다.
+단일 엔진과 동일한 모델 가중치로 `POST /v1/systemone`(TypeSafe의 System One API)을 통한 유형별 의사결정,
+추론 후 의사결정(`"reasoning": true`), 도구 호출이 가능한 OpenAI 호환 채팅을 모두 지원합니다.
 
 ```bash
-curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
-  "request": {
-    "state": {"ticket": "Order #W1 arrived broken. I want my money back."},
-    "questions": {
-      "intent": {"type": "choice", "instructions": "What does the customer want?",
-                 "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
-      "urgent": {"type": "noul", "instructions": "Should this jump the queue?"}}},
-  "reasoning": false}'
-# -> {"answers": {"intent": {"type": "choice", "choice": "refund", "probabilities": {...}},
-#                 "urgent": {"type": "noul", "noul": 0.93}}, ...}
+curl -s localhost:30001/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "zoro-1",
+  "state": {"ticket": "Order #W1 arrived broken. I want my money back."},
+  "questions": {
+    "intent": {"type": "choice", "instructions": "What does the customer want?",
+               "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
+    "urgent": {"type": "noul", "instructions": "Should this jump the queue?"}}}'
+# -> {"model": "...", "answers": {"intent": {"type": "choice", "choice": "refund", "probabilities": {...}},
+#                                 "urgent": {"type": "noul", "noul": 0.93}},
+#     "usage": {"input_tokens": ..., "output_tokens": 0}, ...}
 ```
+기존 `{"request": {...}}` 형식의 `POST /v1/decide`도 계속 동작하지만 더 이상 권장하지 않으며, 다음 릴리스에서 제거됩니다.
 자세한 내용: [`inference/zoro-1/README.md#decisions`](inference/zoro-1/README.md#decisions).
 
 ### 백엔드
@@ -245,7 +246,7 @@ inference/                     nano-inference: 모델별로 구성된 간결한 
     MODEL_CONTRACT.md          서빙 코드가 요구하는 체크포인트 규격
     serve.py                   서버 실행 (--mode causal | self-spec | decide)
     serve_decide.py, decide_*.py, jev*.py
-                               기본 SGLang 배포판에서 실행하는 의사결정 서버 (/v1/decide)
+                               기본 SGLang 배포판에서 실행하는 의사결정 서버 (/v1/systemone)
     chat.py                    OpenAI 호환 클라이언트
     eval.py / eval_ifeval.py   gsm8k / mmlu_pro / ifeval 품질·처리량 평가
     ifeval_lib/                저장소에 포함된 IFEval 채점 코드

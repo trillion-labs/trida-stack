@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `POST /v1/systemone` on the SGLang decision server (`serve_decide.py`) and the MLX server: typed
+  decisions in TypeSafe's System One API 0.2.0 shape (`{"state", "model", "questions"}` ->
+  `{"model", "answers", "usage"}`, score `legend` as `{"0": level, ...}`, 422 validation errors), so
+  System One clients such as the TypeSafe SDK work unchanged. `images`, `reasoning`,
+  `max_reasoning_tokens` and `temperature` are extensions (#92),
+  checked the same way on both servers (a bad value is a 422).
 - `inference/gravityocr/`: serving for `trillionlabs/GravityOCR`, a GLM-OCR-based document OCR
   model, with self-speculative decoding. It runs on upstream SGLang v0.5.10 (Apache-2.0) plus a
   committed patch and the seven new files the patch needs, in a separate Python 3.12
@@ -139,6 +145,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `kev.benchmark` / `kev.serve`.
 - `--fp32_master` (fp32 weights and AdamW state over bf16 compute; needed at small
   LRs) and `--adam_beta2`.
+
+### Deprecated
+
+- `POST /v1/decide` (the `{"request": {...}}` envelope) on both decision servers: it still answers, with a
+  `Deprecation` header and a `Link` to `/v1/systemone`, and will be removed in the next release.
 
 ### Changed
 
