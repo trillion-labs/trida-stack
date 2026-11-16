@@ -104,7 +104,7 @@ unchanged and pinned by a test. Both head formats load without PyTorch. Conversi
 writes an unquantized float32 `jev_head.safetensors` and preserves `temperature.json`.
 
 ```bash
-curl -s localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
+curl -s localhost:8080/v1/systemone -H 'Content-Type: application/json' -d '{
   "model": "zoro-1",
   "state": {"ticket": "the printer on floor 3 is jammed again"},
   "questions": {"team": {"type": "choice", "instructions": "Which team handles it?",
@@ -119,8 +119,9 @@ curl -s localhost:8000/v1/systemone -H 'Content-Type: application/json' -d '{
   the longest complete cached state that prefixes the new state is reused.
   `--decision-cache-mb` bounds retained state memory (1024 MiB by default; 0 disables reuse).
   This cache is independent of the chat cache and uses image-content keys.
-- Images go inside `request` as data URLs or bare base64. No request reads local paths or
-  fetches remote URLs. `min_image_pixels` / `max_image_pixels` control resolution
+- Images go in the top-level `images` list on `/v1/systemone` (at most one: a data URL, bare
+  base64, or `{"url": ...}` holding either), and inside `request` on the deprecated `/v1/decide`.
+  No request reads local paths or fetches remote URLs. `min_image_pixels` / `max_image_pixels` control resolution
   (448×448 maximum by default); direct Python calls may also pass a PIL image. Requests never name files:
   open one with `decide_request.open_image(path)` first.
 - Temperatures come from `temperature.json`, falling back to Zoro-1's fitted model-card
@@ -244,7 +245,7 @@ your own direct requests, use:
 
 ```bash
 uv run python tests/compare_decisions.py \
-  --reference http://cuda-host:30001 --candidate http://localhost:8000 \
+  --reference http://cuda-host:30001 --candidate http://localhost:8080 \
   --requests decisions.jsonl --atol 0.005
 ```
 
