@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 # Copyright 2026 Trillion Labs
 # SPDX-License-Identifier: Apache-2.0
-"""Serve GravityOCR on an Apple Silicon Mac, with the MLX engine of the installed Gravity app.
+"""Serve GravityOCR on an Apple Silicon Mac, with the MLX engine in mac/ocr (the Gravity app's engine).
 
 serve.sh is the real server: upstream SGLang plus the GravityOCR patch, on an NVIDIA L40S, L40 or H100.
 This script is the Mac option for trying the model locally and for running getting_started.ipynb
 without an NVIDIA GPU. It answers the same OpenAI chat-completions requests as serve.sh (one crop, one task
 prompt, a data: image URL), so ocr_request.py and the notebook work against either.
 
-It does not ship an engine. It imports the MLX engine inside Gravity.app
-(https://github.com/trillion-labs/GravityOCR-macOS, a separate download from Trillion Labs) and runs
-it with Gravity's bundled Python, so run it with that interpreter:
+The engine is mac/ocr: the MLX engine of the Gravity app (https://github.com/trillion-labs/GravityOCR-macOS),
+copied unchanged from Gravity 0.3.4 (mac/VENDORED.md). The Gravity app is not needed. Build its env once
+with mac/setup.sh, then run this script with that env's Python:
 
-    /Applications/Gravity.app/Contents/Resources/runtime/bin/python -I -B serve_mac.py
-    .../runtime/bin/python -I -B serve_mac.py --mode causal --port 30001
-    .../runtime/bin/python -I -B serve_mac.py --model /path/to/checkpoint
+    bash mac/setup.sh
+    mac/.venv/bin/python -I serve_mac.py
+    mac/.venv/bin/python -I serve_mac.py --mode causal --port 30001
+    mac/.venv/bin/python -I serve_mac.py --model /path/to/checkpoint
 
 How it differs from serve.sh, so its outputs and timings are not the L40S / H100 numbers:
   * MLX on the Mac GPU instead of SGLang on CUDA; text-decoder layers quantized to 6 bits (Gravity's
@@ -25,17 +26,17 @@ How it differs from serve.sh, so its outputs and timings are not the L40S / H100
   * --mode causal swaps Gravity's speculative decoder for the autoregressive one bundled with it,
     over the same prefilled cache.
 
-It reaches into Gravity's internal Python package (ocr.engine), which is not a public API. It was
-written against Gravity 0.3.4 and warns on any other version; an update may break it.
+It calls the engine's internal entry points (ocr.engine.pipeline.LocalOcrEngine and, for causal mode,
+ocr.recognition.model.decode_ar_mlx_from_prefix); mac/VENDORED.md says how to update the copy.
 """
 
 from __future__ import annotations
 
 import sys
 
-# Never write __pycache__ into Gravity.app: the app is signed, and new files inside the bundle break its
-# seal (codesign --verify fails, and macOS may refuse to open it). Set before any import from Gravity's
-# runtime; -B on the command line does the same.
+# Never write __pycache__ next to the engine: with --engine pointing into Gravity.app, the app is signed, and
+# new files inside the bundle break its seal (codesign --verify fails, and macOS may refuse to open it). Set
+# before any engine import; -B on the command line does the same.
 sys.dont_write_bytecode = True
 
 import argparse  # noqa: E402
@@ -45,14 +46,13 @@ import io
 import ipaddress
 import json
 import os
-import plistlib
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-DEFAULT_APP = "/Applications/Gravity.app"
-TESTED_GRAVITY = "0.3.4"
+HERE = Path(__file__).resolve().parent
+DEFAULT_ENGINE = HERE / "mac"  # holds the ocr package
 DEFAULT_MODEL = "trillionlabs/GravityOCR"
 CACHE = Path.home() / ".cache" / "gravityocr-mac"
 CKPT_PATTERNS = (".json", ".jinja", ".safetensors")  # what the engine reads; skips README, assets
@@ -99,15 +99,10 @@ def fetch_checkpoint(repo: str, cache: Path = CACHE, revision: str = "main") -> 
     return dest
 
 
-# ---- Gravity's engine ---------------------------------------------------------------------------
-def gravity_version(app: Path) -> str:
-    with open(app / "Contents" / "Info.plist", "rb") as f:
-        return plistlib.load(f).get("CFBundleShortVersionString", "unknown")
-
-
-def load_engine(app: Path, checkpoint: Path, mode: str):
-    """Gravity's LocalOcrEngine on `checkpoint`; in causal mode with its AR decoder swapped in."""
-    sys.path.insert(0, str(app / "Contents" / "Resources" / "project"))
+# ---- the MLX engine -----------------------------------------------------------------------------
+def load_engine(engine: Path, checkpoint: Path, mode: str):
+    """The engine's LocalOcrEngine on `checkpoint`; in causal mode with its AR decoder swapped in."""
+    sys.path.insert(0, str(engine))
     from ocr.engine import pipeline
     from ocr.recognition.model import decode_ar_mlx_from_prefix
 
@@ -210,7 +205,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--host", default="127.0.0.1", help="loopback addresses only")
     ap.add_argument("--port", type=int, default=30000)
     ap.add_argument("--served-name", default="glm-ocr")
-    ap.add_argument("--gravity-app", type=Path, default=Path(DEFAULT_APP))
+    ap.add_argument("--engine", type=Path, default=DEFAULT_ENGINE,
+                    help="directory holding the ocr package (default: mac/ in this folder; "
+                         "/Applications/Gravity.app/Contents/Resources/project runs the app's own copy)")
     args = ap.parse_args(argv)
 
     host = "127.0.0.1" if args.host == "localhost" else args.host
@@ -220,12 +217,12 @@ def main(argv: list[str] | None = None) -> int:
         loopback = False
     if not loopback:
         ap.error("--host must be a loopback address: this server has no authentication")
-    if not (args.gravity_app / "Contents" / "Resources" / "project" / "ocr").is_dir():
-        ap.error(f"Gravity's engine not found in {args.gravity_app}: install Gravity "
-                 "(https://gravityocr.trillionlabs.co) or pass --gravity-app")
-    version = gravity_version(args.gravity_app)
-    if version != TESTED_GRAVITY:
-        log(f"warning: Gravity {version}; this script was tested with {TESTED_GRAVITY}")
+    if not (args.engine / "ocr" / "engine" / "pipeline.py").is_file():
+        ap.error(f"no MLX engine (ocr/engine/pipeline.py) in {args.engine}")
+    try:
+        import mlx.core  # noqa: F401
+    except ImportError:
+        ap.error(f"MLX is not installed for {sys.executable}: run mac/setup.sh, then use mac/.venv/bin/python")
 
     ckpt = Path(args.model).expanduser()
     if not ckpt.is_dir():
@@ -234,10 +231,10 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(f"{ckpt} has no block_diffusion.json (see MODEL_CONTRACT.md)")
 
     t0 = time.time()
-    engine = load_engine(args.gravity_app, ckpt, args.mode)
+    engine = load_engine(args.engine, ckpt, args.mode)
     gen = engine.generation
     log(f"mode={args.mode} block_size={gen.block_size} mask_id={gen.mask_token_id} "
-        f"(from {ckpt}/block_diffusion.json); Gravity {version} MLX engine, text layers 6-bit; "
+        f"(from {ckpt}/block_diffusion.json); MLX engine from {args.engine}, text layers 6-bit; "
         f"loaded in {time.time() - t0:.1f} s")
 
     from PIL import Image

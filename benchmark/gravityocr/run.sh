@@ -2,9 +2,11 @@
 # Copyright 2026 Trillion Labs
 # SPDX-License-Identifier: Apache-2.0
 #
-# Evaluate a GravityOCR checkpoint on a docr-ko-eval dataset (region crops) on one NVIDIA GPU, in one command:
+# Evaluate a GravityOCR checkpoint on a docr-ko-eval dataset (region crops) on one NVIDIA GPU or an Apple Silicon
+# Mac, in one command:
 #
-#   export the dataset -> serve the checkpoint (inference/gravityocr/serve.sh: SGLang + the GravityOCR patch)
+#   export the dataset -> serve the checkpoint (NVIDIA: inference/gravityocr/serve.sh, SGLang + the GravityOCR
+#   patch; Mac: inference/gravityocr/serve_mac.py, the MLX engine in inference/gravityocr/mac)
 #   -> warm-up -> one measured pass per concurrency level -> stop the server
 #   -> CDM self-check -> score each split (OmniDocBench Edit_dist / BLEU / TEDS / CDM) -> report.md, report.json
 #
@@ -22,9 +24,12 @@
 #                  dev split of docr-ko-eval-v2; it is private: log in with `hf auth login` or set HF_TOKEN)
 #   OUT            output directory (default runs/<model>-<mode>-<YYYYmmdd-HHMMSS>)
 #   MODE           self-spec (default) | causal
-#   CONCURRENCY    concurrency levels, space-separated (default 128)
-#   WARMUP         1 (default): one crop per task, then one full pass at the first level, both discarded.
-#                  The first high-concurrency pass on a fresh server is ~2x slower; 0 skips the warm-up
+#   BACKEND        auto (default: mac on an Apple Silicon Mac, else sglang) | sglang | mac
+#   CONCURRENCY    concurrency levels, space-separated (default 128; 1 with BACKEND=mac, whose server
+#                  answers one request at a time)
+#   WARMUP         1 (default with sglang): one crop per task, then one full pass at the first level, all
+#                  discarded. The first high-concurrency pass on a fresh SGLang server is ~2x slower.
+#                  tasks (default with mac): one crop per task only. 0 skips the warm-up
 #   SPLITS         splits to score (default: every split in DATASET)
 #   SCORE_LEVELS   levels whose predictions are scored (default: all of CONCURRENCY; "none" skips scoring)
 #   ENDPOINT       OpenAI base URL of a running server; run.sh then starts and stops nothing
@@ -32,6 +37,7 @@
 #   EVAL_HOME      setup.sh's install directory (default $HOME/.gravityocr-eval); its env.sh sets the defaults
 #                  of VBIN, PYTHON and OMNIDOCBENCH and puts its TeX Live on PATH
 #   VBIN           bin/ of the patched SGLang venv, for serve.sh (see inference/gravityocr/sglang/setup.sh)
+#   MAC_PYTHON     Python of the Mac engine env, for serve_mac.py (see inference/gravityocr/mac/setup.sh)
 #   PYTHON         interpreter for export, client, scoring and report (default python3); needs datasets,
 #                  Pillow, pymupdf and OmniDocBench's requirements
 #   OMNIDOCBENCH   OmniDocBench checkout (default $OMNIDOCBENCH_ROOT)
@@ -60,7 +66,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 die() { echo "[run] error: $*" >&2; exit 1; }
 log() { echo "[run $(date +%H:%M:%S)] $*" >&2; }
-now() { date +%s.%N; }
+now() { perl -MTime::HiRes=time -e 'printf "%.3f\n", time'; }  # BSD date (macOS) has no %N
 EVAL_HOME=${EVAL_HOME:-$HOME/.gravityocr-eval}
 # shellcheck source=/dev/null
 [ ! -f "$EVAL_HOME/env.sh" ] || . "$EVAL_HOME/env.sh"
@@ -68,8 +74,16 @@ EVAL_HOME=${EVAL_HOME:-$HOME/.gravityocr-eval}
 DATASET=${DATASET:-trillionlabs/gravityocr-dev}
 [ -n "${ENDPOINT:-}" ] || : "${MODEL:?set MODEL to a checkpoint dir or Hub id (or ENDPOINT to a running server)}"
 MODE=${MODE:-self-spec}
-CONCURRENCY=${CONCURRENCY:-128}
-WARMUP=${WARMUP:-1}
+BACKEND=${BACKEND:-auto}
+if [ "$BACKEND" = auto ]; then
+  if [ "$(uname -s)-$(uname -m)" = Darwin-arm64 ]; then BACKEND=mac; else BACKEND=sglang; fi
+fi
+case "$BACKEND" in
+  sglang) CONCURRENCY=${CONCURRENCY:-128}; WARMUP=${WARMUP:-1} ;;
+  mac) CONCURRENCY=${CONCURRENCY:-1}; WARMUP=${WARMUP:-tasks} ;;
+  *) die "BACKEND must be auto, sglang or mac" ;;
+esac
+case "$WARMUP" in 0|1|tasks) ;; *) die "WARMUP must be 0, 1 or tasks" ;; esac
 SCORE_LEVELS=${SCORE_LEVELS:-$CONCURRENCY}
 PORT=${PORT:-30500}
 PYTHON=${PYTHON:-python3}
@@ -78,6 +92,8 @@ SCORE_WORKERS=${SCORE_WORKERS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}
 SERVE_TIMEOUT=${SERVE_TIMEOUT:-900}
 SCORE_PY=${SCORE_PY:-$HERE/score.py}
 SERVE_SH=${SERVE_SH:-$REPO/inference/gravityocr/serve.sh}
+SERVE_MAC=$REPO/inference/gravityocr/serve_mac.py
+MAC_PYTHON=${MAC_PYTHON:-$REPO/inference/gravityocr/mac/.venv/bin/python}
 case "$MODE" in self-spec|causal) ;; *) die "MODE must be self-spec or causal" ;; esac
 NAME=$(basename "${MODEL:-endpoint}")
 OUT=${OUT:-runs/$NAME-$MODE-$(date +%Y%m%d-%H%M%S)}
@@ -89,7 +105,7 @@ if [ "$SCORE_LEVELS" != none ]; then
 fi
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
-log "out=$OUT model=${MODEL:-$ENDPOINT} mode=$MODE concurrency=[$CONCURRENCY] dataset=$DATASET"
+log "out=$OUT model=${MODEL:-$ENDPOINT} backend=$BACKEND mode=$MODE concurrency=[$CONCURRENCY] dataset=$DATASET"
 
 # ---- 1. export: Hub or save_to_disk -> data.jsonl + images/<id>.png + splits.json (the layout score.py reads) -------
 t0=$(now)
@@ -132,12 +148,13 @@ SPLITS=${SPLITS:-$("$PYTHON" -c 'import json, sys; print(" ".join(sorted(set(jso
 
 # ---- 2. serve ----------------------------------------------------------------------------------------------------
 SRV=
+SRV_TARGET=  # "-<pgid>" for serve.sh (its process group, SGLang's children included); "<pid>" for serve_mac.py
 stop_server() {
   [ -n "$SRV" ] || return 0
   log "stopping the server"
-  kill -TERM -- "-$SRV" 2>/dev/null || true
-  for _ in $(seq 30); do kill -0 -- "-$SRV" 2>/dev/null || break; sleep 1; done
-  kill -KILL -- "-$SRV" 2>/dev/null || true
+  kill -TERM -- "$SRV_TARGET" 2>/dev/null || true
+  for _ in $(seq 30); do kill -0 -- "$SRV_TARGET" 2>/dev/null || break; sleep 1; done
+  kill -KILL -- "$SRV_TARGET" 2>/dev/null || true
   SRV=
 }
 trap stop_server EXIT
@@ -145,13 +162,20 @@ trap 'exit 130' INT TERM
 
 t_up=$t_export
 if [ -z "${ENDPOINT:-}" ]; then
-  [ -f "$SERVE_SH" ] || die "serve.sh not found at $SERVE_SH"
   ENDPOINT=http://127.0.0.1:$PORT/v1
-  log "starting serve.sh (log: $OUT/serve.log)"
-  # setsid: the server gets its own process group, so stop_server can take down SGLang's children too
-  CKPT=$MODEL MODE=$MODE PORT=$PORT SERVE_HOST=127.0.0.1 SERVED_NAME=glm-ocr \
-    setsid bash "$SERVE_SH" > "$OUT/serve.log" 2>&1 < /dev/null &
-  SRV=$!
+  if [ "$BACKEND" = mac ]; then
+    [ -x "$MAC_PYTHON" ] || die "no Mac engine env at $MAC_PYTHON: run setup.sh (or inference/gravityocr/mac/setup.sh)"
+    log "starting serve_mac.py (log: $OUT/serve.log)"
+    "$MAC_PYTHON" -I -B "$SERVE_MAC" --model "$MODEL" --mode "$MODE" --port "$PORT" > "$OUT/serve.log" 2>&1 < /dev/null &
+    SRV=$!; SRV_TARGET=$SRV
+  else
+    [ -f "$SERVE_SH" ] || die "serve.sh not found at $SERVE_SH"
+    log "starting serve.sh (log: $OUT/serve.log)"
+    # setsid: the server gets its own process group, so stop_server can take down SGLang's children too
+    CKPT=$MODEL MODE=$MODE PORT=$PORT SERVE_HOST=127.0.0.1 SERVED_NAME=glm-ocr \
+      setsid bash "$SERVE_SH" > "$OUT/serve.log" 2>&1 < /dev/null &
+    SRV=$!; SRV_TARGET=-$SRV
+  fi
   deadline=$(( $(date +%s) + SERVE_TIMEOUT ))
   until curl -sf "$ENDPOINT/models" > /dev/null; do
     kill -0 "$SRV" 2>/dev/null || { tail -30 "$OUT/serve.log" >&2; SRV=; die "the server exited; see $OUT/serve.log"; }
@@ -159,7 +183,8 @@ if [ -z "${ENDPOINT:-}" ]; then
     sleep 2
   done
   t_up=$(now)
-  log "server up in $(awk "BEGIN{printf \"%.1f\", $t_up-$t_export}") s"
+  up_s=$(awk -v a="$t_export" -v b="$t_up" 'BEGIN{printf "%.1f", b - a}')  # no nested quotes: bash 3.2 (macOS)
+  log "server up in $up_s s"
 else
   curl -sf "$ENDPOINT/models" > /dev/null || die "no server answers at $ENDPOINT/models"
 fi
@@ -168,7 +193,7 @@ fi
 "$PYTHON" - "$OUT" "$ENDPOINT" "$SCORE_PY" "$WARMUP" $CONCURRENCY <<'PY'
 import base64, importlib.util, json, statistics as st, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
-out, endpoint, score_py, warmup = sys.argv[1], sys.argv[2].rstrip("/"), sys.argv[3], sys.argv[4] == "1"
+out, endpoint, score_py, warmup = sys.argv[1], sys.argv[2].rstrip("/"), sys.argv[3], sys.argv[4]
 levels = [int(x) for x in sys.argv[5:]]
 spec = importlib.util.spec_from_file_location("score", score_py)
 score = importlib.util.module_from_spec(spec); spec.loader.exec_module(score)
@@ -204,11 +229,12 @@ def run(c):
                  "errors": sum(1 for x in res if x["error"]), "out_tokens": toks, "out_tok_per_s": round(toks / wall, 1)}
 
 summary = {"warmup": None, "levels": []}
-if warmup:
+if warmup != "0":
     for t in ("text", "table", "formula"):
         r = next((x for x in recs if x["task_type"] == t), None)
         if r:
             one(r)
+if warmup == "1":
     _, w = run(levels[0])
     summary["warmup"] = w
     print(f"[run] warm-up  c={w['concurrency']}: {w['wall_s']} s, {w['crops_per_s']} crops/s (discarded)", file=sys.stderr)
@@ -283,12 +309,12 @@ fi
 t_end=$(now)
 
 # ---- 5. report ---------------------------------------------------------------------------------------------------
-"$PYTHON" - "$OUT" "${MODEL:-$ENDPOINT}" "$MODE" "$SCORE_LEVELS" "$SPLITS" \
+"$PYTHON" - "$OUT" "${MODEL:-$ENDPOINT}" "$MODE" "$SCORE_LEVELS" "$SPLITS" "$BACKEND" \
   "$t0" "$t_export" "$t_up" "$t_pred" "$t_score0" "$t_end" <<'PY'
 import json, os, re, sys
 from collections import defaultdict
-out, model, mode, levels, splits = sys.argv[1:6]
-t0, t_export, t_up, t_pred, t_score0, t_end = map(float, sys.argv[6:12])
+out, model, mode, levels, splits, backend = sys.argv[1:7]
+t0, t_export, t_up, t_pred, t_score0, t_end = map(float, sys.argv[7:13])
 levels = [] if levels == "none" else [int(x) for x in levels.split()]
 splits = splits.split()
 recs = {r["id"]: r for r in map(json.loads, open(f"{out}/data/data.jsonl", encoding="utf-8"))}
@@ -320,11 +346,11 @@ for c in levels:
             g[(recs[r["id"]].get("source") or "?", r["task_type"])].append(r["score"])
         src_rows += [{"concurrency": c, "split": s, "source": a, "task": t, "n": len(v),
                       "mean": round(sum(v) / len(v), 4)} for (a, t), v in sorted(g.items())]
-report = {"model": model, "mode": mode, "crops": len(recs), "timing": timing, "mean_accept_len": accept,
+report = {"model": model, "mode": mode, "backend": backend, "crops": len(recs), "timing": timing, "mean_accept_len": accept,
           "speed": sweep, "accuracy": acc_rows, "by_source": src_rows}
 json.dump(report, open(f"{out}/report.json", "w"), indent=1, ensure_ascii=False)
 
-L = [f"# GravityOCR eval: {model} ({mode})", "", f"{len(recs)} crops. Timing: " +
+L = [f"# GravityOCR eval: {model} ({mode}, {backend})", "", f"{len(recs)} crops. Timing: " +
      ", ".join(f"{k} {v}" for k, v in timing.items()) + (f". Mean accept length (serve.log): {accept}." if accept else "."), "",
      "## Speed (measured pass" + (f"; warm-up c={sweep['warmup']['concurrency']} {sweep['warmup']['wall_s']} s discarded" if sweep["warmup"] else "") + ")",
      "| c | wall s | crops/s | out tok/s | lat mean | p50 | p90 | max | errors |", "|---|---|---|---|---|---|---|---|---|"]

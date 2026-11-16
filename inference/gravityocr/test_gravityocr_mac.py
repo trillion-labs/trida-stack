@@ -2,12 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """CPU tests for serve_mac.py: request parsing, the HTTP handler and argument checks.
 
-Gravity.app and MLX are not needed: the engine is replaced by a stub.
+MLX is not needed: the engine is replaced by a stub. Also checks the vendored engine in mac/ocr against
+mac/VENDORED.sha256.
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib.util
 import json
 import threading
@@ -119,14 +121,33 @@ def test_bad_request_is_400_and_engine_error_is_500_and_server_survives(server):
 @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.5", "example.com"])
 def test_non_loopback_host_is_refused(host, tmp_path):
     with pytest.raises(SystemExit) as e:
-        serve_mac.main(["--host", host, "--gravity-app", str(tmp_path)])
+        serve_mac.main(["--host", host, "--engine", str(tmp_path)])
     assert e.value.code == 2
 
 
-def test_missing_gravity_app_is_refused(tmp_path):
+def test_missing_engine_is_refused(tmp_path):
     with pytest.raises(SystemExit) as e:
-        serve_mac.main(["--gravity-app", str(tmp_path / "Gravity.app")])
+        serve_mac.main(["--engine", str(tmp_path)])
     assert e.value.code == 2
+
+
+def test_default_engine_is_the_vendored_copy():
+    assert serve_mac.DEFAULT_ENGINE == HERE / "mac"
+    assert (serve_mac.DEFAULT_ENGINE / "ocr" / "engine" / "pipeline.py").is_file()
+
+
+def test_vendored_engine_matches_its_checksums():
+    # mac/ocr is a byte-for-byte copy of the Gravity app's engine (mac/VENDORED.md): no file edited,
+    # added or removed.
+    mac = HERE / "mac"
+    want = {}
+    for line in (mac / "VENDORED.sha256").read_text().splitlines():
+        digest, name = line.split(maxsplit=1)
+        want[name] = digest
+    have = {str(f.relative_to(mac)): hashlib.sha256(f.read_bytes()).hexdigest()
+            for f in sorted((mac / "ocr").rglob("*"))
+            if f.is_file() and "__pycache__" not in f.parts}
+    assert have == want
 
 
 def test_engine_import_writes_no_bytecode_into_the_app(tmp_path, monkeypatch):
@@ -134,7 +155,8 @@ def test_engine_import_writes_no_bytecode_into_the_app(tmp_path, monkeypatch):
     # next to the sources, as Gravity's runtime does (Apple's system Python redirects it elsewhere).
     import sys
     monkeypatch.setattr(sys, "pycache_prefix", None)
-    pkg = tmp_path / "Gravity.app" / "Contents" / "Resources" / "project" / "ocr"
+    project = tmp_path / "Gravity.app" / "Contents" / "Resources" / "project"
+    pkg = project / "ocr"
     for sub in ("engine", "recognition"):
         (pkg / sub).mkdir(parents=True)
         (pkg / sub / "__init__.py").write_text("")
@@ -145,12 +167,12 @@ def test_engine_import_writes_no_bytecode_into_the_app(tmp_path, monkeypatch):
         "        self.checkpoint = checkpoint\n")
     (pkg / "recognition" / "model.py").write_text("def decode_ar_mlx_from_prefix(*a, **k):\n    pass\n")
     try:
-        engine = serve_mac.load_engine(tmp_path / "Gravity.app", tmp_path, "causal")
+        engine = serve_mac.load_engine(project, tmp_path, "causal")
         assert engine.checkpoint == tmp_path
     finally:
         for name in [m for m in sys.modules if m == "ocr" or m.startswith("ocr.")]:
             del sys.modules[name]
-        sys.path.remove(str(tmp_path / "Gravity.app" / "Contents" / "Resources" / "project"))
+        sys.path.remove(str(project))
     assert not list((tmp_path / "Gravity.app").rglob("__pycache__"))
 
 
