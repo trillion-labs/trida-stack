@@ -240,7 +240,7 @@ def test_systemone_request_rejects(bad, msg):
     ({"temperature": -1}, "'temperature' must be a finite number above 0"),
     ({"temperature": 0}, "'temperature' must be a finite number above 0"),
     ({"temperature": True}, "'temperature'"),
-    ({"max_reasoning_tokens": 0}, "'max_reasoning_tokens' must be an integer from 1 to 8192"),
+    ({"max_reasoning_tokens": 0}, "'max_reasoning_tokens' must be an integer from 1 to 4096"),
     ({"max_reasoning_tokens": -5}, "'max_reasoning_tokens'"),
     ({"max_reasoning_tokens": 8193}, "'max_reasoning_tokens'"),
     ({"max_reasoning_tokens": 64.0}, "'max_reasoning_tokens'"),
@@ -260,7 +260,7 @@ def test_systemone_options_accept_valid_and_null_values():
     from decide_request import systemone_request
     body = {"state": "s", "model": "m", "questions": REQ["questions"]}
     ok = {"reasoning": False, "max_reasoning_tokens": 8192, "temperature": 0.5}
-    assert systemone_request({**body, **ok})[1] == ok
+    assert systemone_request({**body, **ok}, reasoning_token_limit=8192)[1] == ok
     nulls = {"reasoning": None, "max_reasoning_tokens": None, "temperature": None}
     assert systemone_request({**body, **nulls})[1] == {}   # null means unset, as OpenAI-style clients send it
     assert systemone_request({**body, "reasoning": "auto", "threshold": 0.9}, extensions=("threshold",),
@@ -710,3 +710,19 @@ def test_reasoning_defaults_to_server_cap(cap, endpoint):
     response = TestClient(create_app(engine)).post(endpoint, json={**wire, "reasoning": True})
     assert response.status_code == 200, response.text
     assert captured == [cap]
+
+
+@pytest.mark.parametrize("cap", [2048, 4096, 8192])
+@pytest.mark.parametrize("reasoning", [False, True])
+def test_systemone_rejects_budget_above_server_cap_before_inference(cap, reasoning):
+    engine = FakeDecider()
+    engine.reasoning_token_limit = cap
+    client = _client(engine)
+    body = {"model": "zoro-1", **REQ, "reasoning": reasoning}
+    r = client.post("/v1/systemone", json={**body, "max_reasoning_tokens": cap + 1})
+    assert r.status_code == 422
+    assert f"1 to {cap}" in r.json()["detail"][0]["msg"]
+    assert engine.calls == []
+    r = client.post("/v1/systemone", json={**body, "max_reasoning_tokens": cap})
+    assert r.status_code == 200, r.text
+    assert engine.calls[-1]["budget"] == cap

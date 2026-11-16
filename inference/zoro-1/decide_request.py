@@ -362,7 +362,7 @@ def to_answer(q, p):
 SYSTEMONE_EXTENSIONS = ("reasoning", "max_reasoning_tokens", "temperature")
 
 
-def systemone_request(body, extensions=(), auto_reasoning=False):
+def systemone_request(body, extensions=(), auto_reasoning=False, *, reasoning_token_limit=DEFAULT_REASONING_TOKEN_LIMIT):
     """A System One body -> (request for parse(), {extension: value} for the keys present). RequestError names the
     first problem; the request itself is validated by parse(), the extension values by systemone_options()."""
     if not isinstance(body, dict):
@@ -386,10 +386,10 @@ def systemone_request(body, extensions=(), auto_reasoning=False):
             raise RequestError("'images' entries must be a base64 string, a data URL, or {\"url\": ...} with one")
         request["image"] = image
     options = {k: body[k] for k in (*SYSTEMONE_EXTENSIONS, *extensions) if k in body}
-    return request, systemone_options(options, auto_reasoning)
+    return request, systemone_options(options, auto_reasoning, reasoning_token_limit=reasoning_token_limit)
 
 
-def systemone_options(options, auto_reasoning=False):
+def systemone_options(options, auto_reasoning=False, *, reasoning_token_limit=DEFAULT_REASONING_TOKEN_LIMIT):
     """Check the extension values both servers take, so a request means the same on each; null means unset.
     `reasoning: "auto"` only where the server supports it (auto_reasoning)."""
     def number(v):
@@ -400,8 +400,8 @@ def systemone_options(options, auto_reasoning=False):
         allowed = 'true, false or "auto"' if auto_reasoning else "true or false (this server has no \"auto\")"
         raise RequestError(f"'reasoning' must be {allowed}, got {reasoning!r}")
     budget = options.get("max_reasoning_tokens")
-    if budget is not None and (type(budget) is not int or not 1 <= budget <= MAX_REASONING_TOKENS):
-        raise RequestError(f"'max_reasoning_tokens' must be an integer from 1 to {MAX_REASONING_TOKENS}, got {budget!r}")
+    if budget is not None and (type(budget) is not int or not 1 <= budget <= reasoning_token_limit):
+        raise RequestError(f"'max_reasoning_tokens' must be an integer from 1 to {reasoning_token_limit}, got {budget!r}")
     temperature = options.get("temperature")
     if temperature is not None and not (number(temperature) and temperature > 0):
         raise RequestError(f"'temperature' must be a finite number above 0, got {temperature!r}")

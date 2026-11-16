@@ -1,5 +1,15 @@
 # Review validation
 
+## Final option-validation follow-up (2026-11-16)
+
+The shared System One option validator now receives the server's configured
+reasoning cap on both CUDA and MLX, including requests with reasoning disabled.
+Cap/cap+1 regressions cover 2,048 / 4,096 / 8,192 and rejection before inference.
+CHANGELOG keeps the follow-up directly under the existing System One entry.
+Focused CPU tests: 123 passed; adapter/setup: 21 passed; MLX: 56 passed, 1 skipped.
+Benchmark inputs, scoring and probability tolerances are unchanged. No H100
+reevaluation was run for this validation-only follow-up.
+
 ## System One integration and H100 rerun (2026-11-16)
 
 Integrated the maintainer's six commits through `8fdf816` and `origin/main`

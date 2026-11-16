@@ -12,15 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MLX server: `tool_choice: "none"` now keeps the tool schemas in the prompt and bans `<tool_call>`
   (before, the tools were dropped from the prompt), so clients sending it (evals, Hermes) get a different
   prompt than earlier baselines.
-- Decision server, `POST /v1/systemone` (and its deprecated `/v1/decide` alias) with `"reasoning": true` (CUDA `inference/zoro-1/serve_decide.py`
-  and the MLX server): `max_reasoning_tokens` (default: the configured cap, 4,096) must be between 1 and the server's
-  `--reasoning-token-limit` (default 4,096, at most 8,192) and fit the context with the prompt, or the
-  request gets HTTP 422 (400 on the deprecated alias). Responses add `reasoning_stats` and `answers_source`. Reasoning that does not
-  finish (`cut: "length"`, with the actual reason in `reasoning_stats.finish_reason`), that finishes empty (`"empty"`), or that
-  has no room in the state (`"state_limit"`) returns the **direct** answers with `answers_source: "direct"` instead of
-  deciding on partial reasoning; reasoning too long for the state keeps its end and reports
-  `reasoning_trimmed`. Clients that treated every reasoning response as reasoned must check these
-  fields. CUDA adds opt-in `--decision-max-state` / `--decision-max-row` limits (defaults unchanged).
 
 ### Added
 
@@ -38,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   System One clients such as the TypeSafe SDK work unchanged. `images`, `reasoning`,
   `max_reasoning_tokens` and `temperature` are extensions (#92),
   checked the same way on both servers (a bad value is a 422).
+- System One reasoning: `POST /v1/systemone` (and its deprecated `/v1/decide` alias) with `"reasoning": true` (CUDA `inference/zoro-1/serve_decide.py`
+  and the MLX server): `max_reasoning_tokens` (default: the configured cap, 4,096) must be between 1 and the server's
+  `--reasoning-token-limit` (default 4,096, at most 8,192) and fit the context with the prompt, or the
+  request gets HTTP 422 (400 on the deprecated alias). Responses add `reasoning_stats` and `answers_source`. Reasoning that does not
+  finish (`cut: "length"`, with the actual reason in `reasoning_stats.finish_reason`), that finishes empty (`"empty"`), or that
+  has no room in the state (`"state_limit"`) returns the **direct** answers with `answers_source: "direct"` instead of
+  deciding on partial reasoning; reasoning too long for the state keeps its end and reports
+  `reasoning_trimmed`. Clients that treated every reasoning response as reasoned must check these
+  fields. CUDA adds opt-in `--decision-max-state` / `--decision-max-row` limits (defaults unchanged).
+  The shared option validator uses the configured server cap, including requests with reasoning disabled.
 - `inference/gravityocr/`: serving for `trillionlabs/GravityOCR`, a GLM-OCR-based document OCR
   model, with self-speculative decoding. It runs on upstream SGLang v0.5.10 (Apache-2.0) plus a
   committed patch and the seven new files the patch needs, in a separate Python 3.12
