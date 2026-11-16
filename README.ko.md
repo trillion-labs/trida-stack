@@ -23,7 +23,7 @@
 | | 스택 | 주요 기능 |
 |---|---|---|
 | 🏋️ | **`train/`** | **AR → 디퓨전 전환.** 별도의 디퓨전 사전학습 없이 *사전학습된 AR 체크포인트*에 블록 디퓨전 지도 미세조정(SFT)을 바로 적용합니다. AR 보조 손실을 함께 사용해 동일한 가중치로 자기회귀 생성도 수행할 수 있도록 학습합니다. 선택적으로 **유형별 의사결정(typed decision) 공동 학습**(예/아니오·선택·점수형 질문에 답하는 포인터 헤드)과 비전-언어 체크포인트의 **이미지 입력 학습**을 지원합니다. |
-| ⚡ | **`inference/<model>/`** | **nano-inference: nanoGPT 스타일의 간결한 모델별 서빙 스택.** [`inference/zoro-1/`](inference/zoro-1/)은 `trillionlabs/Zoro-1`을 서빙합니다. 하나의 체크포인트로 self-speculative 디코딩과 유형별 의사결정을 지원합니다. **SGLang**, **vLLM**, **MLX** 백엔드에서 OpenAI 호환 API를 제공합니다. |
+| ⚡ | **`inference/<model>/`** | **nano-inference: nanoGPT 스타일의 간결한 모델별 서빙 스택.** [`inference/zoro-1/`](inference/zoro-1/)은 `trillionlabs/Zoro-1`을 서빙합니다. 하나의 체크포인트로 self-speculative 디코딩과 유형별 의사결정을 지원합니다. **SGLang**, **vLLM**, **MLX** 백엔드에서 OpenAI 호환 API를 제공합니다. [`inference/gravityocr/`](inference/gravityocr/)는 업스트림 SGLang에서 self-speculative 디코딩으로 `trillionlabs/GravityOCR`(GLM-OCR 기반 문서 OCR)를 서빙합니다. |
 
 `train/`과 `inference/` 사이에는 상호 임포트 의존성이 없습니다. `benchmark/`는 에이전트 평가를 위한 종합 평가 도구를,
 `inference/`는 품질과 처리량을 간단히 측정할 수 있는 벤치마크(gsm8k / mmlu_pro / ifeval)를 제공합니다.
