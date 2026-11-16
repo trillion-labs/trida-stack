@@ -59,7 +59,8 @@ reused.
 | `EVAL_HOME` | install directory (default `$HOME/.gravityocr-eval`) |
 | `SKIP_SGLANG=1` | no server env (SGLang or Mac), for a scoring-only machine, or when you run `run.sh` with `ENDPOINT` |
 | `SKIP_TEXLIVE=1` | use the `pdflatex` already on PATH; it must be TeX Live 2022.06 or newer |
-| `TL_REPO` | TeX Live package mirror (default `https://mirror.ctan.org/systems/texlive/tlnet`) |
+| `TL_REPO` | TeX Live package mirror (default `https://mirror.ctan.org/systems/texlive/tlnet`, which picks a nearby mirror) |
+| `TL_FALLBACK` | mirrors tried when the install fails from `TL_REPO` (default: JAIST in Japan, then RIT in the US) |
 | `CUDA_HOME`, `PY` | passed to the SGLang setup |
 
 > **Why not `apt install texlive`?**
@@ -113,6 +114,7 @@ Anything set in the environment overrides `env.sh`. `bash run.sh --help` lists e
 |---|---|---|
 | `MODEL` | – (required) | checkpoint directory or Hub id |
 | `DATASET` | `trillionlabs/gravityocr-dev` | Hub dataset id or `datasets.save_to_disk` directory |
+| `DATASET_REVISION` | `447ce14` for `trillionlabs/gravityocr-dev`, else the latest | Hub revision (commit, branch or tag) of `DATASET`; `main` for the latest |
 | `OUT` | `runs/<model>-<mode>-<time>` | output directory |
 | `MODE` | `self-spec` | `self-spec` (block-diffusion draft + AR verify) or `causal` (plain AR) |
 | `BACKEND` | `auto` | `sglang` (`serve.sh`, NVIDIA) or `mac` (`serve_mac.py`); `auto` picks `mac` on an Apple Silicon Mac |
@@ -123,8 +125,15 @@ Anything set in the environment overrides `env.sh`. `bash run.sh --help` lists e
 | `ENDPOINT` | – | OpenAI base URL of a running server |
 | `PORT` | `30500` | server port |
 | `SCORE_WORKERS` | CPU count | scoring processes |
+| `ALLOW_ERRORS` | `0` | `1` scores even when requests failed (see below) |
+| `API_KEY` | – | bearer key sent with each request; set it when the server requires one |
+| `GPU` | first of `CUDA_VISIBLE_DEVICES`, else `0` | the GPU `serve.sh` uses |
 
-Other `serve.sh` settings pass through, for example `GPU`, `MEMFRAC`, `CUDA_HOME`, `SKIP_PREFLIGHT` and `HF_HOME`.
+Other `serve.sh` settings pass through, for example `MEMFRAC`, `CUDA_HOME`, `SKIP_PREFLIGHT` and `HF_HOME`.
+
+> **In a Slurm (or other scheduler) job:** `serve.sh` sets `CUDA_VISIBLE_DEVICES=$GPU` itself. When `GPU` is not
+> set, `run.sh` takes the first device of the `CUDA_VISIBLE_DEVICES` the scheduler assigned, so the server runs
+> on your allocation and not on physical GPU 0. On nodes that do not set `CUDA_VISIBLE_DEVICES`, set `GPU`.
 
 ### What one run does
 1. **Export:** reads the dataset (Hub or `save_to_disk`) and writes `data/data.jsonl`, `data/images/<id>.png` and
@@ -137,6 +146,10 @@ Other `serve.sh` settings pass through, for example `GPU`, `MEMFRAC`, `CUDA_HOME
    - **Warm-up:** the first high-concurrency pass on a fresh SGLang server is about 2× slower, so the warm-up
      pass is discarded. On a Mac only one crop per task is sent first.
    - **Measured pass:** one per concurrency level.
+   - **Failed requests stop the run.** A request that fails (server crash, a 401, a timeout) would be scored as an
+     empty prediction, which scores 0 and quietly lowers Overall. So if any request failed, `run.sh` stops
+     before scoring and shows the first error. `ALLOW_ERRORS=1` scores anyway; the `errors` column of the speed
+     table then says how many.
 4. **Self-check:** scores CDM of two formulas, one with Hangul, against themselves; anything below 1.0 stops
    the run.
 5. **Score:** each split at each scored level.
@@ -185,6 +198,20 @@ Optional columns (`kind`, `lang`, `degradation`, `source_detail`, ...) feed the 
 Datasets and checkpoints are not stored in this repository. Pass Hub ids as `MODEL` and `DATASET`, or mount local
 directories.
 
+### Access and terms
+
+- **`trillionlabs/gravityocr-dev` is gated**, shared with participants for their own testing and tuning: request
+  access on its Hub page, then log in with the approved account. Without access, run `run.sh` on your own data in
+  the layout above, as a Hub dataset or a `save_to_disk` directory.
+- **100 of its 402 crops come from AI Hub dataset 479** (Korean handwriting). AI Hub's terms restrict
+  redistribution, so those crops follow AI Hub's terms, not this repository's licence. Do not re-upload or share
+  the dataset, or crops exported from it (`$OUT/data/`), outside the people it was shared with.
+- docr-ko-eval-v2, the source of gravityocr-dev, is an internal `save_to_disk` copy and is not published.
+- **Pinned revision:** `run.sh` loads `trillionlabs/gravityocr-dev` at `447ce14` (2026-11-13), the revision the
+  reference numbers below use (its data is the same as at the first upload; later commits changed only the card),
+  so an update to the dataset cannot silently change them. `DATASET_REVISION=main`
+  loads the latest.
+
 ## Reference numbers
 
 GravityOCR-KO (`trillionlabs/GravityOCR-KO` @ `bc0e105`) on docr-ko-eval-v2 (402 dev / 402 test crops). The dev
@@ -206,7 +233,9 @@ Speed of the measured pass (804 crops):
 Whole run: 2.4 minutes (server start 30 s, predictions 41 s, scoring 70 s).
 
 Decoding is greedy, but outputs of batched runs can still differ in a few crops from run to run. Expect Overall
-to move by about ±0.1.
+to move by about ±0.25. For example, on one H100: dev gave 92.62 and 92.72 in two runs, and test 92.14
+against 92.37 on the L40S. Compare checkpoints on the same split and setup, and treat a difference under
+about 0.3 as noise.
 
 ### On a Mac
 
@@ -253,6 +282,12 @@ docker run --gpus 1 -e HF_TOKEN -v $HOME/.cache/huggingface:/root/.cache/hugging
 
 ## Troubleshooting
 
+- **`setup.sh` fails installing TeX Live** ("Installation failed", or a 404 for a file under `archive/`). The
+  mirror `mirror.ctan.org` picked is missing files; from Korea it is often `mirror.kakao.com`. `setup.sh`
+  retries on other mirrors by itself. If every try fails, pick a mirror:
+  `TL_REPO=https://ftp.jaist.ac.jp/pub/CTAN/systems/texlive/tlnet bash benchmark/gravityocr/setup.sh`.
+- **The run stops with "failed requests".** A 401 means the server requires a key: set `API_KEY` to the one the
+  server uses. For anything else, see `$OUT/serve.log`.
 - **The dataset download fails with 401, 404 or "Repository not found".** `trillionlabs/gravityocr-dev` is
   private: run `hf auth login` (or set `HF_TOKEN`) with an account that can see it.
 - **Every formula scores CDM 0 with `cdm_errors=0`.** pdflatex is too old or a TeX package is missing. Run

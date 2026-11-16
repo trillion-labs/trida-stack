@@ -244,6 +244,23 @@ def test_build_model_selects_implementation_and_resume_source(monkeypatch, tmp_p
     assert all(p.dtype == torch.float32 for p in model.parameters())
 
 
+def test_build_model_head_init_prefers_released_decision_head_name(monkeypatch, tmp_path):
+    # Zoro-1 on the Hub ships decision_head.pt; training checkpoints carry jev_head.pt
+    from train.models import build
+    args = build_parser().parse_args([])
+    args.resume, args.decision_data = str(tmp_path), 'records.jsonl'
+    model = torch.nn.Linear(1, 1)
+    model.is_vl, model.decision_head = False, torch.nn.Linear(1, 1)
+    for name, fill in (('jev_head.pt', 0.25), ('decision_head.pt', 0.5)):
+        head = {key: torch.full_like(value, fill) for key, value in model.decision_head.state_dict().items()}
+        torch.save({'head_dim': args.decision_head_dim, 'head': head}, tmp_path / name)
+    monkeypatch.setattr(build, 'HFBlockDiffusionHybrid', Mock(return_value=model))
+    monkeypatch.setattr(build, 'is_hybrid_model_id', Mock(return_value=True))
+    monkeypatch.setattr(build, 'load_image_processor', Mock(return_value=None))
+    build.build_model(args)
+    assert all(torch.all(value == 0.5) for value in model.decision_head.state_dict().values())
+
+
 @pytest.mark.parametrize('suffix,value,expected', [
     ('data', 'records.jsonl', 'records.jsonl'), ('only', None, True),
     ('loss_weight', '0.5', 0.5), ('micro_per_step', '2', 2),

@@ -12,8 +12,8 @@ serves (§4b).
 | Component | Path | Upstream | License |
 |---|---|---|---|
 | IFEval scorer | `inference/zoro-1/ifeval_lib/` | [google-research · instruction_following_eval](https://github.com/google-research/google-research/tree/master/instruction_following_eval) | **Apache-2.0** |
-| Jev request encoding (vendored, adapted) | `inference/zoro-1/jev.py`, `inference/zoro-1/jev_head.py`, `scripts/export_kev_checkpoint.py`, `inference/zoro-1/decide_request.py`, `inference/zoro-1/decide_engine.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
-| Typed-decision training, kev scheme (vendored, adapted) | `train/data/decision.py`, `train/models/decision.py`, `train/tools/export_kev_checkpoint.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
+| Jev request encoding (vendored, adapted) | `inference/zoro-1/jev.py`, `inference/zoro-1/jev_head.py`, `scripts/export_decision_checkpoint.py`, `inference/zoro-1/decide_request.py`, `inference/zoro-1/decide_engine.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
+| Typed-decision training, kev scheme (vendored, adapted) | `train/data/decision.py`, `train/models/decision.py`, `train/tools/export_decision_checkpoint.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
 | mlx-vlm Qwen3-VL vision encoder (adapted) | `inference/zoro-1/mlx/trida_mlx/vision.py` | [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) `mlx_vlm/models/qwen3_vl/vision.py` | **MIT** |
 | MLX gated-delta Metal kernel (adapted) | `inference/zoro-1/mlx/trida_mlx/kernels.py` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) `mlx_lm/models/gated_delta.py` | **MIT** |
 | Qwen3.5 / Trida chat template (test fixture) | `inference/zoro-1/mlx/tests/fixtures/trida_chat_template.jinja` | shipped with `trillionlabs/Trida2.0-4B` (from Qwen3.5) | **Apache-2.0** |
@@ -21,12 +21,12 @@ serves (§4b).
 
 These are the only third-party source code redistributed in the repository (see
 [`NOTICE`](NOTICE)); `inference/zoro-1/jev.py` and `inference/zoro-1/jev_head.py` vendor kev's request
-mapping, encoding and pointer head, and `scripts/export_kev_checkpoint.py` writes kev's
+mapping, encoding and pointer head, and `scripts/export_decision_checkpoint.py` writes kev's
 checkpoint format; `inference/zoro-1/decide_request.py` and `inference/zoro-1/decide_engine.py` (the
 decision server) follow the same encoding and pointer head. On the training side,
 `train/data/decision.py` vendors the same mapping and encoding plus kev's augmentation, and
 `train/models/decision.py` vendors kev's pointer head and loss, both adapted to this
-trainer's packed rows, and `train/tools/export_kev_checkpoint.py` writes the same format.
+trainer's packed rows, and `train/tools/export_decision_checkpoint.py` writes the same format.
 `inference/gravityocr/sglang/gravityocr_selfspec.patch` modifies 22 source files of upstream
 SGLang plus `python/pyproject.toml` (it relaxes the `torchao` and `torchcodec` pins). The
 seven new files the patch needs, which `sglang/setup.sh` copies into the checkout
@@ -94,6 +94,8 @@ run sandboxed (an operational detail, not a licensing one).
 | KoAgentBench | `benchmark/ko_agentbench/` | [huggingface-KREW/Ko-AgentBench](https://huggingface.co/datasets/huggingface-KREW/Ko-AgentBench) | **Apache-2.0** |
 | SWE-bench | `benchmark/swe_bench/` | [princeton-nlp/SWE-bench](https://github.com/princeton-nlp/SWE-bench) | **MIT** |
 | Terminal-Bench | `benchmark/terminal_bench/` | [laude-institute/terminal-bench](https://github.com/laude-institute/terminal-bench) | **Apache-2.0** |
+| WorkflowEvals (pinned; `trida` provider patch applied at setup) | `benchmark/workflow_evals/` | [typesafe-ai/WorkflowEvals](https://github.com/typesafe-ai/WorkflowEvals) | **Apache-2.0** |
+| OmniDocBench metric code (pinned `0604d98`; with sacrebleu, PyMuPDF, Levenshtein, TeX Live in a separate venv) | `benchmark/gravityocr/` | [opendatalab/OmniDocBench](https://github.com/opendatalab/OmniDocBench) | **Apache-2.0**; PyMuPDF (AGPL-3.0) and Levenshtein (GPL-2.0-or-later) under a maintainer exception for this local tool ([intake 0016](docs/oss/intake/0016-gravityocr-eval.md)) |
 
 ## 4. Evaluation datasets (pulled on demand, not redistributed)
 
@@ -106,6 +108,8 @@ None are redistributed from this repo — all are downloaded at eval time. See
 | MMLU-Pro | `inference/zoro-1/eval.py` | [TIGER-Lab/MMLU-Pro](https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro) | **MIT** |
 | IFEval | `inference/zoro-1/eval_ifeval.py` | google/IFEval | **Apache-2.0** |
 | benchmark suites | `benchmark/` | each harness's own datasets | per upstream |
+| evalsafe invoice processing | `benchmark/workflow_evals/` | [typesafe/evalsafe-invoice-processing](https://huggingface.co/datasets/typesafe/evalsafe-invoice-processing) | **Apache-2.0** |
+| evalsafe customer service, security incidents, agent-trace observability | `benchmark/workflow_evals/` (local evaluation only, behind `--allow-unverified-datasets`) | [typesafe](https://huggingface.co/typesafe) | **No licence stated**: maintainer exception for local evaluation, no redistribution ([intake 0011](docs/oss/intake/0011-workflowevals.md)) |
 
 ## 4b. Model weights — base model and derived checkpoint
 

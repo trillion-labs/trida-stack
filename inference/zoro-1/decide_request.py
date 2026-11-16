@@ -20,17 +20,21 @@ Each question needs 1-255 options and becomes one causal token row:
 
 The model's decision head reads the last-layer hidden states at each option's `</opt>` and at `<decide>`
 (decide_engine.py). This is the format decision checkpoints are trained on; the rendering and row encoding follow
-kev (https://github.com/jaredpalmer/kev, Apache-2.0), see NOTICE. `prompt` / `with_reasoning` at the end turn a
-request into a chat prompt for reason-then-decide.
+kev (https://github.com/jaredpalmer/kev, Apache-2.0), see NOTICE. `prompt` / `with_reasoning` turn a request into
+a chat prompt for reason-then-decide, and `systemone_request` / `systemone_response` at the end map the System One
+API body (POST /v1/systemone) onto a request and a result back onto its response.
 """
 import base64
 import io
+import math
 import os
 import re
 from dataclasses import dataclass, field
 
 SPECIAL = ["<|fim_prefix|>", "<|fim_middle|>", "<|box_start|>", "<|box_end|>", "<|fim_suffix|>"]  # state q opt /opt decide
 VISION = ["<|vision_start|>", "<|image_pad|>", "<|vision_end|>"]
+MAX_REASONING_TOKENS = 8192   # largest supported request budget
+DEFAULT_REASONING_TOKEN_LIMIT = 4096
 MAX_STATE, MAX_BRANCH = 7552, 8192   # state tokens, and state + one question, as in training
 MAX_IMAGE_PIXELS = 448 * 448
 MAX_OPTIONS = 255
@@ -41,6 +45,16 @@ _SPECIAL_RE = re.compile(r"<\|([A-Za-z0-9_]+)\|>")
 
 class RequestError(ValueError):
     """A request the model cannot take. The message says what is wrong and where; it is shown to whoever sent it."""
+
+
+def validate_decision_limits(max_state, max_branch, context_length, reasoning_token_limit):
+    """Server-side bounds; never let an encoder row exceed the engine context."""
+    if any(type(v) is not int for v in (max_state, max_branch, context_length, reasoning_token_limit)):
+        raise RequestError("decision and reasoning limits must be integers")
+    if not 1 <= max_state <= max_branch - 640 or max_branch > context_length:
+        raise RequestError("limits must satisfy 1 <= decision_max_state <= decision_max_row - 640 and decision_max_row <= context_length")
+    if not 1 <= reasoning_token_limit <= MAX_REASONING_TOKENS:
+        raise RequestError(f"reasoning_token_limit must be between 1 and {MAX_REASONING_TOKENS}")
 
 
 # ---- rendering ------------------------------------------------------------------------------------
@@ -110,8 +124,8 @@ class Request:
     max_image_pixels: int = MAX_IMAGE_PIXELS
     raw: dict = field(default_factory=dict, repr=False)
 
-    def encode(self, tokenizer, image_processor=None):
-        """-> Encoded. The state is cut to fit MAX_STATE (the image counts as its token count + 2); a question that
+    def encode(self, tokenizer, image_processor=None, *, max_state=MAX_STATE, max_branch=MAX_BRANCH):
+        """-> Encoded. The state is cut to fit max_state (the image counts as its token count + 2); a question that
         does not fit its row raises RequestError."""
         pixel_values = grid = None
         n = 0
@@ -119,30 +133,36 @@ class Request:
             if image_processor is None:
                 raise RequestError("the request has an image but this checkpoint has no image processor (not a VL model)")
             pixel_values, grid, n = image_input(self.image, image_processor, self.max_image_pixels, self.min_image_pixels)
-        return Encoded(self.encode_rows(tokenizer, n), pixel_values, grid)
+        return Encoded(self.encode_rows(tokenizer, n, max_state=max_state, max_branch=max_branch), pixel_values, grid)
 
-    def encode_rows(self, tokenizer, image_tokens=0):
+    def encode_rows(self, tokenizer, image_tokens=0, *, max_state=MAX_STATE, max_branch=MAX_BRANCH):
         """Torch-free serving rows, also used by MLX with its own image preprocessing."""
         image = []
         if image_tokens:
             vs, pad, ve = (tokenizer.convert_tokens_to_ids(t) for t in VISION)
             image = [vs] + [pad] * image_tokens + [ve]
-        s_id, q_id, o_id, c_id, d_id = (tokenizer.convert_tokens_to_ids(t) for t in SPECIAL)
-        state = [s_id] + image + _user(tokenizer, self.state)[: max(0, MAX_STATE - 1 - len(image))]
+        s_id = tokenizer.convert_tokens_to_ids(SPECIAL[0])
+        state = [s_id] + image + _user(tokenizer, self.state)[: max(0, max_state - 1 - len(image))]
         rows = []
         for q in self.questions:
-            instr = [q_id] + _user(tokenizer, q.instr)
-            spans = [[o_id] + _user(tokenizer, o) + [c_id] for o in q.options]
-            branch = instr + [t for sp in spans for t in sp] + [d_id]
-            if len(branch) > MAX_BRANCH - len(state):
+            instr, spans, branch = question_parts(q, tokenizer)
+            if len(branch) > max_branch - len(state):
                 raise RequestError(f"question {q.qid!r} is too long: {len(branch)} tokens of instructions and options "
-                                   f"with a {len(state)}-token state (at most {MAX_BRANCH} per question); shorten it")
+                                   f"with a {len(state)}-token state (at most {max_branch} per question); shorten it")
             ends, cursor = [], len(state) + len(instr)
             for sp in spans:
                 cursor += len(sp)
                 ends.append(cursor - 1)
             rows.append({"ids": state + branch, "decide": len(state) + len(branch) - 1, "opts": ends})
         return rows
+
+
+def question_parts(question, tokenizer):
+    """Exactly the question suffix used by encode_rows, including all delimiters."""
+    _, q_id, o_id, c_id, d_id = (tokenizer.convert_tokens_to_ids(t) for t in SPECIAL)
+    instr = [q_id] + _user(tokenizer, question.instr)
+    spans = [[o_id] + _user(tokenizer, option) + [c_id] for option in question.options]
+    return instr, spans, instr + [t for span in spans for t in span] + [d_id]
 
 
 def _user(tok, text):
@@ -281,6 +301,32 @@ def with_reasoning(request, text):
     return {**request, "state": state}
 
 
+def fit_reasoning(request, text, tokenizer, image_tokens=0, *, max_state=MAX_STATE, max_branch=MAX_BRANCH):
+    """Keep the reasoning's conclusion within the encoder's state budget.
+
+    Preserve the original state; return an empty string when it leaves no room for
+    reasoning. Callers must report any trimming and use direct answers if empty.
+    image_tokens counts image patches, excluding the two vision delimiters.
+    """
+    longest = max(len(question_parts(q, tokenizer)[2]) for q in parse(request).questions)
+    room = min(max_state, max_branch - longest) - 1 - (image_tokens + 2 if image_tokens else 0)
+
+    def fits(candidate):
+        return len(_user(tokenizer, render(with_reasoning(request, candidate)["state"]))) <= room
+
+    if fits(text):
+        return text
+    ids = _user(tokenizer, text)
+    lo, hi = 0, len(ids) + 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if fits("…" + tokenizer.decode(ids[-mid:])):
+            lo = mid
+        else:
+            hi = mid
+    return "…" + tokenizer.decode(ids[-lo:]) if lo else ""
+
+
 # ---- response formatting (shared by SGLang and MLX) ------------------------------------------------
 
 def _confidence(qtype, p):
@@ -304,3 +350,82 @@ def to_answer(q, p):
                 "confidence": r(_confidence("choice", p)), "probabilities": {k: r(v) for k, v in zip(q.keys, p)}}
     return {"type": "score", "score": r(sum(i * x for i, x in enumerate(p))), "legend": q.options,
             "confidence": r(_confidence("score", p)), "probabilities": {str(i): r(v) for i, v in enumerate(p)}}
+
+
+# ---- System One envelope (POST /v1/systemone, shared by SGLang and MLX) ---------------------------
+# TypeSafe's System One API 0.2.0: the body is {"state", "model", "questions"} with the question shapes above, and the
+# response is {"model", "answers", "usage": {"input_tokens", "output_tokens"}}. Unknown top-level keys are ignored, as
+# the published schema allows. Our extensions, read when present: `images` (at most one, a base64 string, a data URL,
+# or {"url": ...} as SGLang's /v1/systemone takes it), `min_image_pixels` / `max_image_pixels`, `reasoning`,
+# `max_reasoning_tokens` and `temperature`, plus whatever extra keys a server names in `extensions`.
+
+SYSTEMONE_EXTENSIONS = ("reasoning", "max_reasoning_tokens", "temperature")
+
+
+def systemone_request(body, extensions=(), auto_reasoning=False, *, reasoning_token_limit=DEFAULT_REASONING_TOKEN_LIMIT):
+    """A System One body -> (request for parse(), {extension: value} for the keys present). RequestError names the
+    first problem; the request itself is validated by parse(), the extension values by systemone_options()."""
+    if not isinstance(body, dict):
+        raise RequestError(f"the body must be an object with 'state', 'model' and 'questions', got {type(body).__name__}")
+    for key in ("state", "model", "questions"):
+        if key not in body:
+            raise RequestError(f"the body has no {key!r}")
+    if not isinstance(body["model"], str) or not body["model"].strip():
+        raise RequestError("'model' must be a non-empty string")
+    request = {k: body[k] for k in ("state", "questions", "min_image_pixels", "max_image_pixels") if k in body}
+    images = body.get("images") or []
+    if not isinstance(images, list):
+        raise RequestError("'images' must be a list")
+    if len(images) > 1:
+        raise RequestError(f"'images' has {len(images)} entries; this model takes at most one image per request")
+    if images:
+        image = images[0]
+        if isinstance(image, dict):
+            image = image.get("url")
+        if not isinstance(image, str):
+            raise RequestError("'images' entries must be a base64 string, a data URL, or {\"url\": ...} with one")
+        request["image"] = image
+    options = {k: body[k] for k in (*SYSTEMONE_EXTENSIONS, *extensions) if k in body}
+    return request, systemone_options(options, auto_reasoning, reasoning_token_limit=reasoning_token_limit)
+
+
+def systemone_options(options, auto_reasoning=False, *, reasoning_token_limit=DEFAULT_REASONING_TOKEN_LIMIT):
+    """Check the extension values both servers take, so a request means the same on each; null means unset.
+    `reasoning: "auto"` only where the server supports it (auto_reasoning)."""
+    def number(v):
+        return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+
+    reasoning = options.get("reasoning")
+    if reasoning is not None and not isinstance(reasoning, bool) and not (auto_reasoning and reasoning == "auto"):
+        allowed = 'true, false or "auto"' if auto_reasoning else "true or false (this server has no \"auto\")"
+        raise RequestError(f"'reasoning' must be {allowed}, got {reasoning!r}")
+    budget = options.get("max_reasoning_tokens")
+    if budget is not None and (type(budget) is not int or not 1 <= budget <= reasoning_token_limit):
+        raise RequestError(f"'max_reasoning_tokens' must be an integer from 1 to {reasoning_token_limit}, got {budget!r}")
+    temperature = options.get("temperature")
+    if temperature is not None and not (number(temperature) and temperature > 0):
+        raise RequestError(f"'temperature' must be a finite number above 0, got {temperature!r}")
+    threshold = options.get("threshold")
+    if threshold is not None and not (number(threshold) and 0 <= threshold <= 1):
+        raise RequestError(f"'threshold' must be a number from 0 to 1, got {threshold!r}")
+    return {k: v for k, v in options.items() if v is not None}
+
+
+def systemone_response(result, model):
+    """A decision result ({"answers", "usage"?, ...}) -> the System One response for the served model. The score
+    legend becomes {"0": level, ...}; any other result fields (timing, reasoning) are kept as extensions."""
+    def answer(a):
+        if a.get("type") == "score" and isinstance(a.get("legend"), list):
+            return {**a, "legend": {str(i): level for i, level in enumerate(a["legend"])}}
+        return a
+
+    usage = result.get("usage") or {}
+    return {"model": model, "answers": {qid: answer(a) for qid, a in result["answers"].items()},
+            "usage": {"input_tokens": int(usage.get("input_tokens", 0)),
+                      "output_tokens": int(usage.get("output_tokens", 0))},
+            **{k: v for k, v in result.items() if k not in ("answers", "usage", "model")}}
+
+
+def rows_tokens(rows):
+    """Input tokens of the decision rows a request was scored on (usage.input_tokens)."""
+    return sum(len(row["ids"]) for row in rows)

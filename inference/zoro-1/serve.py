@@ -222,14 +222,14 @@ def main():
                     help="extra flags forwarded verbatim to sglang.launch_server (serve_decide.py for decide)")
     args = ap.parse_args()
     if args.model is None and args.mode == DECIDE_MODE:
-        args.model = os.environ.get("TRIDA_DECIDE_MODEL")   # Zoro-1 carries jev_head.pt, so the default works too
+        args.model = os.environ.get("TRIDA_DECIDE_MODEL")   # Zoro-1 carries decision_head.pt, so the default works too
     if args.model is None:
         args.model = os.environ.get("TRIDA_MODEL", DEFAULT_MODEL)
 
     if args.mode in MODES and args.shape and not args.dry_run:
         args.model = for_sglang(args.model)
     elif args.mode == DECIDE_MODE and not args.dry_run:
-        args.model = str(local_checkpoint(args.model))   # serve_decide.py reads <ckpt>/jev_head.pt from disk
+        args.model = str(local_checkpoint(args.model))   # serve_decide.py reads the decision head from disk
     cmd = build_command(args)
     print("[serve]", " ".join(shlex.quote(c) for c in cmd), flush=True)
     if args.dry_run:

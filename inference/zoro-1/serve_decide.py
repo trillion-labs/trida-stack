@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Serve a Trida decision checkpoint: typed decisions and chat from one engine, one copy of the weights.
 
-  POST /v1/decide            {"request": {"state": ..., "questions": {...}}, "reasoning": false, "temperature": null}
-                             -> {"answers": {qid: answer}, "timing_ms": ...} (+ "reasoning" when reasoning=true)
+  POST /v1/systemone         TypeSafe's System One API: {"state": ..., "model": ..., "questions": {...}}
+                             -> {"model", "answers": {qid: answer}, "usage": {"input_tokens", "output_tokens"}}.
+                             Extensions: "images": [one base64 / data URL / {"url"}], "reasoning", "max_reasoning_tokens"
+                             (default: --reasoning-token-limit), "temperature"; the response then also carries "reasoning" and timing fields.
+                             Validation errors are 422 {"detail": [{"loc", "msg", "type"}]}, as System One returns them.
+  POST /v1/decide            deprecated alias, removed in the next release: {"request": {"state": ..., "questions":
+                             {...}}, "reasoning": false, "temperature": null, "max_reasoning_tokens": null}
+                             -> {"answers", "usage", "timing_ms"}
   POST /v1/chat/completions  OpenAI-compatible, streaming or not; `tools` supported (tool calls parsed from the
                              model's <tool_call> blocks); the thinking is returned as reasoning_content; honours
                              max_tokens, temperature, top_p, top_k, presence_penalty and
@@ -15,7 +21,7 @@ Usage:
   python serve.py /path/to/decision-checkpoint --mode decide           # the same, through serve.py
 
 Needs stock SGLang >= 0.5.22 (Apache-2.0) plus fastapi and uvicorn in the same environment; see README "Decisions".
-A decision checkpoint is a Trida checkpoint with jev_head.pt (MODEL_CONTRACT.md); an optional temperature.json sets
+A decision checkpoint is a Trida checkpoint with decision_head.pt or jev_head.pt (MODEL_CONTRACT.md); an optional temperature.json sets
 its serving temperatures. Generation here is causal decoding; the two-stream decode modes are serve.py's others.
 """
 import argparse
@@ -147,10 +153,10 @@ def _num(body, key, default, cast):
 
 
 def create_app(engine):
-    from fastapi import Body, FastAPI, HTTPException
+    from fastapi import Body, FastAPI, HTTPException, Response
     from fastapi.responses import StreamingResponse
 
-    from decide_request import RequestError
+    from decide_request import RequestError, systemone_request, systemone_response
 
     name = os.path.basename(os.path.normpath(engine.ckpt))
     app = FastAPI(title="Trida decisions")
@@ -163,13 +169,31 @@ def create_app(engine):
     def models():
         return {"object": "list", "data": [{"id": name, "object": "model", "created": 0, "owned_by": "trida"}]}
 
-    @app.post("/v1/decide")
-    async def decide(body: dict = Body(...)):
-        if "request" not in body:
-            raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float}")
+    @app.post("/v1/systemone")
+    async def systemone(body: dict = Body(...)):
+        def invalid(msg):
+            return HTTPException(422, [{"loc": ["body"], "msg": msg, "type": "value_error"}])
         try:
+            request, opts = systemone_request(
+                body, reasoning_token_limit=getattr(engine, "reasoning_token_limit", 4096))
             # the image, if any, is in the request (base64 or a data URL): requests never name server files
-            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")))
+            result = await engine.adecide(request, None, opts.get("temperature"), opts.get("reasoning", False),
+                                          max_reasoning_tokens=opts.get("max_reasoning_tokens"))
+        except RequestError as e:
+            raise invalid(str(e)) from e
+        return systemone_response(result, name)
+
+    @app.post("/v1/decide", deprecated=True)
+    async def decide(response: Response, body: dict = Body(...)):
+        response.headers["Deprecation"] = "true"
+        response.headers["Link"] = '</v1/systemone>; rel="successor-version"'
+        if "request" not in body:
+            raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float, \"max_reasoning_tokens\"?: int (within server reasoning-token-limit; default server cap)}")
+        try:
+            budget = _num(body, "max_reasoning_tokens", None, int)
+            # Images use the shared request contract; server file paths are not accepted.
+            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
+                                        max_reasoning_tokens=budget)
         except RequestError as e:
             raise HTTPException(400, str(e)) from e
 
@@ -234,18 +258,26 @@ def create_app(engine):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("model", nargs="?", default=os.environ.get("TRIDA_DECIDE_MODEL"),
-                    help="decision checkpoint directory (with jev_head.pt); default $TRIDA_DECIDE_MODEL")
+                    help="decision checkpoint directory (with decision_head.pt or jev_head.pt); default $TRIDA_DECIDE_MODEL")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=30001)
     ap.add_argument("--mem-fraction", type=float, default=0.8)
     ap.add_argument("--context-length", type=int, default=16384)
+    ap.add_argument("--decision-max-state", type=int, default=7552,
+                    help="state token limit including delimiters; default 7552")
+    ap.add_argument("--decision-max-row", type=int, default=8192,
+                    help="complete decision-row token limit; default 8192")
+    ap.add_argument("--reasoning-token-limit", type=int, default=4096,
+                    help="maximum requested reasoning budget, up to 8192; default 4096")
     a = ap.parse_args()
     if not a.model:
         ap.error("give a decision checkpoint (positional) or set TRIDA_DECIDE_MODEL")
     import uvicorn
 
     from decide_engine import DecideEngine
-    engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length)
+    engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length,
+                          decision_max_state=a.decision_max_state, decision_max_row=a.decision_max_row,
+                          reasoning_token_limit=a.reasoning_token_limit)
     # The HTTP server runs on the engine's own event loop, so concurrent requests batch in the engine.
     server = uvicorn.Server(uvicorn.Config(create_app(engine), host=a.host, port=a.port, loop="none"))
     engine.loop.run_until_complete(server.serve())

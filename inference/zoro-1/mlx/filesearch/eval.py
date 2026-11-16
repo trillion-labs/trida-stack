@@ -405,7 +405,7 @@ def main():
             judge.binary("ping", [("README.md", "file README.md")])
         except Exception as e:  # noqa: BLE001
             sys.exit(f"the decision endpoint {judge.url} is not answering ({e}); start the server with Zoro-1 "
-                     "and its jev_head.pt, or pass --methods bm25")
+                     "and its decision head, or pass --methods bm25")
     args.out.mkdir(parents=True, exist_ok=True)
     summary_out = {"corpus": str(args.root or f"git:{args.rev}"), "files": len(files), "args": {
         k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()}, "methods": {}}
