@@ -288,7 +288,8 @@ def test_stream_start_failure_is_propagated_without_hanging():
     asyncio.run(run())
 
 
-def test_http_forwards_auto_and_budget_and_rejects_sampling_override():
+@pytest.mark.parametrize("path", ["/v1/decide", "/v1/systemone"])
+def test_http_forwards_auto_and_budget_and_rejects_sampling_override(path):
     from fastapi.testclient import TestClient
     from serve_decide import create_app
     e = engine()
@@ -297,12 +298,13 @@ def test_http_forwards_auto_and_budget_and_rejects_sampling_override():
         received.append((args, kw))
         return {"answers": {}}
     e.adecide = decide
+    wire = {"request": REQUEST} if path == "/v1/decide" else {"model": "zoro-1", **REQUEST}
     with TestClient(create_app(e)) as client:
-        response = client.post("/v1/decide", json={"request": REQUEST, "reasoning": "auto", "threshold": 0.8,
+        response = client.post(path, json={**wire, "reasoning": "auto", "threshold": 0.8,
                                                    "max_reasoning_tokens": 12})
         assert response.status_code == 200
         assert received[0][0][-1] == "auto" and received[0][1] == {"threshold": 0.8, "max_reasoning_tokens": 12}
-        response = client.post("/v1/decide", json={"request": REQUEST, "reasoning": "auto", "max_reasoning_tokens": None})
+        response = client.post(path, json={**wire, "reasoning": "auto", "max_reasoning_tokens": None})
         assert response.status_code == 200 and "max_reasoning_tokens" not in received[-1][1]
         response = client.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": "hi"}], "temperature": 0})
         assert response.status_code == 400 and "fixed" in response.text
@@ -458,3 +460,46 @@ def test_http_reasoning_defaults_to_configured_cap(cls, reasoning, cap, provided
     result = response.json()
     assert result["answers_source"] == "reasoned" and calls == ["direct", "reasoned"]
     assert "cut" not in result and result["direct"]["answers"]
+
+
+@pytest.mark.parametrize("path", ["/v1/decide", "/v1/systemone"])
+def test_selfspec_http_disconnect_cancels_and_waits_for_cleanup(monkeypatch, path):
+    from fastapi import HTTPException
+    import serve_decide
+    e = engine()
+    entered, cleaned = [], []
+    async def decide(*args, **kwargs):
+        entered.append(True)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0.01)
+            cleaned.append(True)
+    e.adecide = decide
+    original = serve_decide._decision_while_connected
+    async def disconnected(work, _request):
+        class Disconnected:
+            async def is_disconnected(self):
+                return bool(entered)
+        return await original(work, Disconnected())
+    monkeypatch.setattr(serve_decide, "_decision_while_connected", disconnected)
+    from fastapi.testclient import TestClient
+    wire = {"request": REQUEST} if path == "/v1/decide" else {"model": "zoro-1", **REQUEST}
+    response = TestClient(serve_decide.create_app(e)).post(path, json=wire)
+    assert response.status_code == 499
+    assert entered == cleaned == [True]
+
+
+def test_selfspec_systemone_image_refusal_is_422():
+    import base64
+    import io
+    from PIL import Image
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+    buffer = io.BytesIO()
+    Image.new("RGB", (1, 1)).save(buffer, format="PNG")
+    image = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+    response = TestClient(create_app(engine())).post("/v1/systemone", json={
+        "model": "zoro-1", **REQUEST, "images": [image]})
+    assert response.status_code == 422
+    assert "text only" in response.json()["detail"][0]["msg"]

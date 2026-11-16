@@ -33,6 +33,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `serve_decide.py --backend self-spec` or `serve.py --decision-backend self-spec`.
   The self-spec backend is text-only and serial; probability parity is not yet accepted.
 
+- `benchmark/workflow_evals/`: [TypeSafe WorkflowEvals](https://github.com/typesafe-ai/WorkflowEvals),
+  pinned and patched at setup with a `trida` provider, runs the four business workflows against
+  `/v1/systemone`, directly or with reasoning, and rejects every cut or trimmed reasoning response.
+  Code and dataset revisions are pinned. The invoice dataset is Apache-2.0; the other three state no
+  licence and run only locally behind `--allow-unverified-datasets` (maintainer exception,
+  [intake 0011](docs/oss/intake/0011-workflowevals.md)); no dataset content is committed. CI runs the
+  adapter and setup tests offline with a read-only token.
+
+- `POST /v1/systemone` on the SGLang decision server (`serve_decide.py`) and the MLX server: typed
+  decisions in TypeSafe's System One API 0.2.0 shape (`{"state", "model", "questions"}` ->
+  `{"model", "answers", "usage"}`, score `legend` as `{"0": level, ...}`, 422 validation errors), so
+  System One clients such as the TypeSafe SDK work unchanged. `images`, `reasoning`,
+  `max_reasoning_tokens`, `temperature` and CUDA/MLX auto `threshold` are extensions (#92),
+  checked the same way on both servers (a bad value is a 422).
+- System One reasoning: `POST /v1/systemone` (and its deprecated `/v1/decide` alias) with `"reasoning": true` (CUDA `inference/zoro-1/serve_decide.py`
+  and the MLX server): `max_reasoning_tokens` (default: the configured cap, 4,096) must be between 1 and the server's
+  `--reasoning-token-limit` (default 4,096, at most 8,192).
+  Invalid options get HTTP 422 (400 on the deprecated alias); insufficient context
+  returns an explicit direct fallback. Responses add `reasoning_stats` and `answers_source`. Reasoning that does not
+  finish (`cut: "length"`, with the actual reason in `reasoning_stats.finish_reason`), that finishes empty (`"empty"`), or that
+  has no room in the state (`"state_limit"`) returns the **direct** answers with `answers_source: "direct"` instead of
+  deciding on partial reasoning; reasoning too long for the state keeps its end and reports
+  `reasoning_trimmed`. Clients that treated every reasoning response as reasoned must check these
+  fields. CUDA adds opt-in `--decision-max-state` / `--decision-max-row` limits (defaults unchanged).
+  The shared option validator uses the configured server cap, including requests with reasoning disabled.
+- `inference/gravityocr/`: serving for `trillionlabs/GravityOCR`, a GLM-OCR-based document OCR
+  model, with self-speculative decoding. It runs on upstream SGLang v0.5.10 (Apache-2.0) plus a
+  committed patch and the seven new files the patch needs, in a separate Python 3.12
+  environment that `sglang/setup.sh` builds from a resolved lock: it applies the patch, verifies
+  the checkout byte for byte, and builds SGLang offline with the locked build backend.
+  `validated-freeze.txt` and a fixed resolution date make the lock reproducible from the repo.
+  `serve.sh` launches it (`MODE=self-spec` by default, or `causal`), binds to 127.0.0.1 by
+  default, refuses a non-loopback `SERVE_HOST` without `API_KEY`, and runs one tokenizer worker
+  unless `TOKENIZER_WORKERS` asks for more. It locks SGLang's management endpoints with a
+  fresh random admin key on every start and hands the keys over through a FIFO, so they never
+  reach a file, a command line or an environment. `EXTRA_ARGS`
+  accepts only a fixed list of logging and capacity options. `ocr_request.py` sends one crop
+  through the OpenAI-compatible API (`--task text|table|formula`, key from `$API_KEY` only,
+  redirects refused). Self-spec applies the request's sampling settings, penalties,
+  `logit_bias`, `min_tokens` and grammars as causal decoding does, and returns log
+  probabilities; the README states what it reproduces. The patch also changes four upstream
+  SGLang behaviours for every server it builds: every tokenizer worker checks the keys, `/server_info` and the logged server arguments
+  no longer contain them, the tokenizer workers' shared-memory segment is private, and a
+  single-node server's torch.distributed rendezvous runs on 127.0.0.1 with a store that listens
+  on loopback only (upstream binds it on every interface). CPU tests cover the patch and its
+  pin, `setup.sh` and the lock, the launcher, the request client, the self-spec commit,
+  sampling and grammar logic, the auth changes, the ViT graph settings, the loopback
+  rendezvous, and that the patch leaves other SGLang models and speculative algorithms as
+  upstream has them.
+  The advisory job scans the lock; the findings its SGLang, torch, transformers and diskcache
+  pins cannot fix carry exceptions in `docs/supply-chain/exceptions.md`, and the weekly
+  fetch-recipe job checks that the patch still applies at its pinned commit. None of it uses
+  the PolyForm-NC kernels.
 - Zoro-1 Chat 0.6.0: **a personal knowledge graph** learned from chats (`inference/zoro-1/mlx/app/Knowledge`,
   a standalone Swift package with its own `kg-selftest`).
   - **Learning:** after each reply, Zoro-1 decides whether there is something lasting to remember and
@@ -129,6 +182,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `kev.benchmark` / `kev.serve`.
 - `--fp32_master` (fp32 weights and AdamW state over bf16 compute; needed at small
   LRs) and `--adam_beta2`.
+
+### Deprecated
+
+- `POST /v1/decide` (the `{"request": {...}}` envelope) on both decision servers: it still answers, with a
+  `Deprecation` header and a `Link` to `/v1/systemone`, and will be removed in the next release.
 
 ### Changed
 

@@ -243,7 +243,7 @@ New run artifacts are in `review-fixes/` under the same H100 task directory.
 ## PR review: shared contract and readiness
 
 The request helpers adopt #89's `fit_reasoning` and limit validation directly;
-benchmark code from that PR is not imported. `SelfSpecDecideEngine` no longer
+its benchmark code is carried by the integration merge without modification. `SelfSpecDecideEngine` no longer
 implements its own `adecide`: it inherits the causal engine's shared policy and
 only replaces native generation/readout operations. MLX uses the same torch-free
 `finish_reasoning` helper. `cut` is `length`, `empty`, or `state_limit`,
@@ -256,9 +256,10 @@ omitted or null budgets use that default and fit the available context. CUDA and
 `--reasoning-token-limit` up to 8192. `usage.input_tokens` sums the decision rows
 actually scored, including both passes, and `usage.output_tokens` uses native
 reasoning counts even on fallback. These are logical API counters, not physical
-K+1-prefill totals. This supplies #94's usage fields without adding its separate
-`/v1/systemone` endpoint here. #89 and #94 remain independently open PRs; their
-eventual handler merges still require the usual rebase/integration checks.
+K+1-prefill totals. The merged #94 endpoint exposes these through `/v1/systemone`,
+including auto reasoning, threshold and budget extensions. `/v1/decide` remains
+a deprecated alias. Both routes keep disconnect cancellation and cleanup; invalid
+System One options and unsupported images return its 422 `detail` list.
 
 Abort-acknowledgement failure still prevents further inference, and `/health`
 now returns 503 with `ok: false`. CPU regression tests force that timeout and
@@ -268,10 +269,11 @@ the incomplete 38/40 parity result.
 
 ### Integration order
 
-Land **#89 first**, then rebase #96 onto the resulting `origin/main`, reconcile
-its shared serving files and rerun integration tests before merging #96. #89 is
-still open; this follow-up does not merge it or claim the cross-PR conflicts are
-resolved. Coordinate #97's default-budget change with this shared-cap default.
+**#94 is merged.** This branch integrates the latest #89 branch, preserving its
+maintainer fixes and configured-cap validation. Land **#89 first**, then update
+#96 against the resulting `origin/main` before merging. The current shared-file
+conflicts are resolved and CPU/MLX integration checks are rerun; another main
+update may require reconciliation. Coordinate #97 with the shared 4096 default.
 
 ### Latency and AR comparison
 
@@ -402,3 +404,17 @@ skipped)**, Ruff and pinned supply-chain checks passed. No additional H100 or
 forced-length speed comparison was run. Frozen benchmark inputs, probability
 comparison code and tolerances are unchanged; the two parity failures remain.
 #89 must still land before the integration rebase described above.
+
+
+### System One review follow-up (2026-11-16)
+
+Integrated #94 and the latest #89 maintainer fixes. Shared option validation uses
+the configured server cap before inference, including disabled reasoning.
+CPU tests cover auto/budget forwarding, abort/missing finish, usage, 422 text-only
+image refusal and disconnect cleanup on both routes. MLX keeps the same shared
+request contract. Context overflow retains #96's documented direct fallback,
+with `cut: "state_limit"` and no reasoning generation; it is never counted as a
+completed reasoning response by the benchmark. No H100 reevaluation was run.
+Focused CPU regressions: **182 passed**; MLX decision/server: **61 passed, 1 skipped**.
+Benchmark inputs, parity fixtures and tolerances are unchanged, including both
+previously failing parity cases. Existing GPU results above remain historical.

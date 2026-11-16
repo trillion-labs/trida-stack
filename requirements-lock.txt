@@ -156,7 +156,7 @@ nvidia-nvshmem-cu13==3.4.5
     # via torch
 nvidia-nvtx==13.0.85
     # via cuda-toolkit
-opentelemetry-api==1.45.1
+opentelemetry-api==1.45.2
     # via
     #   opentelemetry-exporter-http-transport
     #   opentelemetry-exporter-otlp-proto-http

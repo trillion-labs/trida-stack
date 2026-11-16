@@ -21,7 +21,7 @@ In the spirit of nanoGPT, this directory serves **one model** and nothing else, 
 |---|---|
 | `causal` | native autoregressive decoding — the reference |
 | **`self-spec`** (default) | the diffusion stream drafts a block, the model's own AR stream verifies it in the same forward pass: generation block 8 (`b15_g8`), several tokens per forward, the AR model's output distribution |
-| `decide` | typed decisions (`/v1/decide`: yes/no, choice, score with probabilities), reason-then-decide, and OpenAI chat from one engine ([Decisions](#decisions)) |
+| `decide` | typed decisions (`/v1/systemone`: yes/no, choice, score with probabilities), reason-then-decide, and OpenAI chat from one engine ([Decisions](#decisions)) |
 
 Zoro-1 does not support pure iterative diffusion decoding, so there is no `diffusion` mode. Other models get their own nano-inference next to this one (`inference/<model>/`).
 
@@ -84,7 +84,7 @@ Three levels, from no hardware to the full stack:
      wait_up 30000 $pid && python eval.py gsm8k --num-problems 200
      kill $pid; wait $pid
    done
-   python serve.py --mode decide --port 30001        # then the /v1/decide example under Decisions
+   python serve.py --mode decide --port 30001        # then the /v1/systemone example under Decisions
    ```
 
 ## Usage
@@ -139,27 +139,40 @@ python serve.py --mode decide --port 30001
 ```
 
 ```bash
-curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
-  "request": {
-    "state": {"ticket": "Order #W1 arrived broken. I want my money back.", "order": {"status": "delivered", "total": 42.0}},
-    "questions": {
-      "intent":  {"type": "choice", "instructions": "What does the customer want?",
-                  "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
-      "urgent":  {"type": "noul", "instructions": "Should this jump the queue?"},
-      "anger":   {"type": "score", "instructions": "How upset is the customer?", "criteria": ["calm", "annoyed", "angry"]}}},
-  "reasoning": false}'
-# -> {"answers": {"intent": {"type": "choice", "choice": "refund", "confidence": 0.9794,
-#                             "probabilities": {"refund": 0.9863, "exchange": 0.011, "info": 0.0027}},
+curl -s localhost:30001/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "zoro-1",
+  "state": {"ticket": "Order #W1 arrived broken. I want my money back.", "order": {"status": "delivered", "total": 42.0}},
+  "questions": {
+    "intent":  {"type": "choice", "instructions": "What does the customer want?",
+                "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
+    "urgent":  {"type": "noul", "instructions": "Should this jump the queue?"},
+    "anger":   {"type": "score", "instructions": "How upset is the customer?", "criteria": ["calm", "annoyed", "angry"]}}}'
+# -> {"model": "zoro-1",
+#     "answers": {"intent": {"type": "choice", "choice": "refund", "confidence": 0.9794,
+#                            "probabilities": {"refund": 0.9863, "exchange": 0.011, "info": 0.0027}},
 #                 "urgent": {"type": "noul", "noul": 0.9256},
-#                 "anger":  {"type": "score", "score": 1.6872, "legend": ["calm", "annoyed", "angry"], ...}}, ...}
+#                 "anger":  {"type": "score", "score": 1.6872, "legend": {"0": "calm", "1": "annoyed", "2": "angry"}, ...}},
+#     "usage": {"input_tokens": ..., "output_tokens": 0}, "timing_ms": ...}
 ```
 
+- **The API:** `POST /v1/systemone` takes and returns TypeSafe's System One API (0.2.0) shapes, so System One clients, such as the TypeSafe SDK and WorkflowEvals' `typesafe` provider, work
+  against this server.
+  - `model` is required, as in System One; any name is accepted and the response names the served model.
+  - `usage.input_tokens` counts the decision-row tokens scored and `usage.output_tokens` the reasoning generated.
+  - Validation errors return 422 with System One's `{"detail": [{"loc", "msg", "type"}]}` body.
+  - Our extensions: `images` (one image: base64, a data URL, or `{"url": ...}`), `reasoning`,
+    `max_reasoning_tokens` and `temperature`; the response then also carries the reasoning and timing fields.
+    All decision servers check them the same way, and a bad value is a 422: `reasoning` is `true` / `false` / `"auto"`, `max_reasoning_tokens` an integer from 1 to the configured cap (at most 8192), `temperature` a finite number above 0.
+    `null` means unset.
+  - `POST /v1/decide`, the earlier `{"request": {...}, "reasoning", "temperature"}` envelope, still answers, with a
+    `Deprecation` header, and goes away in the next release. Its score `legend` is a list and it has no `model`.
+  - Not System One's: `GET /v1/models` keeps the OpenAI shape that `chat.py` and `eval.py` read.
 - **Question types:**
   - `noul`: yes/no; the answer is P(yes).
   - `choice`: `{key: description}`.
   - `score`: a list of levels, lowest first; the answer is the expected level.
 - **Reasoning:** see the shared [reasoning contract](#reasoning-contract) below.
-- **Images:** add an `image` (path, base64 or data URL) to the request.
+- **Images:** add `"images": [...]` with one base64 string or data URL. Requests never name server files.
 - **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
   - It takes `tools`; tool calls come back as `tool_calls`.
   - The thinking comes back as `reasoning_content` (streamed as `reasoning_content` deltas before the content).
@@ -173,7 +186,7 @@ How it fits a stock engine: a request row is causal, so an option's hidden state
 
 ### Reasoning contract
 
-CUDA causal, CUDA self-spec and MLX share these `/v1/decide` rules:
+CUDA causal, CUDA self-spec and MLX share these `/v1/systemone` rules (also on the deprecated `/v1/decide` alias):
 
 - `reasoning: true` always reasons; `reasoning: "auto"` reasons when any
   question's top probability is below `threshold` (default `0.7`). Both first
@@ -192,13 +205,15 @@ CUDA causal, CUDA self-spec and MLX share these `/v1/decide` rules:
   `answers_source: "direct"` and `cut: "length"`, `"empty"` or `"state_limit"`.
   Optional `cut_detail` distinguishes context and row limits. Clients requiring
   complete, untrimmed reasoning must reject cuts and trimming.
+  `reasoning_stats.finish_reason` retains raw abort/missing-finish metadata; these
+  remain unfinished even if a partial response contains a closing tag.
 - Reasoning responses include `direct`, `escalated` and `threshold`. `usage`
   counts all scored decision-row tokens and generated reasoning tokens, including
   on fallback; it does not count the physical K+1 prefix executions.
 
 ### Self-spec decisions (experimental)
 
-One diffusion engine can also serve `/v1/decide` and self-spec chat. Install the
+One diffusion engine can also serve `/v1/systemone` and self-spec chat. Install the
 [diffusion backend and decision readout patch](sglang/README.md#decision-readout), then run:
 
 ```bash

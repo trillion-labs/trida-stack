@@ -23,7 +23,7 @@
 | | 스택 | 주요 기능 |
 |---|---|---|
 | 🏋️ | **`train/`** | **AR → 디퓨전 전환.** 별도의 디퓨전 사전학습 없이 *사전학습된 AR 체크포인트*에 블록 디퓨전 지도 미세조정(SFT)을 바로 적용합니다. AR 보조 손실을 함께 사용해 동일한 가중치로 자기회귀 생성도 수행할 수 있도록 학습합니다. 선택적으로 **유형별 의사결정(typed decision) 공동 학습**(예/아니오·선택·점수형 질문에 답하는 포인터 헤드)과 비전-언어 체크포인트의 **이미지 입력 학습**을 지원합니다. |
-| ⚡ | **`inference/<model>/`** | **nano-inference: nanoGPT 스타일의 간결한 모델별 서빙 스택.** [`inference/zoro-1/`](inference/zoro-1/)은 `trillionlabs/Zoro-1`을 서빙합니다. 하나의 체크포인트로 self-speculative 디코딩과 유형별 의사결정을 지원합니다. **SGLang**, **vLLM**, **MLX** 백엔드에서 OpenAI 호환 API를 제공합니다. |
+| ⚡ | **`inference/<model>/`** | **nano-inference: nanoGPT 스타일의 간결한 모델별 서빙 스택.** [`inference/zoro-1/`](inference/zoro-1/)은 `trillionlabs/Zoro-1`을 서빙합니다. 하나의 체크포인트로 self-speculative 디코딩과 유형별 의사결정을 지원합니다. **SGLang**, **vLLM**, **MLX** 백엔드에서 OpenAI 호환 API를 제공합니다. [`inference/gravityocr/`](inference/gravityocr/)는 업스트림 SGLang에서 self-speculative 디코딩으로 `trillionlabs/GravityOCR`(GLM-OCR 기반 문서 OCR)를 서빙합니다. |
 
 `train/`과 `inference/` 사이에는 상호 임포트 의존성이 없습니다. `benchmark/`는 에이전트 평가를 위한 종합 평가 도구를,
 `inference/`는 품질과 처리량을 간단히 측정할 수 있는 벤치마크(gsm8k / mmlu_pro / ifeval)를 제공합니다.
@@ -195,21 +195,22 @@ Self-speculative 디코딩은 동일한 샘플링 설정에서 **무손실**로 
 ### 의사결정 서빙 (`--mode decide`)
 
 `--mode decide`는 **기본 SGLang 배포판**(≥ 0.5.22)에서 `serve_decide.py`를 실행합니다. 별도의 포크나 패치가 필요하지 않습니다.
-단일 엔진과 동일한 모델 가중치로 `POST /v1/decide`를 통한 유형별 의사결정, 추론 후 의사결정(`"reasoning": true`),
-도구 호출이 가능한 OpenAI 호환 채팅을 모두 지원합니다.
+단일 엔진과 동일한 모델 가중치로 `POST /v1/systemone`(TypeSafe의 System One API)을 통한 유형별 의사결정,
+추론 후 의사결정(`"reasoning": true`), 도구 호출이 가능한 OpenAI 호환 채팅을 모두 지원합니다.
 
 ```bash
-curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
-  "request": {
-    "state": {"ticket": "Order #W1 arrived broken. I want my money back."},
-    "questions": {
-      "intent": {"type": "choice", "instructions": "What does the customer want?",
-                 "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
-      "urgent": {"type": "noul", "instructions": "Should this jump the queue?"}}},
-  "reasoning": false}'
-# -> {"answers": {"intent": {"type": "choice", "choice": "refund", "probabilities": {...}},
-#                 "urgent": {"type": "noul", "noul": 0.93}}, ...}
+curl -s localhost:30001/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "zoro-1",
+  "state": {"ticket": "Order #W1 arrived broken. I want my money back."},
+  "questions": {
+    "intent": {"type": "choice", "instructions": "What does the customer want?",
+               "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
+    "urgent": {"type": "noul", "instructions": "Should this jump the queue?"}}}'
+# -> {"model": "...", "answers": {"intent": {"type": "choice", "choice": "refund", "probabilities": {...}},
+#                                 "urgent": {"type": "noul", "noul": 0.93}},
+#     "usage": {"input_tokens": ..., "output_tokens": 0}, ...}
 ```
+기존 `{"request": {...}}` 형식의 `POST /v1/decide`도 계속 동작하지만 더 이상 권장하지 않으며, 다음 릴리스에서 제거됩니다.
 자세한 내용: [`inference/zoro-1/README.md#decisions`](inference/zoro-1/README.md#decisions).
 
 ### 백엔드
@@ -245,7 +246,7 @@ inference/                     nano-inference: 모델별로 구성된 간결한 
     MODEL_CONTRACT.md          서빙 코드가 요구하는 체크포인트 규격
     serve.py                   서버 실행 (--mode causal | self-spec | decide)
     serve_decide.py, decide_*.py, jev*.py
-                               기본 SGLang 배포판에서 실행하는 의사결정 서버 (/v1/decide)
+                               기본 SGLang 배포판에서 실행하는 의사결정 서버 (/v1/systemone)
     chat.py                    OpenAI 호환 클라이언트
     eval.py / eval_ifeval.py   gsm8k / mmlu_pro / ifeval 품질·처리량 평가
     ifeval_lib/                저장소에 포함된 IFEval 채점 코드

@@ -311,8 +311,10 @@ class DecideEngine:
             if piece:
                 yield piece
         finish = meta.get("finish_reason") or {}
-        complete = END_THINK in raw or (isinstance(finish, dict) and finish.get("matched") == self._stops[0])
-        yield {"finish_reason": "stop" if complete else "length", "prompt_tokens": prompt_tokens,
+        complete = END_THINK in raw or (bool(self._stops) and isinstance(finish, dict) and finish.get("matched") == self._stops[0])
+        native_finish = (finish.get("type") if isinstance(finish, dict) else finish) or "unknown"
+        reported = ("stop" if complete else "length") if native_finish == "stop" else native_finish
+        yield {"finish_reason": reported, "prompt_tokens": prompt_tokens,
                "completion_tokens": meta.get("completion_tokens", 0)}
 
     def _chat_request(self, messages, tools, max_new_tokens, temperature, top_p, top_k, presence_penalty,
