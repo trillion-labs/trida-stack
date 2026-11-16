@@ -16,14 +16,16 @@
 #   4. TeX Live from upstream (install-tl), into $EVAL_HOME/texlive, with the packages CDM needs. Not apt:
 #      CDM colors tokens with \mathcolor (xcolor 2.14+), and the TeX Live in Ubuntu 22.04 (xcolor 2.13) renders
 #      every token black, which scores every formula 0.
-#   5. The patched SGLang server env, by inference/gravityocr/sglang/setup.sh, into $EVAL_HOME/sglang
-#      (needs nvcc 12.x at CUDA_HOME; no GPU needed to build). SKIP_SGLANG=1 skips it.
-#   6. $EVAL_HOME/env.sh, which run.sh reads: VBIN, PYTHON, OMNIDOCBENCH and TeX Live on PATH.
+#   5. The server env. Linux: the patched SGLang env, by inference/gravityocr/sglang/setup.sh, into
+#      $EVAL_HOME/sglang (needs nvcc 12.x at CUDA_HOME; no GPU needed to build). Apple Silicon Mac: the MLX
+#      engine env, by inference/gravityocr/mac/setup.sh, into $EVAL_HOME/mac-venv (no Gravity app needed).
+#      SKIP_SGLANG=1 skips it.
+#   6. $EVAL_HOME/env.sh, which run.sh reads: VBIN or MAC_PYTHON, PYTHON, OMNIDOCBENCH and TeX Live on PATH.
 #   7. Check: pdflatex renders \mathcolor in color.
 #
 # Env, or KEY=VALUE arguments:
 #   EVAL_HOME           install directory (default $HOME/.gravityocr-eval)
-#   SKIP_SGLANG=1       skip step 5 (scoring only, or VBIN comes from elsewhere)
+#   SKIP_SGLANG=1       skip step 5 (scoring only, or the server env comes from elsewhere)
 #   SKIP_TEXLIVE=1      skip step 4 and use the pdflatex on PATH (it must be TeX Live 2022.06 or newer)
 #   TL_REPO             TeX Live package repository (default https://mirror.ctan.org/systems/texlive/tlnet, which
 #                       picks a nearby mirror; a failed install is retried there, then on TL_FALLBACK)
@@ -147,10 +149,15 @@ EOF
     die "tlmgr install failed from every mirror tried; set TL_REPO to a working mirror (log: $EVAL_HOME/tlmgr.log)"; }
 fi
 
-# ── 5. patched SGLang ────────────────────────────────────────────────────────────────────────────
-VBIN=
+# ── 5. server env: patched SGLang (Linux) or the MLX engine (Apple Silicon Mac) ─────────────────
+VBIN='' MAC_PYTHON=''
 if [ "${SKIP_SGLANG:-0}" = 1 ]; then
-  log "SKIP_SGLANG=1: no server env (set VBIN for run.sh, or use run.sh with ENDPOINT)"
+  log "SKIP_SGLANG=1: no server env (set VBIN or MAC_PYTHON for run.sh, or use run.sh with ENDPOINT)"
+elif [ "$(uname -s)-$(uname -m)" = Darwin-arm64 ]; then
+  log "building the Mac MLX engine env into $EVAL_HOME/mac-venv (inference/gravityocr/mac/setup.sh)"
+  MAC_VENV=$EVAL_HOME/mac-venv bash "$REPO/inference/gravityocr/mac/setup.sh"
+  MAC_PYTHON=$EVAL_HOME/mac-venv/bin/python
+  [ -x "$MAC_PYTHON" ] || die "the Mac setup did not produce $MAC_PYTHON"
 else
   log "building the patched SGLang server env into $EVAL_HOME/sglang (inference/gravityocr/sglang/setup.sh)"
   SGLANG_SRC=$EVAL_HOME/sglang bash "$REPO/inference/gravityocr/sglang/setup.sh"
@@ -163,6 +170,7 @@ fi
 {
   echo "# Written by benchmark/gravityocr/setup.sh; run.sh reads it. Defaults only: the environment wins."
   [ -z "$VBIN" ] || echo ": \"\${VBIN:=$VBIN}\""
+  [ -z "$MAC_PYTHON" ] || echo ": \"\${MAC_PYTHON:=$MAC_PYTHON}\"; export MAC_PYTHON"
   echo ": \"\${PYTHON:=$VENV/bin/python}\""
   echo ": \"\${OMNIDOCBENCH:=$ODB}\""
   echo "export VBIN PYTHON OMNIDOCBENCH"

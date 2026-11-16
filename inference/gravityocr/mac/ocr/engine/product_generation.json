@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "blockSize": 16,
+  "eosTokenIDs": [59246, 59253],
+  "maxNewTokens": {
+    "text": 2048,
+    "table": 8192,
+    "formula": 1024
+  }
+}

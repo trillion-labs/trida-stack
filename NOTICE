@@ -88,6 +88,15 @@ SGLang self-speculative decoding patch for GravityOCR
            inference/gravityocr/sglang/setup.sh. See inference/gravityocr/NOTICE for
            the folder-local notice and the list of changes.
 
+GravityOCR Mac engine (Trillion Labs code, not third-party)
+  Copyright 2026 Trillion Labs.
+  License: Apache License 2.0
+  Source:  https://github.com/trillion-labs/GravityOCR-macOS (the Gravity app for
+           macOS, version 0.3.4)
+  Bundled: inference/gravityocr/mac/ocr/ — copied unchanged (no licence headers);
+           listed here because it is copied in from another repository. See
+           inference/gravityocr/mac/VENDORED.md and inference/gravityocr/NOTICE.
+
 The components above are the third-party source code redistributed in this
 repository. They do not share a single license: see COMPLIANCE.md section 1.
 
@@ -122,6 +131,12 @@ GravityOCR serving (inference/gravityocr/) — installed into its own environmen
   Model weights, downloaded at run time and not redistributed:
     trillionlabs/GravityOCR  MIT  https://huggingface.co/trillionlabs/GravityOCR
     zai-org/GLM-OCR (base)   MIT  https://huggingface.co/zai-org/GLM-OCR
+
+GravityOCR on a Mac (inference/gravityocr/serve_mac.py) — installed into its own environment
+  MLX and mlx-vlm (MIT, https://github.com/ml-explore/mlx, https://github.com/Blaizzy/mlx-vlm),
+  coremltools (BSD-3-Clause), protobuf (BSD-3-Clause), NumPy, SymPy and mpmath (BSD),
+  tokenizers (Apache-2.0), Pillow (MIT-CMU) and the rest of
+  inference/gravityocr/mac/requirements-lock.txt, installed by mac/setup.sh from PyPI.
 
 Runtime backends and libraries — PyTorch, Hugging Face Transformers / Datasets /
 Accelerate, SGLang, optionally vLLM, and for inference/zoro-1/mlx Apple MLX and mlx-lm

@@ -237,7 +237,7 @@ pytest -q inference/gravityocr/      # CPU only, no downloads; also runs under `
 | `test_gravityocr_gating.py` | the patch leaves SGLang's diffusion-LLM and EAGLE draft-runner modules untouched and adds no code that depends on diffusion-LLM state; with the patched SGLang: the shared functions it changes behave exactly as v0.5.10 for every server that is not self-spec (differential tests against verbatim copies), EAGLE-family CUDA-graph capture, `--dllm-algorithm` refused together with self-spec, and nothing left of the removed `SELFSPEC_NOMASK` path |
 | `test_gravityocr_dist_init.py` | the single-node torch.distributed rendezvous: the patch's store function, run on CPU torch, listens on loopback only (both TCPStore backends, IPv4 and IPv6), serves two ranks, closes its port with the store and leaves every other init method to torch; with the patched SGLang: a single-node server rendezvouses on `127.0.0.1` whatever `--host` is, the override and `--dist-init-addr` keep their precedence, and `init_distributed_environment` with gloo (one and two ranks) runs its collectives over a loopback-only store |
 | `test_gravityocr_vit_graph.py` | the ViT graph settings parser, the replay / eager dispatch, the single caller thread, and the fallback after a failed capture (memory released after the exception is handled, eager forward kept); with the patched SGLang: the runner's copy of the encoder forward in sync with the model's, and the model keeping its eager forward after a failed capture |
-| `test_gravityocr_mac.py` | `serve_mac.py` with a stub engine: the three task prompts, the payload `ocr_request.py` sends, refusal of non-`data:` image URLs and other bad requests (400), an engine error answered with 500 while the server keeps running, and refusal of a non-loopback `--host` or a missing Gravity app |
+| `test_gravityocr_mac.py` | `serve_mac.py` with a stub engine: the three task prompts, the payload `ocr_request.py` sends, refusal of non-`data:` image URLs and other bad requests (400), an engine error answered with 500 while the server keeps running, refusal of a non-loopback `--host` or a missing engine, and `mac/ocr` against `mac/VENDORED.sha256` |
 
 `test_gravityocr_auth.py`, and the parts of `test_gravityocr_selfspec_cpu.py`, `test_gravityocr_gating.py`, `test_gravityocr_dist_init.py` and `test_gravityocr_vit_graph.py` that need the patched SGLang, skip without it, as in CI. To run them, use the server's Python with the checkout first on the path (otherwise `inference/gravityocr/sglang/` shadows the editable install) and pytest from a separate directory, so the server venv stays as locked:
 
@@ -271,7 +271,7 @@ runs on Linux with an L40S, L40 or H100 (`serve.sh`) or on an Apple Silicon Mac 
 | `COMPARE_CAUSAL` | `1` | `0` skips section 6 |
 | `SGLANG_SRC`, `VBIN` | `~/src/sglang-gravityocr` | where `sglang/setup.sh` built the server environment |
 | `GRAVITYOCR_MODEL` | `trillionlabs/GravityOCR` | Hub id or local checkpoint |
-| `GRAVITY_APP` | `/Applications/Gravity.app` | the Gravity app, for `BACKEND=mac` |
+| `MAC_PYTHON` | `mac/.venv/bin/python` | the Mac engine env built by `mac/setup.sh`, for `BACKEND=mac` |
 | `PORT`, `CAUSAL_PORT` | `30000`, `30001` | the two servers' ports |
 | `CUDA_HOME` | `$CUDA_HOME`, else `/usr/local/cuda-12.8` or `/usr/local/cuda`, whichever has `nvcc` | a CUDA 12.x toolkit |
 | `API_KEY` | as for `serve.sh` | |
@@ -311,23 +311,27 @@ the executed copy out of the repository.
 
 ## On a Mac
 
-`serve_mac.py` answers the same requests as `serve.sh` on an Apple Silicon Mac, for trying the model
-and running [`getting_started.ipynb`](getting_started.ipynb) without an NVIDIA GPU. It is not a
-second serving recipe. It runs the MLX engine of the [Gravity](https://gravityocr.trillionlabs.co) app,
-which must be installed, with Gravity's bundled Python, and downloads `trillionlabs/GravityOCR` once
-into `~/.cache/gravityocr-mac/` (pinned to a commit, SHA-256 checked):
+`serve_mac.py` answers the same requests as `serve.sh` on an Apple Silicon Mac, for trying the model,
+running [`getting_started.ipynb`](getting_started.ipynb) and evaluating
+([`benchmark/gravityocr`](../../benchmark/gravityocr/)) without an NVIDIA GPU. It is not a second serving
+recipe. It runs the MLX engine of the [Gravity](https://gravityocr.trillionlabs.co) app, which is in
+this folder as [`mac/ocr`](mac/VENDORED.md) (copied unchanged from Gravity 0.3.4), so the app does not
+have to be installed. `mac/setup.sh` builds its env once (about 10 s; the package versions Gravity 0.3.4
+bundles, from a hashed lock). The server downloads `trillionlabs/GravityOCR` once into
+`~/.cache/gravityocr-mac/` (pinned to a commit, SHA-256 checked):
 
 ```bash
-/Applications/Gravity.app/Contents/Resources/runtime/bin/python -I -B inference/gravityocr/serve_mac.py
+bash inference/gravityocr/mac/setup.sh
+inference/gravityocr/mac/.venv/bin/python -I inference/gravityocr/serve_mac.py
 python3 inference/gravityocr/ocr_request.py --synthetic 'Hello GravityOCR'
 ```
 
 Its numbers are not this recipe's: MLX instead of SGLang, text layers quantized to 6 bits, a 16-token
 draft block instead of 32, crops downscaled to a 1344 px long side, and Gravity's own per-task token
 limits (`max_tokens` is ignored). `--mode causal` swaps in the autoregressive decoder that ships with
-Gravity. It binds loopback only, accepts `data:` image URLs only, and imports Gravity's internal
-`ocr.engine` package, which is not a public API: it was written against Gravity 0.3.4 and warns on
-other versions.
+the engine. It binds loopback only and accepts `data:` image URLs only. It calls the engine's internal
+entry points; [`mac/VENDORED.md`](mac/VENDORED.md) says how to update the copy to a newer Gravity.
+`--engine /Applications/Gravity.app/Contents/Resources/project` runs an installed app's own copy instead.
 
 ## Files
 
@@ -337,6 +341,11 @@ inference/gravityocr/
   serve.sh                   launcher: MODE=self-spec | causal, env-driven
   ocr_request.py             one-crop OpenAI-compatible client (stdlib; Pillow for --synthetic)
   serve_mac.py               Mac option: the same API on the Gravity app's MLX engine (see below)
+  mac/
+    ocr/                       the Gravity app's MLX engine, copied unchanged (VENDORED.md, VENDORED.sha256)
+    requirements.in            the package versions Gravity 0.3.4 bundles
+    requirements-lock.txt      the same, with hashes
+    setup.sh                   builds mac/.venv for serve_mac.py; no Gravity app needed
   getting_started.ipynb      5-10 minute tutorial; runs on an L40S / L40 / H100 or on a Mac
   test_gravityocr_*.py       CPU tests
   sglang/
@@ -351,6 +360,7 @@ inference/gravityocr/
 
 - **Code.** Apache-2.0, like the rest of this repo ([`LICENSE`](../../LICENSE)). It comes from [`trillion-labs/GravityOCR`](https://github.com/trillion-labs/GravityOCR), which Trillion Labs also publishes. There, the SGLang patch and the seven new SGLang files are likewise Apache-2.0, and the launcher and client are MIT; Trillion Labs contributes them here under Apache-2.0.
 - **Upstream SGLang.** [`sgl-project/sglang`](https://github.com/sgl-project/sglang), Apache-2.0, at `1519acf37c23f2189adb93f57ca9cd2db1bebf18` (tag v0.5.10). It is not vendored: `setup.sh` fetches it. This folder carries only the patch, which modifies 22 upstream source files and `python/pyproject.toml`, and the seven new files. Five of the new files adapt SGLang code and carry SGLang's copyright notice; [`NOTICE`](NOTICE) lists them with their sources.
+- **Mac engine.** [`mac/ocr`](mac/VENDORED.md) is the Python engine of Trillion Labs' Gravity app for macOS (0.3.4), from [`trillion-labs/GravityOCR-macOS`](https://github.com/trillion-labs/GravityOCR-macOS), which Trillion Labs also publishes, without a licence file. Trillion Labs contributes it here under Apache-2.0, like the rest of this folder. The files are copied unchanged, so they carry no licence header; this bullet, [`NOTICE`](NOTICE) and `COMPLIANCE.md` §1 state their licence. Its packages (MLX and mlx-vlm, MIT; coremltools, protobuf, NumPy, SymPy and mpmath, BSD; tokenizers, Apache-2.0; Pillow, MIT-CMU; and the rest of `mac/requirements-lock.txt`) are not vendored: `mac/setup.sh` installs them from PyPI at the locked versions, which are Gravity 0.3.4's except Pillow (13.0.0 for security fixes; see `mac/requirements.in`).
 - **Weights.** [`trillionlabs/GravityOCR`](https://huggingface.co/trillionlabs/GravityOCR) is MIT-licensed and fine-tuned from [`zai-org/GLM-OCR`](https://huggingface.co/zai-org/GLM-OCR) (MIT). Neither is redistributed here; `serve.sh` downloads the checkpoint from the Hub.
 - **Design notes.** Comments in the new SGLang files mention "natcache", `src/fast_sampling.py` and `docs/SGLANG_SELFSPEC_IMPL.md`. These are the in-process reference decoder and the implementation notes in the [GravityOCR repository](https://github.com/trillion-labs/GravityOCR), which is the place to read about the design. Some of those comments also say that a path matches causal decoding; they record checks made while the patch was developed, on test sets and at a given position layout, not a guarantee for every input. [What self-spec reproduces](#what-self-spec-reproduces) states what holds. The files keep those comments so that they stay identical to GravityOCR's, and the header of `selfspec_diffusion_worker.py` points here.
 

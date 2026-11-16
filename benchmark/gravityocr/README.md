@@ -1,18 +1,21 @@
 # GravityOCR evaluation (docr-ko-eval)
 
-`run.sh` evaluates a GravityOCR checkpoint on a docr-ko-eval dataset in one command, on one NVIDIA GPU.
+`run.sh` evaluates a GravityOCR checkpoint on a docr-ko-eval dataset in one command, on one NVIDIA GPU or on
+an Apple Silicon Mac.
 
 - **Input:** a docr-ko-eval dataset of region crops. Each crop is one text block, table or formula with its target.
   There is no layout detection step.
 - **Serving:** `run.sh` starts the checkpoint with [`inference/gravityocr/serve.sh`](../../inference/gravityocr/)
-  (upstream SGLang plus the GravityOCR self-speculative patch).
+  (upstream SGLang plus the GravityOCR self-speculative patch) on NVIDIA, or with
+  [`serve_mac.py`](../../inference/gravityocr/serve_mac.py) on a Mac (the Gravity app's MLX engine, which is in
+  [`inference/gravityocr/mac`](../../inference/gravityocr/mac/VENDORED.md); the app itself is not needed).
 - **Timing:** it sends every crop at each concurrency level and times the run.
 - **Scoring:** it scores the predictions with OmniDocBench's own metric code and writes one report with speed,
   accuracy and per-source numbers.
 
 | file | what it is |
 |---|---|
-| `setup.sh` | One-time setup: the scoring venv, OmniDocBench, TeX Live and the patched SGLang server env, all under one directory. |
+| `setup.sh` | One-time setup: the scoring venv, OmniDocBench, TeX Live and the server env (patched SGLang on Linux, the MLX engine on a Mac), all under one directory. |
 | `run.sh` | The evaluation: export → serve → warm-up → measured passes → stop server → CDM self-check → score → report. |
 | `score.py` | The metric definitions (OmniDocBench Edit_dist / BLEU / TEDS / CDM). `run.sh` calls it; it also runs on its own. |
 
@@ -25,10 +28,12 @@ EVAL_HOME=/opt/gravityocr-eval bash benchmark/gravityocr/setup.sh   # another di
 
 ### Needs
 - **Tools:** `uv`, `git`, `curl`, `tar` and `perl` on PATH.
-- **For the server env:** the CUDA 12.x toolkit at `CUDA_HOME` (default `/usr/local/cuda-12.8`).
+- **Linux, for the server env:** the CUDA 12.x toolkit at `CUDA_HOME` (default `/usr/local/cuda-12.8`).
   A GPU is not needed to build, only to run.
-- **Disk:** about 15 GB, mostly the SGLang env. Downloads come from PyPI, the PyTorch index, GitHub and CTAN.
-- **Time:** about 10–20 minutes.
+- **Mac:** Apple Silicon. Nothing else; the Gravity app does not have to be installed.
+- **Disk:** Linux about 15 GB, mostly the SGLang env; Mac about 1.1 GB. Downloads come from PyPI, the PyTorch
+  index (Linux), GitHub and CTAN.
+- **Time:** Linux about 10–20 minutes; Mac about 5 minutes, mostly TeX Live.
 
 ### What it installs into `EVAL_HOME`
 
@@ -37,8 +42,9 @@ EVAL_HOME=/opt/gravityocr-eval bash benchmark/gravityocr/setup.sh   # another di
 | OmniDocBench at a pinned commit (`0604d98`) | `OmniDocBench/`: the metric code `score.py` imports |
 | Scoring venv, Python 3.10 | `venv/`: OmniDocBench's pinned requirements plus `datasets`, `sacrebleu` and `pymupdf` |
 | TeX Live from upstream `install-tl`, scheme-basic plus the packages CDM uses | `texlive/` |
-| The patched SGLang server env, via [`inference/gravityocr/sglang/setup.sh`](../../inference/gravityocr/sglang/setup.sh) | `sglang/.venv-sglang/` |
-| Defaults for `run.sh` | `env.sh`: sets `VBIN`, `PYTHON` and `OMNIDOCBENCH`, and puts TeX Live first on PATH |
+| Linux: the patched SGLang server env, via [`inference/gravityocr/sglang/setup.sh`](../../inference/gravityocr/sglang/setup.sh) | `sglang/.venv-sglang/` |
+| Mac: the MLX engine env, via [`inference/gravityocr/mac/setup.sh`](../../inference/gravityocr/mac/setup.sh) | `mac-venv/` |
+| Defaults for `run.sh` | `env.sh`: sets `VBIN` (Linux) or `MAC_PYTHON` (Mac), `PYTHON` and `OMNIDOCBENCH`, and puts TeX Live first on PATH |
 
 The TeX packages are `geometry booktabs multirow amsmath amsfonts xcolor was cjk cjk-ko nanumtype1 uhc
 unfonts-core`; Hangul is set in the `mj` font.
@@ -51,7 +57,7 @@ reused.
 | setting | effect |
 |---|---|
 | `EVAL_HOME` | install directory (default `$HOME/.gravityocr-eval`) |
-| `SKIP_SGLANG=1` | no server env, for a scoring-only machine, or when you run `run.sh` with `ENDPOINT` |
+| `SKIP_SGLANG=1` | no server env (SGLang or Mac), for a scoring-only machine, or when you run `run.sh` with `ENDPOINT` |
 | `SKIP_TEXLIVE=1` | use the `pdflatex` already on PATH; it must be TeX Live 2022.06 or newer |
 | `TL_REPO` | TeX Live package mirror (default `https://mirror.ctan.org/systems/texlive/tlnet`, which picks a nearby mirror) |
 | `TL_FALLBACK` | mirrors tried when the install fails from `TL_REPO` (default: JAIST in Japan, then RIT in the US) |
@@ -69,6 +75,9 @@ reused.
 hf auth login                                          # once: the default dataset is private (or set HF_TOKEN)
 MODEL=trillionlabs/GravityOCR-KO bash benchmark/gravityocr/run.sh
 ```
+
+The same command works on an NVIDIA machine and on an Apple Silicon Mac: `BACKEND=auto` serves with `serve.sh`
+on Linux and with `serve_mac.py` on a Mac (one request at a time, so `CONCURRENCY` defaults to 1 there).
 
 `DATASET` defaults to [`trillionlabs/gravityocr-dev`](https://huggingface.co/datasets/trillionlabs/gravityocr-dev),
 the 402-crop dev split of docr-ko-eval-v2, downloaded from the Hub on the first run. The Hugging Face account must
@@ -108,8 +117,9 @@ Anything set in the environment overrides `env.sh`. `bash run.sh --help` lists e
 | `DATASET_REVISION` | `447ce14` for `trillionlabs/gravityocr-dev`, else the latest | Hub revision (commit, branch or tag) of `DATASET`; `main` for the latest |
 | `OUT` | `runs/<model>-<mode>-<time>` | output directory |
 | `MODE` | `self-spec` | `self-spec` (block-diffusion draft + AR verify) or `causal` (plain AR) |
-| `CONCURRENCY` | `128` | concurrency levels, space-separated |
-| `WARMUP` | `1` | one crop per task, then one full pass at the first level, both discarded (see below) |
+| `BACKEND` | `auto` | `sglang` (`serve.sh`, NVIDIA) or `mac` (`serve_mac.py`); `auto` picks `mac` on an Apple Silicon Mac |
+| `CONCURRENCY` | `128`; `1` on `mac` | concurrency levels, space-separated. The Mac server answers one request at a time |
+| `WARMUP` | `1`; `tasks` on `mac` | `1`: one crop per task, then one full pass at the first level, all discarded (see below). `tasks`: one crop per task only. `0`: none |
 | `SPLITS` | every split in `DATASET` | splits to score |
 | `SCORE_LEVELS` | all levels | levels whose predictions are scored; `none` skips scoring |
 | `ENDPOINT` | – | OpenAI base URL of a running server |
@@ -128,13 +138,13 @@ Other `serve.sh` settings pass through, for example `MEMFRAC`, `CUDA_HOME`, `SKI
 ### What one run does
 1. **Export:** reads the dataset (Hub or `save_to_disk`) and writes `data/data.jsonl`, `data/images/<id>.png` and
    `data/splits.json`.
-2. **Serve:** starts `serve.sh` in its own process group and waits for `/v1/models`. The server is stopped when
+2. **Serve:** starts `serve.sh` in its own process group (or `serve_mac.py` on a Mac) and waits for `/v1/models`. The server is stopped when
    predictions are done, and also if the run fails or is interrupted.
 3. **Predict:** sends each crop as an OpenAI chat request: one PNG `data:` URL plus the crop's task prompt
    (`Text Recognition:`, `Table Recognition:` or `Formula Recognition:`).
    - Settings: `temperature` 0; `max_tokens` 512 for text and 4096 for tables and formulas.
-   - **Warm-up:** the first high-concurrency pass on a fresh server is about 2× slower, so the warm-up pass
-     is discarded.
+   - **Warm-up:** the first high-concurrency pass on a fresh SGLang server is about 2× slower, so the warm-up
+     pass is discarded. On a Mac only one crop per task is sent first.
    - **Measured pass:** one per concurrency level.
    - **Failed requests stop the run.** A request that fails (server crash, a 401, a timeout) would be scored as an
      empty prediction, which scores 0 and quietly lowers Overall. So if any request failed, `run.sh` stops
@@ -226,6 +236,26 @@ Decoding is greedy, but outputs of batched runs can still differ in a few crops 
 to move by about ±0.25. For example, on one H100: dev gave 92.62 and 92.72 in two runs, and test 92.14
 against 92.37 on the L40S. Compare checkpoints on the same split and setup, and treat a difference under
 about 0.3 as noise.
+
+### On a Mac
+
+The same model on `trillionlabs/gravityocr-dev` (402 crops) on an Apple M3 Pro MacBook Pro (18 GB, macOS 27.2),
+`BACKEND=mac`, self-spec, concurrency 1, from a fresh `setup.sh` and `run.sh` with the defaults. No Gravity app
+was installed in the env. The predictions are identical, crop for crop, to `serve_mac.py` run on Gravity 0.3.4's
+own copy of the engine, and with Pillow 12.3.0 (the app's) or 13.0.0 (the lock's). Speed depends on the chip
+and on load: the timing below is on an otherwise idle machine; with other work running, the same pass took 383 s.
+
+| split | Overall | text 1−ED | text BLEU | table TEDS | TEDS-S | formula CDM |
+|---|---|---|---|---|---|---|
+| dev | 92.29 | 0.898 | 0.738 | 0.939 | 0.990 | 0.932 |
+
+| wall time | crops/s | output tokens/s | latency p50 / p90 |
+|---|---|---|---|
+| 283 s | 1.42 | 182 | 0.50 / 1.56 s |
+
+Whole run: 7.1 minutes (server start 2 s, predictions 285 s, scoring 135 s). Overall is 0.28 below the L40S dev
+row because the Mac engine is not `serve.sh`: MLX with 6-bit text layers, a 16-token draft block and crops
+downscaled to a 1344 px long side ([`inference/gravityocr` → On a Mac](../../inference/gravityocr/README.md#on-a-mac)).
 
 ## Docker
 

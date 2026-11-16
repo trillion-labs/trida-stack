@@ -19,3 +19,5 @@
 0018,Levenshtein,0.25.1 (OmniDocBench가 고정),외부유입,GPL-2.0-or-later,78,조건부 채택,로컬 평가 도구 예외 (maintainer 승인: Luke Kim 2026-11-16); 별도 venv · 미배포,2026-11-16,2027-05-16,intake/0016-gravityocr-eval.md
 0019,sacrebleu,2.6.0,외부유입,Apache-2.0,78,채택,GravityOCR 평가 도구 전용,2026-11-16,2027-05-16,intake/0016-gravityocr-eval.md
 0020,TeX Live (install-tl),>=2022.06,외부유입,LPPL 외,78,채택,CDM용 pdflatex를 외부 프로그램으로 실행; EVAL_HOME에 설치,2026-11-16,2027-05-16,intake/0016-gravityocr-eval.md
+0021,GravityOCR Mac engine (inference/gravityocr/mac/ocr),Gravity 0.3.4,직접개발,Apache-2.0 (Trillion Labs 기여; 원 저장소 라이선스 파일 없음),85,조건부 채택,maintainer 서명 대기 (PR #109); 원본과 바이트 동일 유지 (VENDORED.sha256),2026-11-16,2027-05-16,intake/0021-gravityocr-mac-engine.md
+0022,GravityOCR Mac engine env (inference/gravityocr/mac/requirements-lock.txt),17 packages (mlx 0.32.2 · mlx-vlm 0.7.0 · coremltools 9.0 · pillow 13.0.0 외),외부유입,MIT · BSD · Apache-2.0 · MIT-CMU · PSF-2.0 · MPL-2.0 AND MIT (tqdm) · WTFPL (pyaml),85,조건부 채택,별도 venv · 수정 없이 설치 · PyPI 휠 · 해시 고정; tqdm·pyaml 무수정 의존성; CI pip-audit,2026-11-16,2027-05-16,intake/0021-gravityocr-mac-engine.md
