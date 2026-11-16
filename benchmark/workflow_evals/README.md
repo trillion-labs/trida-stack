@@ -28,7 +28,7 @@ data outside Git. See the
 
 ## Run
 
-Start a [decision server](../../inference/zoro-1/README.md#decisions) exposing `/v1/decide`, then:
+Start a [decision server](../../inference/zoro-1/README.md#decisions) exposing `/v1/systemone`, then:
 
 ```bash
 # Try one case first. Use --dry-run to check data without inference.
@@ -54,7 +54,7 @@ benchmark/workflow_evals/run.sh customer_service \
 The flag is required on each invocation, including dry runs and resumes. Dataset
 pins and license metadata stay unchanged; setup and CI do not download these datasets.
 
-Pass the server root URL, without `/v1/decide`. Use the actual model and precision
+Pass the server root URL, without `/v1/systemone`. Use the actual model and precision
 in the model name. Direct decisions and grouped questions are the defaults.
 To reason before deciding, add `--reasoning --max-output-tokens 2048` and use a
 separate run name, such as `zoro-reasoning`. The token limit caps reasoning generation;
@@ -74,9 +74,10 @@ python inference/zoro-1/serve_decide.py /path/to/decision-checkpoint \
 
 This is a server flag, not a `run.sh` flag. The H100 pilot's `ap_00002` reasoning
 prompt used 21,306 tokens; adding the 2,048-token budget exceeds the default 16,384.
-32,768 accommodates that observed prompt and budget. On the H100 pilot, no invoice
-case completed reasoning within 8,192 tokens; see [VALIDATION.md](VALIDATION.md).
-Other inputs may need more room.
+32,768 accommodates that observed prompt and budget. Earlier H100 pilots failed to
+complete invoice reasoning within 8,192 tokens. A later per-question `ap_00111` run
+completed all 21 questions with strict checks intact; this is one case, not full
+benchmark coverage. See [VALIDATION.md](VALIDATION.md). Other inputs may need more room.
 The full benchmark inputs are retained. This setting does **not** raise the default
 decision-encoder limits described below.
 
@@ -150,3 +151,8 @@ benchmark/workflow_evals/.upstream/.venv/bin/python benchmark/workflow_evals/tes
 To update upstream, change `upstream-revision`, review the provider patch, and update
 `dataset-revisions.json` as needed. Preserve results before recreating `.upstream/`.
 Upstream code is Apache-2.0; datasets have separate licenses.
+
+The Trida adapter uses the System One wire format. It remains separate from the
+upstream `typesafe` provider to reject unfinished or trimmed reasoning, validate
+probabilities without normalizing them, and retain completion metadata in traces.
+Benchmark questions, states, references, policies and scoring stay upstream.

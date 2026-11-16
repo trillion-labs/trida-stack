@@ -232,14 +232,15 @@ def test_reasoning_budget_obeys_server_cap(decider, budget):
         decider.decide(REQ, reasoning=True, max_reasoning_tokens=budget)
 
 
-def test_auto_reasoning_uses_configured_cap(decider, monkeypatch):
+@pytest.mark.parametrize("reasoning", [True, "auto"])
+def test_auto_reasoning_uses_configured_cap(decider, monkeypatch, reasoning):
     budgets = []
     def think(request, image, max_tokens, **kwargs):
         budgets.append(max_tokens)
         return {"text": "unfinished", "ended": "budget", "stats": {"finish_reason": "length"}}
     monkeypatch.setattr(decider, "think", think)
-    decider.decide(REQ, reasoning="auto", threshold=1)
+    decider.decide(REQ, reasoning=reasoning, threshold=1)
     decider.reasoning_token_limit = 8192
-    decider.decide(REQ, reasoning="auto", threshold=1)
+    decider.decide(REQ, reasoning=reasoning, threshold=1)
     decider.decide(REQ, reasoning=True, max_reasoning_tokens=8192)
     assert budgets == [4096, 8192, 8192]

@@ -1,5 +1,5 @@
 diff --git a/core/providers.py b/core/providers.py
-index 8ac4b8f..6b86ddd 100644
+index 8ac4b8f..d62754c 100644
 --- a/core/providers.py
 +++ b/core/providers.py
 @@ -8,8 +8,8 @@ from typesafe_sdk.constants import DEFAULT_BASE_URL
@@ -93,10 +93,10 @@ index 8ac4b8f..6b86ddd 100644
      return QuestionClient(config)
 diff --git a/core/trida_client.py b/core/trida_client.py
 new file mode 100644
-index 0000000..ec5c80c
+index 0000000..0e3c8f0
 --- /dev/null
 +++ b/core/trida_client.py
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,86 @@
 +"""Transport adapter only; workflow questions, policies and scoring stay upstream."""
 +import math
 +import os
@@ -127,10 +127,10 @@ index 0000000..ec5c80c
 +
 +    def system_one(self, *, model, state, questions) -> SystemOneResponse:
 +        wire = {key: question_record(q) for key, q in questions.items()}
-+        body = {"request": {"state": state, "questions": wire}, "reasoning": self.reasoning}
++        body = {"model": model, "state": state, "questions": wire, "reasoning": self.reasoning}
 +        if self.reasoning:
 +            body["max_reasoning_tokens"] = self.max_reasoning_tokens
-+        response = self.client.post("v1/decide", json=body)
++        response = self.client.post("v1/systemone", json=body)
 +        try:
 +            response.raise_for_status()
 +        except httpx.HTTPStatusError as exc:
@@ -165,8 +165,7 @@ index 0000000..ec5c80c
 +            if question["type"] == "choice" and answer["choice"] not in keys:
 +                raise ValueError(f"Unknown choice for {key}")
 +            if question["type"] == "score":
-+                # Trida supplies a list; the TypeSafe SDK expects an index-to-level mapping.
-+                answer["legend"] = dict(enumerate(criteria))
++                answer["legend"] = {int(k): value for k, value in answer["legend"].items()}
 +                answer["probabilities"] = {int(k): p for k, p in answer["probabilities"].items()}
 +        return TridaResponse.model_validate(
 +            {"model": self.model, "answers": answers, "usage": raw.get("usage") or {},
@@ -185,7 +184,7 @@ index 0000000..ec5c80c
 +    def close(self):
 +        self.client.close()
 diff --git a/run.py b/run.py
-index b33e218..7407501 100644
+index b33e218..ca6f897 100644
 --- a/run.py
 +++ b/run.py
 @@ -23,6 +23,7 @@ def main(argv: list[str] | None = None) -> int:

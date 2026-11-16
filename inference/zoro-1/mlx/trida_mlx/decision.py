@@ -20,7 +20,9 @@ from pathlib import Path
 import mlx.core as mx
 import numpy as np
 
-from .decide_request import DEFAULT_REASONING_TOKEN_LIMIT, MAX_REASONING_TOKENS, MAX_STATE, MAX_BRANCH, RequestError, SPECIAL, VISION, fit_reasoning, parse, prompt, to_answer, with_reasoning
+from .decide_request import (DEFAULT_REASONING_TOKEN_LIMIT, MAX_REASONING_TOKENS, MAX_STATE, MAX_BRANCH,
+                            RequestError, SPECIAL, VISION, fit_reasoning, parse, prompt, rows_tokens,
+                            to_answer, with_reasoning)
 from .decode import DecodeStats, SamplingParams
 from .engine import IncrementalDetokenizer
 from .vision import image_key, preprocess
@@ -299,7 +301,7 @@ class Decider:
         if not isinstance(reasoning, bool) and reasoning != "auto":
             raise RequestError('reasoning must be a boolean or "auto"')
         if max_reasoning_tokens is None:
-            max_reasoning_tokens = min(self.reasoning_token_limit, 8192 if reasoning == "auto" else 768)
+            max_reasoning_tokens = self.reasoning_token_limit
         if (isinstance(threshold, bool) or not isinstance(threshold, (int, float))
                 or not math.isfinite(threshold) or not 0 <= threshold <= 1):
             raise RequestError("threshold must be between 0 and 1")
@@ -331,6 +333,7 @@ class Decider:
                 return {
                     "answers": {q.qid: to_answer(q, mx.softmax(z / t).tolist())
                                 for q, z in zip(parsed.questions, self.logits(encoded))},
+                    "usage": {"input_tokens": rows_tokens(encoded), "output_tokens": 0},
                     "timing_ms": round((time.perf_counter() - start) * 1000, 1),
                 }
 
@@ -363,6 +366,8 @@ class Decider:
                                  mode=mode or "self-spec")
             result.update(reasoning=thought["text"], reasoning_stats=thought["stats"],
                           reasoning_ms=round((time.perf_counter() - thinking_start) * 1000, 1))
+            result["usage"] = {"input_tokens": direct["usage"]["input_tokens"],
+                               "output_tokens": thought["stats"].get("new_tokens", 0)}
             if thought["ended"] != "complete":
                 result["cut"] = "length"
             elif not thought["text"].strip():
@@ -376,6 +381,7 @@ class Decider:
                     reasoned = parse(with_reasoning(request, text), image=req.image)
                     result["reasoned"] = score(reasoned, self.encode(reasoned, image))
                     result["answers"] = result["reasoned"]["answers"]
+                    result["usage"]["input_tokens"] += result["reasoned"]["usage"]["input_tokens"]
             result["answers_source"] = "direct" if "cut" in result else "reasoned"
             result["timing_ms"] = round((time.perf_counter() - start) * 1000, 1)
             emit("result", result)

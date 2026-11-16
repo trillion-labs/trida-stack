@@ -31,7 +31,7 @@ class TridaProviderTest(unittest.TestCase):
             "route": {"type": "choice", "choice": "b", "confidence": 0.4,
                       "probabilities": {"a": 0.3, "b": 0.7}},
             "level": {"type": "score", "score": 0.7, "confidence": 0.4,
-                      "legend": ["Low", "High"], "probabilities": {"0": 0.3, "1": 0.7}},
+                      "legend": {"0": "Low", "1": "High"}, "probabilities": {"0": 0.3, "1": 0.7}},
         }
 
     def respond(self, status=200, payload=None):
@@ -50,11 +50,13 @@ class TridaProviderTest(unittest.TestCase):
     def test_request_and_all_answer_types(self):
         self.respond()
         response = self.ask()
-        self.assertEqual(self.request.url.path, "/v1/decide")
+        self.assertEqual(self.request.url.path, "/v1/systemone")
         body = json.loads(self.request.content)
         self.assertFalse(body["reasoning"])
-        self.assertEqual(body["request"]["state"], {"ticket": "Help"})
-        self.assertEqual(body["request"]["questions"]["route"],
+        self.assertEqual(body["model"], "zoro-1-q8")
+        self.assertNotIn("request", body)
+        self.assertEqual(body["state"], {"ticket": "Help"})
+        self.assertEqual(body["questions"]["route"],
                          {"type": "choice", "instructions": "Where?",
                           "criteria": {"a": "Team A", "b": "Team B"}})
         self.assertEqual(response.answers["route"].probabilities, {"a": 0.3, "b": 0.7})
@@ -63,6 +65,16 @@ class TridaProviderTest(unittest.TestCase):
         self.assertEqual(response.answers["level"].legend, {0: "Low", 1: "High"})
         self.assertIsNone(response.usage.input_tokens)
         self.assertIsNone(response.usage.output_tokens)
+
+    def test_systemone_usage_and_validation_error(self):
+        self.respond(payload={"model": "served-model", "answers": self.answers,
+                              "usage": {"input_tokens": 123, "output_tokens": 7}})
+        response = self.ask()
+        self.assertEqual(response.usage.input_tokens, 123)
+        self.assertEqual(response.usage.output_tokens, 7)
+        self.respond(422, {"detail": [{"loc": ["body"], "msg": "question is too long", "type": "value_error"}]})
+        with self.assertRaisesRegex(httpx.HTTPStatusError, "question is too long"):
+            self.ask()
 
     def test_identity_and_unknown_cost(self):
         self.assertEqual(self.config.identity.name, "trida:zoro-1-q8")

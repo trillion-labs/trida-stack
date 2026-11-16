@@ -1,5 +1,67 @@
 # Review validation
 
+## System One integration and H100 rerun (2026-11-16)
+
+Integrated the maintainer's six commits through `8fdf816` and `origin/main`
+`75d07f7` (including #94). The adapter now posts `{model, state, questions}` to
+`/v1/systemone`; it preserves response usage and reasoning metadata, and still
+rejects unfinished, empty or trimmed reasoning without normalizing probabilities.
+The upstream `typesafe` provider does not perform these strict completion checks,
+so the small transport adapter remains. Questions, states, policies, references,
+dataset revisions and scoring code are unchanged. The probability validation
+formula and tolerance are unchanged.
+
+`cut` remains a closed set: `length` / `empty` / `state_limit`. All unfinished
+passes use `length`; `reasoning_stats.finish_reason` retains `abort`, `unknown`,
+or the actual runtime reason. Both CUDA and MLX now default an omitted reasoning
+budget to the configured cap (4,096 by default), matching the direction of #97.
+The benchmark's explicit 2,048-token default and 8,192-token ceiling are unchanged.
+
+**H100:** job 5341 on `diffusion-compute-001`, one H100 80 GB, stock SGLang
+0.5.23 / torch 2.14.1+cu130, BF16, the same local checkpoint used in the earlier
+runs: `/mnt/vast/trillion/hyungguk/trida-jev-eval/runs/rl-head-i11/iter_300`.
+The head SHA-256 remains
+`1e406f44fd66191cc16bbddf02213182a0e8403ee98ae971fedf8f72a294d9db`.
+This is a local checkpoint run, not an independently downloaded release check.
+
+- HTTP: all three answer types matched the deprecated alias exactly (after the
+  documented score-legend representation change); the alias retained its
+  deprecation header. Missing model, empty questions and budget 8,193 returned
+  System One's 422 `detail` list. A one-token reasoning request returned
+  `cut: "length"`, direct fallback answers, and `usage.output_tokens: 1`.
+- Actual benchmark: pinned invoice dataset
+  `6beeb2d2acd65c086c835022f5f4d7434114cafc`, complete `ap_00111`, all policies,
+  per-question mode, one worker. Context 32,768, row limit 16,384, state limit
+  15,744 (the required 640-token gap), explicit reasoning budget/cap 8,192.
+  The previous 16,384/16,384 server split is now rejected; the original benchmark
+  state and questions were not shortened. Every outgoing state and question was
+  compared with the pinned upstream builders before inference. The nine saved
+  requests from the earlier 8K run also match exactly in state, question and budget.
+- Direct: all 21 calls succeeded in 6.46 s. Reasoning: all 21 succeeded in 53.60 s,
+  each with `finish_reason: "stop"`, no `cut`, no trimming and reasoned answers.
+  Previously looping `price_basis` completed in 1,697 tokens this time. Sampling
+  settings were unchanged; this single successful rerun does not establish
+  repeatability or resolve the model's earlier looping behavior.
+- Consensus agreement: exact action-set 0/3, primary action 3/3 in both modes.
+  Reasoning exact agreement was also 0/3 against OpenAI labels and 2/3 against
+  Anthropic labels. This is a valid scored reasoning case, not a full evaluation
+  or a claim of benchmark-wide accuracy.
+
+Original state/question fingerprint (sorted JSON, SHA-256):
+`b235a449c205bed06c585c175ea4659798c0bfcae7d5a3eba44d9ef8c624a526`.
+Raw requests, responses, scores, source/head hashes and logs remain outside Git at
+`/mnt/nvme_cache/trillion/wonsuk/pr89-systemone-20261116/`.
+
+**Regression checks:** clean Linux Python 3.10 / CPU torch (CI-style): **589 passed,
+69 skipped**; adapter/setup: **21 passed**; Apple Silicon MLX decision/server:
+**56 passed, 1 skipped**; focused CPU decision tests: **117 passed**. Ruff, shell
+syntax, shared-request copy and supply-chain pin checks pass. Initial local full
+suite failures were macOS's old Bash (`mapfile` unavailable); an exploratory run
+inside the SGLang environment also failed GravityOCR runtime-specific tests. The
+clean Linux CPU environment above is the full regression result; no production
+runtime packages were altered to make it pass.
+
+
 ## 8K reasoning / 16K decision-input run (2026-11-13)
 
 Revision `d10db54` adds opt-in CUDA server limits while retaining the original
