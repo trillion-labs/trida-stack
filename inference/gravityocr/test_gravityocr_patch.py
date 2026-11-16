@@ -365,7 +365,7 @@ def synthetic_recipe(tmp_path):
     up = tmp_path / "upstream"
     (up / "python/sglang").mkdir(parents=True)
     _git(up, "init", "-q")
-    (up / ".gitignore").write_text("__pycache__/\n*.egg-info/\npython/sglang/_version.py\n")
+    (up / ".gitignore").write_text("__pycache__/\n*.egg-info/\npython/sglang/_version.py\n*.so\nbuild/\n")
     (up / "python/sglang/__init__.py").write_text("X = 1\n")
     (up / "python/sglang/a.py").write_text("".join(f"line_{i} = {i}\n" for i in range(1, 41)))
     (up / "python/sglang/b.py").write_text("B = 2\n")
@@ -438,9 +438,19 @@ def test_setup_sh_applies_the_patch_and_accepts_a_rerun(synthetic_recipe):
         (lambda s: (s / "python/sglang/extra.py").write_text("import os\n"), "neither upstream nor ours"),
         (lambda s: (s / "python/sglang/srt/sub").mkdir() or (s / "python/sglang/srt/sub/x.py").write_text(""),
          "neither upstream nor ours"),
+        # ignored by the checkout's .gitignore, but an extension module shadows the .py beside it
+        (lambda s: (s / "python/sglang/a.cpython-312-x86_64-linux-gnu.so").write_bytes(b"\0"), "ignored files"),
+        (lambda s: (s / "python/build/lib").mkdir(parents=True) or (s / "python/build/lib/a.py").write_text(""),
+         "ignored files"),
+        # an edit git diff would not see: the index entry is marked skip-worktree / assume-unchanged
+        (lambda s: _git(s, "update-index", "--skip-worktree", "python/sglang/b.py")
+         or (s / "python/sglang/b.py").write_text("B = 3\n"), "skip-worktree"),
+        (lambda s: _git(s, "update-index", "--assume-unchanged", "python/sglang/b.py")
+         or (s / "python/sglang/b.py").write_text("B = 3\n"), "skip-worktree"),
     ],
     ids=["edit-in-patched-file", "line-appended-to-patched-file", "edit-in-unpatched-file",
-         "deleted-unpatched-file", "extra-untracked-file", "extra-untracked-subdir"],
+         "deleted-unpatched-file", "extra-untracked-file", "extra-untracked-subdir", "ignored-extension-module",
+         "ignored-build-dir", "skip-worktree-edit", "assume-unchanged-edit"],
 )
 def test_setup_sh_refuses_a_checkout_that_is_not_base_plus_patch(synthetic_recipe, edit, needle):
     run, checkout = synthetic_recipe
