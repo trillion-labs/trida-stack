@@ -263,12 +263,16 @@ done
 # (weight reloads from a caller-chosen path, profiling, cache control, LoRA loading, ...) refuse every
 # caller, whatever the number of tokenizer workers; API_KEY, when set, guards the other endpoints.
 # Both reach SGLang through --config, which names a FIFO (mode 0600, in a private mode-0700 temp dir):
-# they appear on no command line and in no environment, and never touch disk. A detached writer
-# (double fork: no descendant of the server, so SGLang's exit-time kill_process_tree cannot reach it)
-# blocks until SGLang opens the FIFO, which it does once, at startup; the keys then pass through the
+# they appear on no command line and not in the server's environment, and never touch disk. A detached
+# writer (double fork: no descendant of the server, so SGLang's exit-time kill_process_tree cannot reach
+# it) blocks until SGLang opens the FIFO, which it does once, at startup; the keys then pass through the
 # kernel pipe buffer and the writer removes the directory. If the server exits without opening it (a
 # startup failure, a signal), a guard notices within a second and releases the writer, which removes
-# the directory just the same.
+# the directory just the same. The writer and guard are forks of this shell: until the FIFO is read,
+# their /proc/<pid>/environ still shows an API_KEY the caller exported (readable only by the same user,
+# who can open the FIFO anyway); export -n keeps it out of the processes they start (sleep). They stay
+# in the launcher's process group, so a kill of the whole group (kill -- -<pgid>, the OOM killer
+# taking the group) stops them too and leaves the directory with the empty FIFO; no key is left on disk.
 for t in mkfifo sleep; do command -v "$t" >/dev/null || die 1 "$t not found: it hands the keys to SGLang"; done
 admin=$(od -vAn -N32 -tx1 /dev/urandom) || die 1 "could not read /dev/urandom for the admin key"
 admin="${admin//[[:space:]]/}"
@@ -276,7 +280,7 @@ admin="${admin//[[:space:]]/}"
 keydir=$(umask 077 && mktemp -d "${TMPDIR:-/tmp}/gravityocr-serve.XXXXXX") || die 1 "could not create a private temp dir"
 keyfifo=$keydir/server.yaml
 if ! mkfifo -m 600 "$keyfifo"; then rm -rf -- "$keydir"; die 1 "could not create the key FIFO in $keydir"; fi
-( ( set +e; trap '' HUP INT TERM PIPE
+( ( set +e; trap '' HUP INT TERM PIPE; export -n API_KEY
     # guard: once the server process ($$ after exec) is gone, open the FIFO read-write (that never
     # blocks) every second until the writer has removed it; this releases a writer still waiting for
     # a reader, however late it got there
