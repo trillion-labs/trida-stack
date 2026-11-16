@@ -20,11 +20,13 @@ Each question needs 1-255 options and becomes one causal token row:
 
 The model's decision head reads the last-layer hidden states at each option's `</opt>` and at `<decide>`
 (decide_engine.py). This is the format decision checkpoints are trained on; the rendering and row encoding follow
-kev (https://github.com/jaredpalmer/kev, Apache-2.0), see NOTICE. `prompt` / `with_reasoning` at the end turn a
-request into a chat prompt for reason-then-decide.
+kev (https://github.com/jaredpalmer/kev, Apache-2.0), see NOTICE. `prompt` / `with_reasoning` turn a request into
+a chat prompt for reason-then-decide, and `systemone_request` / `systemone_response` at the end map the System One
+API body (POST /v1/systemone) onto a request and a result back onto its response.
 """
 import base64
 import io
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -304,3 +306,83 @@ def to_answer(q, p):
                 "confidence": r(_confidence("choice", p)), "probabilities": {k: r(v) for k, v in zip(q.keys, p)}}
     return {"type": "score", "score": r(sum(i * x for i, x in enumerate(p))), "legend": q.options,
             "confidence": r(_confidence("score", p)), "probabilities": {str(i): r(v) for i, v in enumerate(p)}}
+
+
+# ---- System One envelope (POST /v1/systemone, shared by SGLang and MLX) ---------------------------
+# TypeSafe's System One API 0.2.0: the body is {"state", "model", "questions"} with the question shapes above, and the
+# response is {"model", "answers", "usage": {"input_tokens", "output_tokens"}}. Unknown top-level keys are ignored, as
+# the published schema allows. Our extensions, read when present: `images` (at most one, a base64 string, a data URL,
+# or {"url": ...} as SGLang's /v1/systemone takes it), `min_image_pixels` / `max_image_pixels`, `reasoning`,
+# `max_reasoning_tokens` and `temperature`, plus whatever extra keys a server names in `extensions`.
+
+SYSTEMONE_EXTENSIONS = ("reasoning", "max_reasoning_tokens", "temperature")
+MAX_REASONING_TOKENS = 8192   # the largest reasoning budget a request may ask for
+
+
+def systemone_request(body, extensions=(), auto_reasoning=False):
+    """A System One body -> (request for parse(), {extension: value} for the keys present). RequestError names the
+    first problem; the request itself is validated by parse(), the extension values by systemone_options()."""
+    if not isinstance(body, dict):
+        raise RequestError(f"the body must be an object with 'state', 'model' and 'questions', got {type(body).__name__}")
+    for key in ("state", "model", "questions"):
+        if key not in body:
+            raise RequestError(f"the body has no {key!r}")
+    if not isinstance(body["model"], str) or not body["model"].strip():
+        raise RequestError("'model' must be a non-empty string")
+    request = {k: body[k] for k in ("state", "questions", "min_image_pixels", "max_image_pixels") if k in body}
+    images = body.get("images") or []
+    if not isinstance(images, list):
+        raise RequestError("'images' must be a list")
+    if len(images) > 1:
+        raise RequestError(f"'images' has {len(images)} entries; this model takes at most one image per request")
+    if images:
+        image = images[0]
+        if isinstance(image, dict):
+            image = image.get("url")
+        if not isinstance(image, str):
+            raise RequestError("'images' entries must be a base64 string, a data URL, or {\"url\": ...} with one")
+        request["image"] = image
+    options = {k: body[k] for k in (*SYSTEMONE_EXTENSIONS, *extensions) if k in body}
+    return request, systemone_options(options, auto_reasoning)
+
+
+def systemone_options(options, auto_reasoning=False):
+    """Check the extension values both servers take, so a request means the same on each; null means unset.
+    `reasoning: "auto"` only where the server supports it (auto_reasoning)."""
+    def number(v):
+        return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+
+    reasoning = options.get("reasoning")
+    if reasoning is not None and not isinstance(reasoning, bool) and not (auto_reasoning and reasoning == "auto"):
+        allowed = 'true, false or "auto"' if auto_reasoning else "true or false (this server has no \"auto\")"
+        raise RequestError(f"'reasoning' must be {allowed}, got {reasoning!r}")
+    budget = options.get("max_reasoning_tokens")
+    if budget is not None and (type(budget) is not int or not 1 <= budget <= MAX_REASONING_TOKENS):
+        raise RequestError(f"'max_reasoning_tokens' must be an integer from 1 to {MAX_REASONING_TOKENS}, got {budget!r}")
+    temperature = options.get("temperature")
+    if temperature is not None and not (number(temperature) and temperature > 0):
+        raise RequestError(f"'temperature' must be a finite number above 0, got {temperature!r}")
+    threshold = options.get("threshold")
+    if threshold is not None and not (number(threshold) and 0 <= threshold <= 1):
+        raise RequestError(f"'threshold' must be a number from 0 to 1, got {threshold!r}")
+    return {k: v for k, v in options.items() if v is not None}
+
+
+def systemone_response(result, model):
+    """A decision result ({"answers", "usage"?, ...}) -> the System One response for the served model. The score
+    legend becomes {"0": level, ...}; any other result fields (timing, reasoning) are kept as extensions."""
+    def answer(a):
+        if a.get("type") == "score" and isinstance(a.get("legend"), list):
+            return {**a, "legend": {str(i): level for i, level in enumerate(a["legend"])}}
+        return a
+
+    usage = result.get("usage") or {}
+    return {"model": model, "answers": {qid: answer(a) for qid, a in result["answers"].items()},
+            "usage": {"input_tokens": int(usage.get("input_tokens", 0)),
+                      "output_tokens": int(usage.get("output_tokens", 0))},
+            **{k: v for k, v in result.items() if k not in ("answers", "usage", "model")}}
+
+
+def rows_tokens(rows):
+    """Input tokens of the decision rows a request was scored on (usage.input_tokens)."""
+    return sum(len(row["ids"]) for row in rows)
