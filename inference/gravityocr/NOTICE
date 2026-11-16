@@ -65,6 +65,17 @@ Launcher, client and tests — serve.sh, ocr_request.py, test_gravityocr_*.py
   Apache License, Version 2.0), used as reference behaviour; each file's header
   says so and marks the copied blocks.
 ------------------------------------------------------------------------------
+Mac engine — mac/ocr
+  Copyright 2026 Trillion Labs. Licensed under the Apache License, Version 2.0.
+  The Python engine of Trillion Labs' Gravity app for macOS, version 0.3.4, also
+  published in https://github.com/trillion-labs/GravityOCR-macOS. Copied
+  unchanged (mac/VENDORED.md, mac/VENDORED.sha256), so the files carry no
+  licence header; this notice states their licence. serve_mac.py runs it.
+  Its packages are not vendored: mac/setup.sh installs them from PyPI at the
+  versions in mac/requirements-lock.txt (MLX and mlx-vlm, MIT; coremltools,
+  protobuf, NumPy, SymPy and mpmath, BSD; tokenizers, Apache-2.0; Pillow,
+  MIT-CMU; attrs, cattrs, packaging, PyYAML, pyaml, tqdm, typing-extensions).
+------------------------------------------------------------------------------
 
 The patch, the new files and the launcher are also published in
 https://github.com/trillion-labs/GravityOCR. The patch here is byte-identical to

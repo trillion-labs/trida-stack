@@ -199,3 +199,82 @@ def test_concurrent_requests_queue_instead_of_resetting():
     finally:
         httpd.shutdown()
     assert codes == [200] * 32
+
+
+# ---- checkpoint fetch: revision, offline, token ----------------------------------------------------
+SHA = "a" * 40
+
+
+def _snapshot(cache, repo, sha, complete=True):
+    d = cache / repo.replace("/", "--") / sha
+    d.mkdir(parents=True)
+    (d / "config.json").write_text("{}")
+    if complete:
+        (d / serve_mac.COMPLETE).write_text(sha)
+    return d
+
+
+def _no_network(*_a, **_k):
+    raise urllib.error.URLError("offline")
+
+
+def test_cached_full_commit_needs_no_network(tmp_path, monkeypatch):
+    snap = _snapshot(tmp_path, "org/m", SHA)
+    monkeypatch.setattr(serve_mac, "_open", _no_network)
+    assert serve_mac.fetch_checkpoint("org/m", cache=tmp_path, revision=SHA) == snap
+
+
+def test_offline_falls_back_to_the_newest_complete_snapshot(tmp_path, monkeypatch):
+    import os
+
+    old, new = _snapshot(tmp_path, "org/m", "b" * 40), _snapshot(tmp_path, "org/m", "c" * 40)
+    _snapshot(tmp_path, "org/m", "d" * 40, complete=False)  # an interrupted download is never used
+    os.utime(old / serve_mac.COMPLETE, (1, 1))
+    monkeypatch.setattr(serve_mac, "_open", _no_network)
+    assert serve_mac.fetch_checkpoint("org/m", cache=tmp_path) == new
+
+
+def test_offline_with_nothing_cached_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(serve_mac, "_open", _no_network)
+    with pytest.raises(RuntimeError, match="nothing is cached"):
+        serve_mac.fetch_checkpoint("org/m", cache=tmp_path)
+
+
+def test_hub_refusal_is_not_hidden_by_the_cache(tmp_path, monkeypatch):
+    _snapshot(tmp_path, "org/m", SHA)
+
+    def refused(url, timeout):
+        raise urllib.error.HTTPError(url, 401, "Unauthorized", None, None)
+
+    monkeypatch.setattr(serve_mac, "_open", refused)
+    with pytest.raises(urllib.error.HTTPError):
+        serve_mac.fetch_checkpoint("org/m", cache=tmp_path)
+
+
+def test_token_is_sent_to_the_hub_but_not_across_a_redirect(monkeypatch):
+    monkeypatch.setenv("HF_TOKEN", "hf_secret")
+    assert serve_mac._hf_token() == "hf_secret"
+    req = urllib.request.Request("https://huggingface.co/org/m/resolve/x/model.safetensors",
+                                 headers={"Authorization": "Bearer hf_secret"})
+    handler = serve_mac._DropAuthOnOtherHost()
+    cdn = handler.redirect_request(req, None, 302, "Found", {}, "https://cdn.example.org/blob")
+    assert not cdn.has_header("Authorization")
+    same = handler.redirect_request(req, None, 302, "Found", {}, "https://huggingface.co/other")
+    assert same.get_header("Authorization") == "Bearer hf_secret"
+
+
+# ---- the vendored engine's import boundary ----------------------------------------------------------
+def test_vendored_engine_imports_no_torch_or_transformers():
+    # GravityOCR-macOS enforces this with tests/test_import_boundaries.py, which is not copied. The lock has
+    # no torch or transformers, so an engine update that needs them would only fail on a Mac; this catches it
+    # on any CI host.
+    import ast
+
+    banned = {"torch", "torchvision", "transformers"}
+    found = []
+    for path in sorted((HERE / "mac" / "ocr").rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+            names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                     else [node.module or ""] if isinstance(node, ast.ImportFrom) and not node.level else [])
+            found += [f"{path.relative_to(HERE)}: {n}" for n in names if n.split(".")[0] in banned]
+    assert not found, found

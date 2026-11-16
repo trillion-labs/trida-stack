@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `inference/gravityocr/serve_mac.py` no longer needs the Gravity app: it runs the MLX engine copied into
+  `inference/gravityocr/mac/ocr`, in a venv `mac/setup.sh` builds. **Breaking** for the command from #86:
+  `--gravity-app` is replaced by `--engine` (a directory holding the `ocr` package; pass
+  `/Applications/Gravity.app/Contents/Resources/project` to run an installed app's own copy), the server runs on
+  `mac/.venv/bin/python` instead of Gravity's bundled Python, and the notebook's `GRAVITY_APP` setting is
+  replaced by `MAC_PYTHON`. `serve_mac.py` also gains `--revision`, sends `HF_TOKEN` (or the `hf auth login`
+  token) to the Hub only, and starts from a cached checkpoint without the network.
 - `export_kev_checkpoint.py` is renamed `export_decision_checkpoint.py`, in both places it lives
   (`scripts/` and `train/tools/`); the arguments and output (kev's checkpoint layout) are unchanged.
 - Released checkpoints name the decision head `decision_head.pt` (Zoro-1 on the Hub ships it under that name).
@@ -24,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `inference/gravityocr/mac/`: the Gravity app's MLX engine (0.3.4), copied unchanged into `mac/ocr` with
+  `VENDORED.sha256` (checked by a test), contributed by Trillion Labs under Apache-2.0, and a hashed
+  lock of the package versions the app bundles (Pillow raised to 13.0.0 for 42 advisories) that
+  `mac/setup.sh` installs from PyPI. CI scans the lock with pip-audit. `benchmark/gravityocr/run.sh` evaluates
+  on an Apple Silicon Mac with it (`BACKEND=mac`, the default there).
 - `benchmark/workflow_evals/`: [TypeSafe WorkflowEvals](https://github.com/typesafe-ai/WorkflowEvals),
   pinned and patched at setup with a `trida` provider, runs the four business workflows against
   `/v1/systemone`, directly or with reasoning, and rejects every cut or trimmed reasoning response.

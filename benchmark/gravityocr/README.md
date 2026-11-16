@@ -239,9 +239,11 @@ about 0.3 as noise.
 
 ### On a Mac
 
-The same model on `trillionlabs/gravityocr-dev` (402 crops) on an Apple Silicon Mac (`BACKEND=mac`), self-spec,
-concurrency 1, from a fresh `setup.sh` and `run.sh` with the defaults. No Gravity app was installed in the env;
-the predictions are identical, crop for crop, to `serve_mac.py` run on Gravity 0.3.4's own copy of the engine.
+The same model on `trillionlabs/gravityocr-dev` (402 crops) on an Apple M3 Pro MacBook Pro (18 GB, macOS 27.2),
+`BACKEND=mac`, self-spec, concurrency 1, from a fresh `setup.sh` and `run.sh` with the defaults. No Gravity app
+was installed in the env. The predictions are identical, crop for crop, to `serve_mac.py` run on Gravity 0.3.4's
+own copy of the engine, and with Pillow 12.3.0 (the app's) or 13.0.0 (the lock's). Speed depends on the chip
+and on load: the timing below is on an otherwise idle machine; with other work running, the same pass took 383 s.
 
 | split | Overall | text 1−ED | text BLEU | table TEDS | TEDS-S | formula CDM |
 |---|---|---|---|---|---|---|

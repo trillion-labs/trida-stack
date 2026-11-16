@@ -150,7 +150,7 @@ EOF
 fi
 
 # ── 5. server env: patched SGLang (Linux) or the MLX engine (Apple Silicon Mac) ─────────────────
-VBIN= MAC_PYTHON=
+VBIN='' MAC_PYTHON=''
 if [ "${SKIP_SGLANG:-0}" = 1 ]; then
   log "SKIP_SGLANG=1: no server env (set VBIN or MAC_PYTHON for run.sh, or use run.sh with ENDPOINT)"
 elif [ "$(uname -s)-$(uname -m)" = Darwin-arm64 ]; then

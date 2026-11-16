@@ -46,7 +46,10 @@ import io
 import ipaddress
 import json
 import os
+import re
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -69,11 +72,67 @@ def log(msg: str) -> None:
 
 
 # ---- checkpoint ---------------------------------------------------------------------------------
+COMPLETE = ".complete"  # written into a snapshot once every file is there and checked
+
+
+def _hf_token() -> str | None:
+    """HF_TOKEN, else the token `hf auth login` saved; None when there is neither."""
+    if os.environ.get("HF_TOKEN"):
+        return os.environ["HF_TOKEN"]
+    home = Path(os.environ.get("HF_HOME") or Path.home() / ".cache" / "huggingface")
+    try:
+        return (home / "token").read_text().strip() or None
+    except OSError:
+        return None
+
+
+class _DropAuthOnOtherHost(urllib.request.HTTPRedirectHandler):
+    """Follow redirects, but send the Hub token to huggingface.co only (downloads redirect to a CDN)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and urllib.parse.urlsplit(newurl).hostname != urllib.parse.urlsplit(req.full_url).hostname:
+            new.remove_header("Authorization")
+        return new
+
+
+def _open(url: str, timeout: int):
+    req = urllib.request.Request(url)
+    token = _hf_token()
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    return urllib.request.build_opener(_DropAuthOnOtherHost).open(req, timeout=timeout)
+
+
+def _cached_snapshot(cache: Path, repo: str, revision: str) -> Path | None:
+    """A complete cached snapshot: the one `revision` names if it is a full commit, else the newest."""
+    root = cache / repo.replace("/", "--")
+    if re.fullmatch(r"[0-9a-f]{40}", revision):
+        return root / revision if (root / revision / COMPLETE).is_file() else None
+    done = [d for d in root.glob("*") if (d / COMPLETE).is_file()]
+    return max(done, key=lambda d: (d / COMPLETE).stat().st_mtime) if done else None
+
+
 def fetch_checkpoint(repo: str, cache: Path = CACHE, revision: str = "main") -> Path:
-    """Download a Hub checkpoint once, pinned to a commit, checking every size and LFS SHA-256."""
+    """Download a Hub checkpoint once, pinned to a commit, checking every size and LFS SHA-256.
+
+    A full commit sha that is already cached is used without the network. A branch or tag is resolved on the
+    Hub; when the Hub cannot be reached, the newest complete cached snapshot is used instead.
+    """
+    if re.fullmatch(r"[0-9a-f]{40}", revision) and (snap := _cached_snapshot(cache, repo, revision)):
+        return snap
     api = f"https://huggingface.co/api/models/{repo}/revision/{revision}?blobs=true"
-    with urllib.request.urlopen(api, timeout=60) as r:
-        info = json.loads(r.read())
+    try:
+        with _open(api, timeout=60) as r:
+            info = json.loads(r.read())
+    except urllib.error.HTTPError:
+        raise  # 401 / 404: no access, or no such repo or revision; a cached copy would hide that
+    except OSError as e:  # no network
+        snap = _cached_snapshot(cache, repo, revision)
+        if snap is None:
+            raise RuntimeError(f"cannot reach the Hub for {repo}@{revision} ({e}) and nothing is cached") from e
+        log(f"cannot reach the Hub ({e}); using the cached {repo}@{snap.name[:7]}")
+        return snap
     sha = info["sha"]
     dest = cache / repo.replace("/", "--") / sha
     files = [s for s in info["siblings"] if s["rfilename"].endswith(CKPT_PATTERNS)
@@ -87,7 +146,7 @@ def fetch_checkpoint(repo: str, cache: Path = CACHE, revision: str = "main") -> 
         url = f"https://huggingface.co/{repo}/resolve/{sha}/{s['rfilename']}"
         log(f"downloading {s['rfilename']} ({s['size'] / 1e9:.2f} GB) from {repo}@{sha[:7]}")
         digest = hashlib.sha256()
-        with urllib.request.urlopen(url, timeout=120) as r, open(part, "wb") as f:
+        with _open(url, timeout=120) as r, open(part, "wb") as f:
             while chunk := r.read(1 << 20):
                 f.write(chunk)
                 digest.update(chunk)
@@ -96,6 +155,7 @@ def fetch_checkpoint(repo: str, cache: Path = CACHE, revision: str = "main") -> 
             part.unlink()
             raise RuntimeError(f"{s['rfilename']}: size or SHA-256 does not match the Hub")
         part.replace(path)
+    (dest / COMPLETE).write_text(sha + "\n")
     return dest
 
 
@@ -201,6 +261,8 @@ class Server(HTTPServer):
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--model", default=DEFAULT_MODEL, help="Hub id or local checkpoint directory")
+    ap.add_argument("--revision", default="main",
+                    help="Hub branch, tag or commit of --model (default main; a cached full commit needs no network)")
     ap.add_argument("--mode", choices=("self-spec", "causal"), default="self-spec")
     ap.add_argument("--host", default="127.0.0.1", help="loopback addresses only")
     ap.add_argument("--port", type=int, default=30000)
@@ -226,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ckpt = Path(args.model).expanduser()
     if not ckpt.is_dir():
-        ckpt = fetch_checkpoint(args.model)
+        ckpt = fetch_checkpoint(args.model, revision=args.revision)
     if not (ckpt / "block_diffusion.json").is_file():
         ap.error(f"{ckpt} has no block_diffusion.json (see MODEL_CONTRACT.md)")
 
