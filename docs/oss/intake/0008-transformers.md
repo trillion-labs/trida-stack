@@ -5,7 +5,7 @@
 | 구분 | 외부유입 |
 | 라이선스 | Apache-2.0 |
 | 획득 경로 | PyPI |
-| 사용 위치 | `train/`, `inference/`, `benchmark/` |
+| 사용 위치 | `train/`, `inference/`, `benchmark/`; 5.3.0 in the separate `inference/gravityocr/` server environment (see Scope) |
 | 평가 기록일 | 2026-10-13 |
 | 결정 시점 | the `<5` ceiling was set when 5.x broke checkpoint loading |
 | 결정 | **조건부 채택** |
@@ -46,6 +46,26 @@ The ceiling is not arbitrary and it is not free. Staying under 5 means some upst
 security fixes land only in 5.x releases, which is why the relevant findings are
 recorded in [`exceptions.md`](../../supply-chain/exceptions.md) with an approver and
 an expiry that CI enforces, rather than being silently carried.
+
+## Scope (amended 2026-10-30)
+
+The `<5` ceiling applies to the environments resolved from `requirements.txt` and
+`inference/zoro-1/requirements.txt`, where our checkpoints' remote code has to load. It
+stands unchanged.
+
+`inference/gravityocr/` runs in a separate Python 3.12 environment, built from
+`inference/gravityocr/sglang/requirements-lock.txt` and never installed together with
+`requirements.txt`. There transformers is **5.3.0**, because SGLang v0.5.10 pins it
+exactly. That environment needs 5.x anyway: GLM-OCR's architecture is built into
+transformers 5.x, and the checkpoint carries no remote code. The pin is recorded and
+owned in [`0010-sglang-gravityocr.md`](0010-sglang-gravityocr.md).
+
+One exception now spans both environments. PYSEC-2026-4174 (custom_generate fetched
+before the trust check) affects 4.49.0 through 5.8.1, so its entry in
+[`exceptions.md`](../../supply-chain/exceptions.md) is written for root and zoro-1 as well
+as for `inference/gravityocr/`. Until 2026-10-30, root's 4174 finding was matched only by
+PYSEC-2025-217's entry, which listed 4174's aliases by mistake. PYSEC-2026-3929 and
+PYSEC-2026-2290 now record the 5.3.0 environment too.
 
 ## Obligations we take on
 
