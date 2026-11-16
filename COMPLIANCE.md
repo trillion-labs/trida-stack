@@ -4,7 +4,8 @@ This project (`trida-stack`) is released under the **Apache License 2.0** (see
 [`LICENSE`](LICENSE)). This document inventories the third-party software, benchmark
 harnesses, and datasets it depends on, with their licenses. The project's own source
 code is Apache-2.0; the **Trida** model weights, when released, carry their own
-model-card license.
+model-card license, and so do the **GravityOCR** weights that `inference/gravityocr/`
+serves (§4b).
 
 ## 1. Bundled third-party code (redistributed in this repo)
 
@@ -16,6 +17,7 @@ model-card license.
 | mlx-vlm Qwen3-VL vision encoder (adapted) | `inference/zoro-1/mlx/trida_mlx/vision.py` | [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) `mlx_vlm/models/qwen3_vl/vision.py` | **MIT** |
 | MLX gated-delta Metal kernel (adapted) | `inference/zoro-1/mlx/trida_mlx/kernels.py` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) `mlx_lm/models/gated_delta.py` | **MIT** |
 | Qwen3.5 / Trida chat template (test fixture) | `inference/zoro-1/mlx/tests/fixtures/trida_chat_template.jinja` | shipped with `trillionlabs/Trida2.0-4B` (from Qwen3.5) | **Apache-2.0** |
+| SGLang self-speculative decoding patch for GravityOCR (derived) | `inference/gravityocr/sglang/` (`gravityocr_selfspec.patch` and the seven files under `sglang/python/`) | [sgl-project/sglang](https://github.com/sgl-project/sglang) v0.5.10 (commit `1519acf37c23f2189adb93f57ca9cd2db1bebf18`) | **Apache-2.0** |
 
 These are the only third-party source code redistributed in the repository (see
 [`NOTICE`](NOTICE)); `inference/zoro-1/jev.py` and `inference/zoro-1/jev_head.py` vendor kev's request
@@ -24,8 +26,22 @@ checkpoint format; `inference/zoro-1/decide_request.py` and `inference/zoro-1/de
 decision server) follow the same encoding and pointer head. On the training side,
 `train/data/decision.py` vendors the same mapping and encoding plus kev's augmentation, and
 `train/models/decision.py` vendors kev's pointer head and loss, both adapted to this
-trainer's packed rows, and `train/tools/export_kev_checkpoint.py` writes the same format. Everything else
-below is installed or fetched separately.
+trainer's packed rows, and `train/tools/export_kev_checkpoint.py` writes the same format.
+`inference/gravityocr/sglang/gravityocr_selfspec.patch` modifies 22 source files of upstream
+SGLang plus `python/pyproject.toml` (it relaxes the `torchao` and `torchcodec` pins). The
+seven new files the patch needs, which `sglang/setup.sh` copies into the checkout
+(`selfspec_diffusion_worker.py`, `selfspec_fast_attn.py`, `selfspec_fast_commit.py`,
+`selfspec_commit_rules.py`, `selfspec_sampling.py`, `glm_vit_graph_runner.py`,
+`http_worker_keys.py`), are Trillion Labs code. Five of them adapt portions of SGLang code
+(its n-gram verify bookkeeping, penalizers, sampler and spec utilities, and the GLM-OCR
+vision encoder's forward) and carry SGLang's copyright notice, "Portions Copyright 2023-2024
+SGLang Team", with the files they adapt. Two CPU tests, `test_gravityocr_selfspec_cpu.py` and
+`test_gravityocr_gating.py`, embed verbatim copies of a few SGLang v0.5.10 functions as
+reference behaviour and say so in their headers. The patch carries upstream
+context lines, so it is listed here as derived Apache-2.0 code; the changes are stated in
+`inference/gravityocr/NOTICE`. `sglang/setup.sh` applies it to a clone of the pinned
+upstream commit at install time. Everything else below is installed or fetched
+separately.
 
 ## 1b. Noncommercial upstream code (fetched via recipe, NOT bundled)
 
@@ -43,18 +59,20 @@ Trillion Labs' patches/modifications against these kernels are derivative works 
 are likewise PolyForm-NC. **The two-stream training and diffusion-serving paths are
 therefore noncommercial-only.** The repo's own Apache-2.0 code (data/eval/serving
 glue, the HF/AR model code, benchmark wrappers) does not itself redistribute this
-noncommercial code.
+noncommercial code. The GravityOCR recipe in `inference/gravityocr/` does not use these
+kernels at all: it builds on upstream SGLang (§1, §2), which is Apache-2.0.
 
 ## 2. Runtime dependencies (installed separately)
 
 | Component | Role | Upstream | License |
 |---|---|---|---|
-| PyTorch | tensor / runtime | [pytorch/pytorch](https://github.com/pytorch/pytorch) | **BSD-3-Clause** |
-| HF Transformers | model loading (≥ 4.57) | [huggingface/transformers](https://github.com/huggingface/transformers) | **Apache-2.0** |
+| PyTorch | tensor / runtime (2.9.1 in the separate `inference/gravityocr/` server environment, pinned by SGLang v0.5.10) | [pytorch/pytorch](https://github.com/pytorch/pytorch) | **BSD-3-Clause** |
+| HF Transformers | model loading (≥ 4.57; 5.3.0 only in the separate `inference/gravityocr/` server environment, pinned by SGLang v0.5.10) | [huggingface/transformers](https://github.com/huggingface/transformers) | **Apache-2.0** |
 | HF Datasets | eval-data loading | [huggingface/datasets](https://github.com/huggingface/datasets) | **Apache-2.0** |
 | HF Accelerate | training | [huggingface/accelerate](https://github.com/huggingface/accelerate) | **Apache-2.0** |
 | Pillow | image loading for image+text training | [python-pillow/Pillow](https://github.com/python-pillow/Pillow) | **MIT-CMU (HPND)** |
-| SGLang | diffusion serving backend; stock ≥ 0.5.22 for the decision server (`inference/zoro-1/serve_decide.py`, no patch) | [sgl-project/sglang](https://github.com/sgl-project/sglang) | **Apache-2.0** |
+| SGLang | diffusion serving backend; stock ≥ 0.5.22 for the decision server (`inference/zoro-1/serve_decide.py`, no patch); upstream v0.5.10 plus the committed §1 patch for `inference/gravityocr/`, in its own Python 3.12 environment resolved from `inference/gravityocr/sglang/requirements-lock.txt` | [sgl-project/sglang](https://github.com/sgl-project/sglang) | **Apache-2.0** |
+| FlashInfer | attention kernels in the `inference/gravityocr/` server environment (0.6.7.post2, pinned by SGLang v0.5.10; the patch's fast path checks this exact version) | [flashinfer-ai/flashinfer](https://github.com/flashinfer-ai/flashinfer) | **Apache-2.0** |
 | FastAPI / Uvicorn | decision server HTTP layer (optional) | [fastapi/fastapi](https://github.com/fastapi/fastapi), [encode/uvicorn](https://github.com/encode/uvicorn) | **MIT** / **BSD-3-Clause** |
 | vLLM | optional AR serving backend | [vllm-project/vllm](https://github.com/vllm-project/vllm) | **Apache-2.0** |
 | MLX | on-device backend (`inference/zoro-1/mlx/`) | [ml-explore/mlx](https://github.com/ml-explore/mlx) | **MIT** |
@@ -93,7 +111,8 @@ None are redistributed from this repo — all are downloaded at eval time. See
 
 Software licences do not carry over to model weights, and the weights this stack serves
 are **not** covered by this repository's Apache-2.0 licence. They are also not
-redistributed here.
+redistributed here. The table covers the Zoro checkpoints and their bases, then the
+GravityOCR checkpoint that `inference/gravityocr/` serves and its base.
 
 | | component | licence | access | verified |
 |---|---|---|---|---|
@@ -102,6 +121,8 @@ redistributed here.
 | base | [Qwen/Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B) | **Apache-2.0** | public | HF model metadata, 2026-11-09 |
 | derived | [trillionlabs/Zoro-1](https://huggingface.co/trillionlabs/Zoro-1) | **Apache-2.0** | gated | HF model metadata, 2026-11-09 |
 | derived | [trillionlabs/Zoro](https://huggingface.co/trillionlabs/Zoro) (published as `trillionlabs/Trida2.0-4B`) | **Apache-2.0** | public | HF model metadata, 2026-11-09 |
+| base | [zai-org/GLM-OCR](https://huggingface.co/zai-org/GLM-OCR) | **MIT** | public | HF model metadata, 2026-11-11 |
+| derived | [trillionlabs/GravityOCR](https://huggingface.co/trillionlabs/GravityOCR) | **MIT** | public | HF model metadata, 2026-11-11 |
 
 `tools/check_model_card.py` (weekly in CI, `model-card.yml`) compares the licence and access
 columns of the derived rows against Hugging Face.
@@ -118,6 +139,16 @@ Apache-2.0, and the training data is Trillion Labs' own. `Zoro` is public and un
 `Zoro-1` is gated, so a user requests access on its model page before downloading it. The
 gate controls who downloads the weights, not the terms they are used under.
 
+**GravityOCR.** `trillionlabs/GravityOCR` is a document-OCR checkpoint derived from
+`zai-org/GLM-OCR`. Both are released under **MIT**, which places no use restriction on a
+derived model, and both are public and ungated. The GravityOCR model repository states the
+derivation (`base_model: zai-org/GLM-OCR`) and carries its own `LICENSE`; MIT's one
+condition, keeping the copyright and licence notice with copies of the weights, is met
+there, because this repository does not redistribute them. The checkpoint ships
+`model.safetensors` and no remote code: `GlmOcrForConditionalGeneration` is built into
+transformers 5.x, which is why it is served from its own environment rather than under
+the root `transformers<5` pin.
+
 **The decode kernels are licensed separately from the weights.** Apache-2.0 on the
 weights does not make the whole serving stack permissive:
 
@@ -125,10 +156,12 @@ weights does not make the whole serving stack permissive:
 |---|---|---|
 | `--mode causal` (AR) | stock vLLM, no §1b dependency | Apache-2.0 throughout |
 | `--mode self-spec` (and vLLM `MODE=diffusion`) | §1b two-stream kernels | **PolyForm Noncommercial** |
+| `inference/gravityocr/serve.sh`, `MODE=causal` / `MODE=self-spec` | upstream SGLang v0.5.10 + the Apache-2.0 §1 patch; no §1b dependency | Apache-2.0 throughout (weights MIT) |
 
 The restriction attaches to *running those kernels*, not to holding the weights. Anyone
-may use the weights; running the diffusion or self-speculative decode paths is
-noncommercial for whoever runs them.
+may use the weights; running the diffusion or self-speculative decode paths that use the
+§1b kernels is noncommercial for whoever runs them. GravityOCR's self-speculative path
+does not use them.
 
 **Training data.** Trida's training data is internal and proprietary to Trillion Labs and
 is out of scope for this inventory — see [`data/DATA_CATALOG.md`](data/DATA_CATALOG.md).
@@ -151,6 +184,15 @@ dependencies are **Apache-2.0**, **MIT**, or **BSD-3-Clause** — mutually compa
 none copyleft (no GPL/AGPL). The one **non-permissive** dependency is the
 PolyForm-Noncommercial two-stream kernel set in §1b, which is **not bundled** (fetched
 via recipe) but is required for the two-stream training and diffusion-serving paths.
+
+The separate `inference/gravityocr/` server environment also installs, unmodified and from
+their own packages, a few dependencies outside that list: `pycountry` (LGPL-2.1, pulled
+in through SGLang's `outlines` pin), MPL-2.0 packages such as `certifi`, `tqdm` and
+`orjson`, and NVIDIA's CUDA libraries, `cuda-python` and `nvidia-cutlass-dsl` under
+NVIDIA's own licences. None of them is redistributed or modified here; the LGPL and MPL
+ones fall under the conditional list in [`docs/oss/LICENSE_POLICY.md`](docs/oss/LICENSE_POLICY.md),
+and the condition is recorded in
+[`docs/oss/intake/0010-sglang-gravityocr.md`](docs/oss/intake/0010-sglang-gravityocr.md).
 
 The practical obligations when redistributing:
 
