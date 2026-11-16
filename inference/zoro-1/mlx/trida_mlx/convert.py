@@ -92,7 +92,9 @@ def main(argv=None):
             shutil.copy2(src / name, out / name)
     head = load_head(src, model.language_model.args.hidden_size)
     if head is not None:
-        mx.save_safetensors(str(out / "decision_head.safetensors"), head.w)
+        # Keep the old name for the converted head: MLX builds from before decision_head.* skip only
+        # jev_head.safetensors when loading weights, so a decision_head.safetensors would break them.
+        mx.save_safetensors(str(out / "jev_head.safetensors"), head.w)
     gb = index["metadata"]["total_size"] / 1e9
     print(f"wrote {out}  ({gb:.2f} GB, {len(shards)} shard(s), "
           f"{'bf16' if not a.bits else f'q{a.bits} g{a.group_size}'}"

@@ -101,7 +101,8 @@ A checkpoint with a decision head (`decision_head.pt` / `.safetensors`, or `jev_
 are extensions here as well. `POST /v1/decide`, the earlier `{"request": {...}}` envelope, still works
 with a `Deprecation` header and goes away in the next release. The canonical `../decide_request.py` is packaged
 unchanged and pinned by a test. Both head formats load without PyTorch. Conversion
-writes an unquantized float32 `decision_head.safetensors` and preserves `temperature.json`.
+writes an unquantized float32 `jev_head.safetensors` (the old name, so older MLX builds can still load the
+converted folder) and preserves `temperature.json`.
 
 ```bash
 curl -s localhost:8080/v1/systemone -H 'Content-Type: application/json' -d '{
@@ -129,9 +130,9 @@ curl -s localhost:8080/v1/systemone -H 'Content-Type: application/json' -d '{
   `--decision-image-temperature` and a per-request `temperature` override them. For CUDA
   parity comparisons, explicitly select the same temperature on both servers.
 - `reasoning` defaults to `false`; `true` generates self-spec reasoning before deciding, with
-  `max_reasoning_tokens` defaulting to 768. `"auto"` first decides directly, then reasons if
+  `max_reasoning_tokens` defaulting to the configured cap (4096). `"auto"` first decides directly, then reasons if
   any question's top probability is below `threshold` (default 0.7). Auto reasoning uses
-  self-spec and up to 8192 tokens by default. `trida_mode` can select `causal` or `self-spec`.
+  self-spec and the configured reasoning cap (4096 tokens by default). `trida_mode` can select `causal` or `self-spec`.
   Completed reasoning is fitted to the state budget, keeping its conclusion. Incomplete
   or looping reasoning keeps the direct answer and reports `cut`.
 - `stream: true` sends SSE data objects with `type: direct`, `type: reasoning` (text pieces),
@@ -293,3 +294,7 @@ compares answer keys, types, and numeric fields, and exits nonzero on mismatches
   have none); images inside system or assistant messages are dropped by the chat template contract.
 - The GGUF quants (`mradermacher/Trida2.0-4B-*GGUF`) run in llama.cpp as plain AR only; self-spec
   there would need the canvas mask and the block-end GDN readout in llama.cpp's qwen35 graph.
+
+Decision reasoning budgets are capped by `--reasoning-token-limit` (default 4096,
+configurable up to 8192). Auto reasoning uses that cap; explicit reasoning defaults
+to the configured cap (4096 by default). Requests above the cap return HTTP 422 on `/v1/systemone` (400 on the deprecated alias).

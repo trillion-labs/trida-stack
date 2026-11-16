@@ -234,7 +234,9 @@ def test_http_decisions(checkpoint):
         assert one["usage"]["input_tokens"] > 0
         assert one["usage"]["output_tokens"] == 0 and one["model"]
         for body in ({"state": REQ["state"], "questions": REQ["questions"]},
-                     {**REQ, "model": "m", "images": ["/etc/hosts"]}):
+                     {**REQ, "model": "m", "images": ["/etc/hosts"]},
+                     {**REQ, "model": "m", "reasoning": False, "max_reasoning_tokens": 4097},
+                     {**REQ, "model": "m", "reasoning": True, "max_reasoning_tokens": 4097}):
             with pytest.raises(urllib.error.HTTPError) as err:
                 post(body, "systemone")
             assert err.value.code == 422 and json.load(err.value)["detail"][0]["loc"] == ["body"]

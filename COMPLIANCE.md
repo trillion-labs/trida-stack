@@ -94,6 +94,7 @@ run sandboxed (an operational detail, not a licensing one).
 | KoAgentBench | `benchmark/ko_agentbench/` | [huggingface-KREW/Ko-AgentBench](https://huggingface.co/datasets/huggingface-KREW/Ko-AgentBench) | **Apache-2.0** |
 | SWE-bench | `benchmark/swe_bench/` | [princeton-nlp/SWE-bench](https://github.com/princeton-nlp/SWE-bench) | **MIT** |
 | Terminal-Bench | `benchmark/terminal_bench/` | [laude-institute/terminal-bench](https://github.com/laude-institute/terminal-bench) | **Apache-2.0** |
+| WorkflowEvals (pinned; `trida` provider patch applied at setup) | `benchmark/workflow_evals/` | [typesafe-ai/WorkflowEvals](https://github.com/typesafe-ai/WorkflowEvals) | **Apache-2.0** |
 
 ## 4. Evaluation datasets (pulled on demand, not redistributed)
 
@@ -106,6 +107,8 @@ None are redistributed from this repo — all are downloaded at eval time. See
 | MMLU-Pro | `inference/zoro-1/eval.py` | [TIGER-Lab/MMLU-Pro](https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro) | **MIT** |
 | IFEval | `inference/zoro-1/eval_ifeval.py` | google/IFEval | **Apache-2.0** |
 | benchmark suites | `benchmark/` | each harness's own datasets | per upstream |
+| evalsafe invoice processing | `benchmark/workflow_evals/` | [typesafe/evalsafe-invoice-processing](https://huggingface.co/datasets/typesafe/evalsafe-invoice-processing) | **Apache-2.0** |
+| evalsafe customer service, security incidents, agent-trace observability | `benchmark/workflow_evals/` (local evaluation only, behind `--allow-unverified-datasets`) | [typesafe](https://huggingface.co/typesafe) | **No licence stated**: maintainer exception for local evaluation, no redistribution ([intake 0011](docs/oss/intake/0011-workflowevals.md)) |
 
 ## 4b. Model weights — base model and derived checkpoint
 
