@@ -95,6 +95,7 @@ run sandboxed (an operational detail, not a licensing one).
 | SWE-bench | `benchmark/swe_bench/` | [princeton-nlp/SWE-bench](https://github.com/princeton-nlp/SWE-bench) | **MIT** |
 | Terminal-Bench | `benchmark/terminal_bench/` | [laude-institute/terminal-bench](https://github.com/laude-institute/terminal-bench) | **Apache-2.0** |
 | WorkflowEvals (pinned; `trida` provider patch applied at setup) | `benchmark/workflow_evals/` | [typesafe-ai/WorkflowEvals](https://github.com/typesafe-ai/WorkflowEvals) | **Apache-2.0** |
+| OmniDocBench metric code (pinned `0604d98`; with sacrebleu, PyMuPDF, Levenshtein, TeX Live in a separate venv) | `benchmark/gravityocr/` | [opendatalab/OmniDocBench](https://github.com/opendatalab/OmniDocBench) | **Apache-2.0**; PyMuPDF (AGPL-3.0) and Levenshtein (GPL-2.0-or-later) under a maintainer exception for this local tool ([intake 0016](docs/oss/intake/0016-gravityocr-eval.md)) |
 
 ## 4. Evaluation datasets (pulled on demand, not redistributed)
 
