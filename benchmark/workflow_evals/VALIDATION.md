@@ -81,8 +81,8 @@ The README and wrapper help now recommend server `--context-length 32768` for
 invoice reasoning. This fits that observed prompt plus budget, keeps benchmark
 inputs unchanged, and does not change the 7,551-text-token state / 8,192-token
 decision-row limits. A successful scored real-model reasoning run with the larger
-context remains unverified. Maintainer license approval and Luke's unpublished
-commits also remain pending.
+context remains unverified. (The licence exception and the #83 fixes were settled later;
+see "Maintainer review (2026-11-16)" below.)
 
 ## Review fixes (2026-11-12)
 
@@ -102,11 +102,11 @@ fit. The adapter rejects these fallbacks and `reasoning_trimmed: true` responses
 The earlier empty-answers-on-truncation behavior described below is historical.
 
 Intake IDs are now 0011–0015, leaving 0009–0010 to #72. The proposed local opt-in
-for unverified datasets awaits maintainer approval; no approval is claimed.
+for unverified datasets was later approved as a maintainer exception (2026-11-16, below).
 
 CUDA/Zoro-1 GPU inference remains pending; no GPU node is available. Luke's seven
 announced #83 commits were not available on #83's frozen head (`e0a8c60`) or the
-replacement branch when checked. They still need to be republished for comparison.
+replacement branch when checked (compared and settled on 2026-11-16, below).
 
 ## Rebase validation (2026-11-11)
 
@@ -163,7 +163,7 @@ ap_00001 RequestError: question 'line_0_scope' is too long: 1482 tokens of instr
 ```
 
 No inputs were shortened. The invoice dataset is Apache-2.0; license evidence and
-the pending status of the other three datasets are in the
+the maintainer exception for the other three datasets are in the
 [intake record](../../docs/oss/intake/0011-workflowevals.md).
 
 ## Row-budget review follow-up (2026-11-13)
