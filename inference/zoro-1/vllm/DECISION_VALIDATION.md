@@ -320,17 +320,19 @@ found two setuptools advisories at 80.10.2:
 - **GHSA-xmj3-9gf7-h52w** concerns legacy wheel installation on Windows. Its fixed
   version, 84.1.0, conflicts with vLLM’s Python 3.12 requirement of setuptools <81.
   An attempted upgrade failed `uv pip check` and was reverted before the GPU test.
-  No new exception is recorded or approved; maintainer disposition is pending.
+  The Linux-only exception was approved by Luke on 2026-11-16 and is recorded in
+  `docs/supply-chain/exceptions.md`, expiring 2026-12-15.
 
 The advisory gate now matches exceptions per advisory and its aliases, rather
 than allowing an exception for one package advisory to cover every other finding
-on that package. The newly discovered advisory therefore remains a CI blocker.
+on that package. This advisory is covered only by its named Linux exception.
 
-### Proposed Linux-only advisory exception (approval pending)
+### Approved Linux-only advisory exception (2026-11-16)
 
-Proposed classification: `not_affected` for **GHSA-xmj3-9gf7-h52w**, limited to
+Approved classification: `not_affected` for **GHSA-xmj3-9gf7-h52w**, limited to
 the locked Linux x86_64 / Python 3.12 decision-serving environment. This is a
-proposal, not an approved entry in `docs/supply-chain/exceptions.md`.
+named exception in `docs/supply-chain/exceptions.md`, approved by
+[usik-luke-trl](https://github.com/trillion-labs/trida-stack/pull/93#issuecomment-6906768396).
 
 - [The upstream advisory](https://github.com/advisories/GHSA-xmj3-9gf7-h52w)
   describes Windows drive-qualified path handling during legacy
@@ -342,12 +344,10 @@ proposal, not an approved entry in `docs/supply-chain/exceptions.md`.
   dependency has been exhaustively audited.
 - Keep setuptools 80.10.2 to satisfy vLLM 0.32.0's Python 3.12 requirement
   `setuptools>=78.1.1,<81`; the fixed 84.1.0 fails dependency validation.
-- Proposed re-review date: **2026-12-15**, or earlier if the platform, installation
-  path or dependency lock changes. Windows deployment is outside this proposal.
-- Only this advisory would be excepted; all other findings remain gated. After
-  maintainer approval, record the named approver, approval link, evidence and
-  expiry in the exception register, then rerun the advisory check. Until then,
-  the current scan failure remains in place.
+- Re-review date: **2026-12-15**, or earlier if the platform, installation
+  path or dependency lock changes. Windows deployment is outside this exception.
+- Only this advisory is excepted; all other findings remain gated. The register
+  records the named approver, approval link, scope, evidence and expiry.
 
 ### H100 HTTP regression after the review fixes
 
@@ -383,3 +383,16 @@ blocked by the unapproved setuptools finding above.
 Artifacts on the node are under
 `/mnt/vast/trillion/wonsuk/issue60-vllm-20261113/pr93-review/` (`report.json`,
 `run.log`, `run-5185.log`, `job-5186.log`, and before/after core hashes).
+
+
+### System One follow-up (2026-11-16)
+
+Merged the latest #89 shared contract (including #94) without changing the native
+vLLM capture path. The canonical route is `/v1/systemone`; `/v1/decide` is the
+deprecated alias. Both routes retain disconnect cleanup. The inherited decision
+implementation reports scored-row input tokens and generated reasoning tokens,
+rejects non-positive temperatures, and uses the configured reasoning cap before
+inference. CPU HTTP regressions cover the response envelope, usage, reasoning,
+422 errors and both routes' cancellation wrapper. Focused CPU regressions: **174 passed**. The approved Linux setuptools
+exception is recorded above. No H100 evaluation was rerun; benchmark inputs and
+all probability/parity tolerances remain unchanged.

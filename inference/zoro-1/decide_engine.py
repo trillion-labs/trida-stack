@@ -35,7 +35,8 @@ import time
 import torch
 import torch.nn as nn
 
-from decide_request import RequestError, MAX_IMAGE_PIXELS, VISION, MAX_STATE, MAX_BRANCH, fit_reasoning, validate_decision_limits, image_input, parse, prompt, with_reasoning, to_answer
+from decide_request import (RequestError, MAX_IMAGE_PIXELS, VISION, MAX_STATE, MAX_BRANCH, fit_reasoning,
+                            validate_decision_limits, image_input, parse, prompt, rows_tokens, with_reasoning, to_answer)
 
 END_THINK = "</think>"
 # Serving temperatures: logits are divided by T before the softmax. Fit T per checkpoint on held-out calibration
@@ -147,7 +148,7 @@ class DecideEngine:
                     return
             yield item
 
-    def decide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768):
+    def decide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=None):
         return self._run(self.adecide(request, image, temperature, reasoning, max_reasoning_tokens))
 
     def logits(self, enc, image=None):
@@ -164,8 +165,14 @@ class DecideEngine:
 
     # ---- decisions ----------------------------------------------------------------------------------
 
-    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768):
-        """-> {"answers": {qid: answer}, "timing_ms"} (+ "reasoning", "reasoning_ms" when reasoning=True)."""
+    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=None):
+        """-> {"answers": {qid: answer}, "usage", "timing_ms"} (+ "reasoning", "reasoning_ms" when reasoning=True).
+        usage: input_tokens = the decision rows scored, output_tokens = the reasoning generated."""
+        if temperature is not None and (isinstance(temperature, bool) or not isinstance(temperature, (int, float))
+                                        or not math.isfinite(temperature) or temperature <= 0):
+            raise RequestError(f"temperature must be a finite number above 0, got {temperature!r}")
+        if max_reasoning_tokens is None:
+            max_reasoning_tokens = self.reasoning_token_limit
         t0 = time.perf_counter()
         extra = {}
         req = parse(request, image)
@@ -180,7 +187,7 @@ class DecideEngine:
             text = "".join(pieces).strip()
             extra = {"reasoning": text, "reasoning_stats": stats,
                      "reasoning_ms": round((time.perf_counter() - t0) * 1000, 1)}
-            if stats.get("finish_reason") == "length":
+            if stats.get("finish_reason") != "stop":   # out of budget ("length"), aborted, or no finish reported
                 extra["cut"] = "length"
             elif not text:
                 extra["cut"] = "empty"
@@ -198,7 +205,9 @@ class DecideEngine:
         T = temperature or (self.image_T if enc.has_image else self.text_T)
         z = await self.alogits(enc, self._sized(req.image, enc.grid) if enc.has_image else None)
         answers = {q.qid: to_answer(q, torch.softmax(zq / T, -1).tolist()) for q, zq in zip(req.questions, z)}
-        return {"answers": answers, "timing_ms": round((time.perf_counter() - t0) * 1000, 1), **extra}
+        usage = {"input_tokens": rows_tokens(enc.rows),
+                 "output_tokens": extra.get("reasoning_stats", {}).get("completion_tokens", 0)}
+        return {"answers": answers, "usage": usage, "timing_ms": round((time.perf_counter() - t0) * 1000, 1), **extra}
 
     def _sized(self, image, grid):
         """The image at exactly the size the processor encodes it at (grid = patches high x wide)."""
@@ -267,7 +276,11 @@ class DecideEngine:
             piece = piece.replace(END_THINK, "")
             if piece:
                 yield piece
-        yield {"finish_reason": self._finish(meta), "prompt_tokens": prompt_tokens,
+        # The raw finish type, not _finish() (which folds everything but "length" into "stop"): an "abort", or no
+        # finish reported at all, leaves the reasoning as unfinished as running out of budget.
+        f = meta.get("finish_reason") or {}
+        finish = (f.get("type") if isinstance(f, dict) else f) or "unknown"
+        yield {"finish_reason": finish, "prompt_tokens": prompt_tokens,
                "completion_tokens": meta.get("completion_tokens", 0)}
 
     def _chat_request(self, messages, tools, max_new_tokens, temperature, top_p, top_k, presence_penalty,

@@ -211,6 +211,134 @@ def test_decide_endpoint_parses_without_paths():
     assert r.status_code == 400 and "/etc" not in r.text
 
 
+def test_systemone_request_maps_the_envelope():
+    from decide_request import systemone_request
+    body = {"state": REQ["state"], "model": "zoro-1", "questions": REQ["questions"], "images": [{"url": "data:x"}],
+            "reasoning": True, "max_reasoning_tokens": 64, "metadata": {"ignored": True}}
+    request, opts = systemone_request(body)
+    assert request == {**REQ, "image": "data:x"}
+    assert opts == {"reasoning": True, "max_reasoning_tokens": 64}   # unknown top-level keys are ignored
+    assert systemone_request({**body, "images": ["abc"]})[0]["image"] == "abc"
+    assert systemone_request(body, extensions=("metadata",))[1]["metadata"] == {"ignored": True}
+
+
+@pytest.mark.parametrize("bad, msg", [
+    ({"state": "s", "questions": REQ["questions"]}, "no 'model'"),
+    ({"model": "m", "questions": REQ["questions"]}, "no 'state'"),
+    ({"state": "s", "model": " ", "questions": REQ["questions"]}, "non-empty string"),
+    ({"state": "s", "model": "m", "questions": REQ["questions"], "images": ["a", "b"]}, "at most one image"),
+    ({"state": "s", "model": "m", "questions": REQ["questions"], "images": [{"detail": "low"}]}, "'images' entries"),
+    ([], "must be an object"),
+])
+def test_systemone_request_rejects(bad, msg):
+    from decide_request import systemone_request
+    with pytest.raises(RequestError, match=msg):
+        systemone_request(bad)
+
+
+@pytest.mark.parametrize("ext, msg", [
+    ({"temperature": -1}, "'temperature' must be a finite number above 0"),
+    ({"temperature": 0}, "'temperature' must be a finite number above 0"),
+    ({"temperature": True}, "'temperature'"),
+    ({"max_reasoning_tokens": 0}, "'max_reasoning_tokens' must be an integer from 1 to 4096"),
+    ({"max_reasoning_tokens": -5}, "'max_reasoning_tokens'"),
+    ({"max_reasoning_tokens": 8193}, "'max_reasoning_tokens'"),
+    ({"max_reasoning_tokens": 64.0}, "'max_reasoning_tokens'"),
+    ({"reasoning": "false"}, "'reasoning' must be true or false"),
+    ({"reasoning": "auto"}, 'this server has no "auto"'),
+    ({"reasoning": 1}, "'reasoning'"),
+    ({"threshold": 1.5}, "'threshold' must be a number from 0 to 1"),
+])
+def test_systemone_options_are_checked_the_same_on_both_servers(ext, msg):
+    from decide_request import systemone_request
+    body = {"state": "s", "model": "m", "questions": REQ["questions"], **ext}
+    with pytest.raises(RequestError, match=msg):
+        systemone_request(body, extensions=("threshold",))
+
+
+def test_systemone_options_accept_valid_and_null_values():
+    from decide_request import systemone_request
+    body = {"state": "s", "model": "m", "questions": REQ["questions"]}
+    ok = {"reasoning": False, "max_reasoning_tokens": 8192, "temperature": 0.5}
+    assert systemone_request({**body, **ok}, reasoning_token_limit=8192)[1] == ok
+    nulls = {"reasoning": None, "max_reasoning_tokens": None, "temperature": None}
+    assert systemone_request({**body, **nulls})[1] == {}   # null means unset, as OpenAI-style clients send it
+    assert systemone_request({**body, "reasoning": "auto", "threshold": 0.9}, extensions=("threshold",),
+                             auto_reasoning=True)[1] == {"reasoning": "auto", "threshold": 0.9}
+
+
+def test_systemone_response_shape():
+    from decide_request import systemone_response
+    result = {"answers": {"n": {"type": "noul", "noul": 0.9},
+                          "s": {"type": "score", "score": 1.2, "legend": ["low", "high"], "confidence": 0.4,
+                                "probabilities": {"0": 0.3, "1": 0.7}}},
+              "usage": {"input_tokens": 120, "output_tokens": 7}, "timing_ms": 3.0}
+    out = systemone_response(result, "zoro-1")
+    assert out["model"] == "zoro-1" and out["usage"] == {"input_tokens": 120, "output_tokens": 7}
+    assert out["answers"]["s"]["legend"] == {"0": "low", "1": "high"}
+    assert out["answers"]["n"] == {"type": "noul", "noul": 0.9} and out["timing_ms"] == 3.0
+    assert systemone_response({"answers": {}}, "m")["usage"] == {"input_tokens": 0, "output_tokens": 0}
+
+
+class FakeDecider:
+    ckpt = "/ckpt/zoro-1"
+
+    def __init__(self):
+        self.calls = []
+
+    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=768):
+        req = parse(request, image)
+        self.calls.append({"temperature": temperature, "reasoning": reasoning, "budget": max_reasoning_tokens})
+        p = {"noul": [0.2, 0.8], "choice": [0.6, 0.4], "score": [0.1, 0.9]}
+        return {"answers": {q.qid: to_answer(q, p[q.qtype][:len(q.options)] if q.qtype != "choice"
+                                             else [1 / len(q.options)] * len(q.options)) for q in req.questions},
+                "usage": {"input_tokens": 42, "output_tokens": 5 if reasoning else 0}, "timing_ms": 1.0}
+
+
+def test_systemone_endpoint():
+    engine = FakeDecider()
+    client = _client(engine)
+    questions = {**REQ["questions"], "u": {"type": "score", "instructions": "Urgency?", "criteria": ["low", "high"]}}
+    body = {"state": REQ["state"], "model": "anything", "questions": questions}
+    r = client.post("/v1/systemone", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["model"] == "zoro-1" and set(out["answers"]) == {"s", "r", "u"}
+    assert out["usage"] == {"input_tokens": 42, "output_tokens": 0}
+    assert out["answers"]["r"] == {"type": "noul", "noul": 0.8}
+    assert out["answers"]["u"]["legend"] == {"0": "low", "1": "high"}
+    assert out["answers"]["s"]["type"] == "choice" and set(out["answers"]["s"]["probabilities"]) == {"pos", "neg"}
+    r = client.post("/v1/systemone", json={**body, "reasoning": True, "max_reasoning_tokens": 64, "temperature": 0.5})
+    assert r.status_code == 200 and r.json()["usage"]["output_tokens"] == 5
+    assert engine.calls[-1] == {"temperature": 0.5, "reasoning": True, "budget": 64}
+    pytest.importorskip("PIL")
+    for bad in ({**body, "model": None}, {k: v for k, v in body.items() if k != "model"},
+                {**body, "questions": {"x": {"type": "rank"}}}, {**body, "images": ["/etc/hosts"]},
+                {**body, "max_reasoning_tokens": "many"}, {**body, "temperature": -1}, {**body, "temperature": 0},
+                {**body, "max_reasoning_tokens": 0}, {**body, "reasoning": "false"}, {**body, "reasoning": "auto"}):
+        r = client.post("/v1/systemone", json=bad)
+        assert r.status_code == 422, (bad, r.text)
+        detail = r.json()["detail"]
+        assert isinstance(detail, list) and detail[0]["loc"] == ["body"] and detail[0]["msg"]
+        assert "/etc" not in r.text
+    assert all(call["temperature"] in (None, 0.5) for call in engine.calls)   # no rejected value reached the engine
+
+
+def test_engine_rejects_a_non_positive_temperature():
+    import asyncio
+    from decide_engine import DecideEngine
+    engine = object.__new__(DecideEngine)
+    for bad in (-1, 0, float("nan"), True):
+        with pytest.raises(RequestError, match="temperature"):
+            asyncio.run(engine.adecide(REQ, temperature=bad))
+
+
+def test_decide_alias_is_deprecated_but_works():
+    r = _client(FakeDecider()).post("/v1/decide", json={"request": REQ})
+    assert r.status_code == 200 and set(r.json()["answers"]) == {"s", "r"}
+    assert r.headers["deprecation"] == "true" and "/v1/systemone" in r.headers["link"]
+
+
 def test_decide_rows_match_the_jev_encoder():
     # the server must score the rows decision checkpoints were trained on; inference/zoro-1/jev.py is pinned to the training
     # encoder by golden fixtures, so this ties decide_request's own encoder to it
@@ -376,8 +504,10 @@ def _reasoning_engine(finish="stop", context_length=16384, text="Check it."):
 
             async def chunks():
                 yield {"text": text, "meta_info": {}}
-                yield {"text": text + "</think>" if finish == "stop" else text,
-                       "meta_info": {"finish_reason": {"type": finish}, "completion_tokens": 3}}
+                meta = {"completion_tokens": 3}
+                if finish is not None:   # None: the last chunk reports no finish at all
+                    meta["finish_reason"] = {"type": finish}
+                yield {"text": text + "</think>" if finish == "stop" else text, "meta_info": meta}
             return chunks()
 
     engine = object.__new__(DecideEngine)
@@ -394,19 +524,24 @@ def _reasoning_engine(finish="stop", context_length=16384, text="Check it."):
     return engine
 
 
-@pytest.mark.parametrize("finish", ["stop", "length"])
-def test_decide_exposes_real_reasoning_finish_status(finish):
+@pytest.mark.parametrize("endpoint", ["/v1/decide", "/v1/systemone"])
+@pytest.mark.parametrize("finish", ["stop", "length", "abort", None])
+def test_decide_exposes_real_reasoning_finish_status(finish, endpoint):
     from fastapi.testclient import TestClient
     from serve_decide import create_app
 
     engine = _reasoning_engine(finish)
-    response = TestClient(create_app(engine)).post("/v1/decide", json={
-        "request": REQ, "reasoning": True, "max_reasoning_tokens": 100})
+    wire = {"request": REQ} if endpoint == "/v1/decide" else {"model": "zoro-1", **REQ}
+    response = TestClient(create_app(engine)).post(endpoint, json={
+        **wire, "reasoning": True, "max_reasoning_tokens": 100})
     assert response.status_code == 200
     body = response.json()
     assert body["reasoning"] == "Check it."
-    assert body["reasoning_stats"]["finish_reason"] == finish
-    if finish == "length":
+    assert body["usage"]["output_tokens"] == 3
+    assert body["usage"]["input_tokens"] > 0
+    reported = finish or "unknown"   # no finish reported counts as unfinished too
+    assert body["reasoning_stats"]["finish_reason"] == reported
+    if finish != "stop":   # an abort leaves the reasoning as unfinished as running out of budget
         assert body["cut"] == "length" and body["answers_source"] == "direct"
         assert engine.scored.rows == parse(REQ).encode(engine.tok).rows
     else:
@@ -556,3 +691,38 @@ def test_long_question_reasoning_returns_trimmed_answer_over_http():
     body = response.json()
     assert body["reasoning_trimmed"] and body["answers_source"] == "reasoned"
     assert all(len(row["ids"]) <= 8192 for row in engine.scored.rows)
+
+
+@pytest.mark.parametrize("cap", [2048, 4096, 8192])
+@pytest.mark.parametrize("endpoint", ["/v1/decide", "/v1/systemone"])
+def test_reasoning_defaults_to_server_cap(cap, endpoint):
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+    engine = _reasoning_engine(context_length=32768)
+    engine.reasoning_token_limit = cap
+    captured = []
+    original = engine.engine.async_generate
+    async def generate(**kwargs):
+        captured.append(kwargs["sampling_params"]["max_new_tokens"])
+        return await original(**kwargs)
+    engine.engine.async_generate = generate
+    wire = {"request": REQ} if endpoint == "/v1/decide" else {"model": "zoro-1", **REQ}
+    response = TestClient(create_app(engine)).post(endpoint, json={**wire, "reasoning": True})
+    assert response.status_code == 200, response.text
+    assert captured == [cap]
+
+
+@pytest.mark.parametrize("cap", [2048, 4096, 8192])
+@pytest.mark.parametrize("reasoning", [False, True])
+def test_systemone_rejects_budget_above_server_cap_before_inference(cap, reasoning):
+    engine = FakeDecider()
+    engine.reasoning_token_limit = cap
+    client = _client(engine)
+    body = {"model": "zoro-1", **REQ, "reasoning": reasoning}
+    r = client.post("/v1/systemone", json={**body, "max_reasoning_tokens": cap + 1})
+    assert r.status_code == 422
+    assert f"1 to {cap}" in r.json()["detail"][0]["msg"]
+    assert engine.calls == []
+    r = client.post("/v1/systemone", json={**body, "max_reasoning_tokens": cap})
+    assert r.status_code == 200, r.text
+    assert engine.calls[-1]["budget"] == cap

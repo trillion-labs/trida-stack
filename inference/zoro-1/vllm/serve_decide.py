@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve /v1/decide and chat on stock vLLM 0.32.x, without the diffusion plugin."""
+"""Serve /v1/systemone and chat on stock vLLM 0.32.x, without the diffusion plugin."""
 import argparse
 from pathlib import Path
 import sys

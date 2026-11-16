@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Serve a Trida decision checkpoint: typed decisions and chat from one engine, one copy of the weights.
 
-  POST /v1/decide            {"request": {"state": ..., "questions": {...}}, "reasoning": false, "temperature": null, "max_reasoning_tokens": 768}
-                             -> {"answers": {qid: answer}, "timing_ms": ...} (+ "reasoning" when reasoning=true)
+  POST /v1/systemone         TypeSafe's System One API: {"state": ..., "model": ..., "questions": {...}}
+                             -> {"model", "answers": {qid: answer}, "usage": {"input_tokens", "output_tokens"}}.
+                             Extensions: "images": [one base64 / data URL / {"url"}], "reasoning", "max_reasoning_tokens",
+                             "temperature"; the response then also carries "reasoning" and timing fields.
+                             Validation errors are 422 {"detail": [{"loc", "msg", "type"}]}, as System One returns them.
+  POST /v1/decide            deprecated alias, removed in the next release: {"request": {"state": ..., "questions":
+                             {...}}, "reasoning": false, "temperature": null} -> {"answers", "usage", "timing_ms"}
   POST /v1/chat/completions  OpenAI-compatible, streaming or not; `tools` supported (tool calls parsed from the
                              model's <tool_call> blocks); the thinking is returned as reasoning_content; honours
                              max_tokens, temperature, top_p, top_k, presence_penalty and
@@ -180,10 +185,10 @@ async def _decision_while_connected(coro, request):
 
 
 def create_app(engine, cancel_disconnected_decisions=False):
-    from fastapi import Body, FastAPI, HTTPException, Request
+    from fastapi import Body, FastAPI, HTTPException, Response, Request
     from fastapi.responses import StreamingResponse
 
-    from decide_request import RequestError
+    from decide_request import RequestError, systemone_request, systemone_response
 
     name = os.path.basename(os.path.normpath(engine.ckpt))
     app = FastAPI(title="Trida decisions")
@@ -196,18 +201,33 @@ def create_app(engine, cancel_disconnected_decisions=False):
     def models():
         return {"object": "list", "data": [{"id": name, "object": "model", "created": 0, "owned_by": "trida"}]}
 
-    @app.post("/v1/decide")
-    async def decide(http_request: Request, body: dict = Body(...)):
-        if "request" not in body:
-            raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float}")
+    @app.post("/v1/systemone")
+    async def systemone(http_request: Request, body: dict = Body(...)):
+        def invalid(msg):
+            return HTTPException(422, [{"loc": ["body"], "msg": msg, "type": "value_error"}])
         try:
-            budget = _num(body, "max_reasoning_tokens", 768, int)
+            request, opts = systemone_request(
+                body, reasoning_token_limit=getattr(engine, "reasoning_token_limit", 4096))
             # the image, if any, is in the request (base64 or a data URL): requests never name server files
+            work = engine.adecide(request, None, opts.get("temperature"), opts.get("reasoning", False),
+                                   max_reasoning_tokens=opts.get("max_reasoning_tokens"))
+            result = await _decision_while_connected(work, http_request) if cancel_disconnected_decisions else await work
+        except RequestError as e:
+            raise invalid(str(e)) from e
+        return systemone_response(result, name)
+
+    @app.post("/v1/decide", deprecated=True)
+    async def decide(http_request: Request, response: Response, body: dict = Body(...)):
+        response.headers["Deprecation"] = "true"
+        response.headers["Link"] = '</v1/systemone>; rel="successor-version"'
+        if "request" not in body:
+            raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float, \"max_reasoning_tokens\"?: int (within server reasoning-token-limit; default server cap)}")
+        try:
+            budget = _num(body, "max_reasoning_tokens", None, int)
+            # Images use the shared request contract; server file paths are not accepted.
             work = engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
-                                  max_reasoning_tokens=budget)
-            if cancel_disconnected_decisions:
-                return await _decision_while_connected(work, http_request)
-            return await work
+                                   max_reasoning_tokens=budget)
+            return await _decision_while_connected(work, http_request) if cancel_disconnected_decisions else await work
         except RequestError as e:
             raise HTTPException(400, str(e)) from e
 

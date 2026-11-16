@@ -2,7 +2,7 @@
 
 ## Typed decisions (stock vLLM 0.32.0)
 
-Serve the same `/v1/decide` request and response contract as the SGLang decision
+Serve the same `/v1/systemone` request and response contract as the SGLang decision
 server, including images and `reasoning: true`:
 
 ```bash
@@ -56,9 +56,9 @@ Generation defaults to vLLM's PyTorch sampler, avoiding an optional FlashInfer
 sampling-kernel build. Sampling temperature, top-k, and top-p are unchanged.
 
 ```bash
-curl http://localhost:30001/v1/decide -H 'Content-Type: application/json' -d '{
-  "request": {"state": "The invoice is 120 EUR; the limit is 100 EUR.",
-              "questions": {"over_limit": {"type": "noul", "instructions": "The invoice exceeds the limit."}}},
+curl http://localhost:30001/v1/systemone -H 'Content-Type: application/json' -d '{
+  "model": "zoro-1", "state": "The invoice is 120 EUR; the limit is 100 EUR.",
+              "questions": {"over_limit": {"type": "noul", "instructions": "The invoice exceeds the limit."}},
   "reasoning": false
 }'
 ```

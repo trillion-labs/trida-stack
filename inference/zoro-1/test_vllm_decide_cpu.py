@@ -505,3 +505,60 @@ def test_vllm_long_question_reasoning_reserves_row_budget():
     answer = asyncio.run(engine.adecide(request, reasoning=True))
     assert answer["reasoning_trimmed"] and answer["answers_source"] == "reasoned"
     assert all(len(row["ids"]) <= 8192 for row in seen)
+
+
+@pytest.mark.parametrize("reasoning", [False, True])
+def test_vllm_systemone_usage_and_reasoning(reasoning):
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+    engine = bare_engine()
+    engine.ckpt = "zoro-1"
+    async def stream(*args, **kwargs):
+        yield "Checked the invoice.", {"finish_reason": "stop", "completion_tokens": 10}
+    async def logits(enc, image):
+        return [torch.tensor([0.0, 1.0])]
+    engine._astream, engine.alogits = stream, logits
+    response = TestClient(create_app(engine, cancel_disconnected_decisions=True)).post(
+        "/v1/systemone", json={"model": "zoro-1", **REQUEST, "reasoning": reasoning})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["model"] == "zoro-1"
+    assert body["usage"]["input_tokens"] > 0
+    assert body["usage"]["output_tokens"] == (10 if reasoning else 0)
+    if reasoning:
+        assert body["answers_source"] == "reasoned"
+        assert body["reasoning_stats"]["finish_reason"] == "stop"
+
+
+@pytest.mark.parametrize("extra", [{"temperature": 0}, {"temperature": -1},
+                                   {"max_reasoning_tokens": 4097}, {"images": ["/etc/hosts"]}])
+def test_vllm_systemone_rejects_bad_options_before_inference(extra):
+    from fastapi.testclient import TestClient
+    from serve_decide import create_app
+    engine = bare_engine()
+    engine.ckpt = "zoro-1"
+    response = TestClient(create_app(engine)).post(
+        "/v1/systemone", json={"model": "zoro-1", **REQUEST, **extra})
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+
+
+@pytest.mark.parametrize("path", ["/v1/decide", "/v1/systemone"])
+def test_both_http_routes_use_disconnect_cleanup(monkeypatch, path):
+    from fastapi.testclient import TestClient
+    import serve_decide
+    called = []
+    original = serve_decide._decision_while_connected
+    async def wrapped(work, request):
+        called.append(request.url.path)
+        return await original(work, request)
+    monkeypatch.setattr(serve_decide, "_decision_while_connected", wrapped)
+    engine = bare_engine()
+    engine.ckpt = "zoro-1"
+    async def logits(enc, image):
+        return [torch.tensor([0.0, 1.0])]
+    engine.alogits = logits
+    body = {"request": REQUEST} if path == "/v1/decide" else {"model": "zoro-1", **REQUEST}
+    response = TestClient(serve_decide.create_app(engine, cancel_disconnected_decisions=True)).post(path, json=body)
+    assert response.status_code == 200, response.text
+    assert called == [path]
