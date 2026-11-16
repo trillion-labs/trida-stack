@@ -26,6 +26,7 @@ API body (POST /v1/systemone) onto a request and a result back onto its response
 """
 import base64
 import io
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -315,11 +316,12 @@ def to_answer(q, p):
 # `max_reasoning_tokens` and `temperature`, plus whatever extra keys a server names in `extensions`.
 
 SYSTEMONE_EXTENSIONS = ("reasoning", "max_reasoning_tokens", "temperature")
+MAX_REASONING_TOKENS = 8192   # the largest reasoning budget a request may ask for
 
 
-def systemone_request(body, extensions=()):
+def systemone_request(body, extensions=(), auto_reasoning=False):
     """A System One body -> (request for parse(), {extension: value} for the keys present). RequestError names the
-    first problem; the request itself is validated by parse()."""
+    first problem; the request itself is validated by parse(), the extension values by systemone_options()."""
     if not isinstance(body, dict):
         raise RequestError(f"the body must be an object with 'state', 'model' and 'questions', got {type(body).__name__}")
     for key in ("state", "model", "questions"):
@@ -341,7 +343,29 @@ def systemone_request(body, extensions=()):
             raise RequestError("'images' entries must be a base64 string, a data URL, or {\"url\": ...} with one")
         request["image"] = image
     options = {k: body[k] for k in (*SYSTEMONE_EXTENSIONS, *extensions) if k in body}
-    return request, options
+    return request, systemone_options(options, auto_reasoning)
+
+
+def systemone_options(options, auto_reasoning=False):
+    """Check the extension values both servers take, so a request means the same on each; null means unset.
+    `reasoning: "auto"` only where the server supports it (auto_reasoning)."""
+    def number(v):
+        return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+
+    reasoning = options.get("reasoning")
+    if reasoning is not None and not isinstance(reasoning, bool) and not (auto_reasoning and reasoning == "auto"):
+        allowed = 'true, false or "auto"' if auto_reasoning else "true or false (this server has no \"auto\")"
+        raise RequestError(f"'reasoning' must be {allowed}, got {reasoning!r}")
+    budget = options.get("max_reasoning_tokens")
+    if budget is not None and (type(budget) is not int or not 1 <= budget <= MAX_REASONING_TOKENS):
+        raise RequestError(f"'max_reasoning_tokens' must be an integer from 1 to {MAX_REASONING_TOKENS}, got {budget!r}")
+    temperature = options.get("temperature")
+    if temperature is not None and not (number(temperature) and temperature > 0):
+        raise RequestError(f"'temperature' must be a finite number above 0, got {temperature!r}")
+    threshold = options.get("threshold")
+    if threshold is not None and not (number(threshold) and 0 <= threshold <= 1):
+        raise RequestError(f"'threshold' must be a number from 0 to 1, got {threshold!r}")
+    return {k: v for k, v in options.items() if v is not None}
 
 
 def systemone_response(result, model):

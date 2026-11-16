@@ -162,6 +162,9 @@ curl -s localhost:30001/v1/systemone -H 'content-type: application/json' -d '{
   - Validation errors return 422 with System One's `{"detail": [{"loc", "msg", "type"}]}` body.
   - Our extensions: `images` (one image: base64, a data URL, or `{"url": ...}`), `reasoning`,
     `max_reasoning_tokens` and `temperature`; the response then also carries the reasoning and timing fields.
+    Both servers check them the same way, and a bad value is a 422: `reasoning` is `true` / `false` (MLX also
+    takes `"auto"`), `max_reasoning_tokens` an integer from 1 to 8192, `temperature` a finite number above 0.
+    `null` means unset.
   - `POST /v1/decide`, the earlier `{"request": {...}, "reasoning", "temperature"}` envelope, still answers, with a
     `Deprecation` header, and goes away in the next release. Its score `legend` is a list and it has no `model`.
   - Not System One's: `GET /v1/models` keeps the OpenAI shape that `chat.py` and `eval.py` read.

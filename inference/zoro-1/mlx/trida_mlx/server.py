@@ -600,7 +600,8 @@ class Handler(BaseHTTPRequestHandler):
         if DECIDER is None:
             raise SystemOneInvalid("this checkpoint has no decision head (jev_head.pt or jev_head.safetensors)")
         try:
-            request, opts = systemone_request(body, extensions=("threshold", "trida_mode", "stream"))
+            request, opts = systemone_request(body, extensions=("threshold", "trida_mode", "stream"),
+                                              auto_reasoning=True)   # checks the values before any streaming
             parse_decision(request)
         except DecisionError as error:
             raise SystemOneInvalid(str(error)) from error

@@ -173,16 +173,12 @@ def create_app(engine):
         def invalid(msg):
             return HTTPException(422, [{"loc": ["body"], "msg": msg, "type": "value_error"}])
         try:
-            request, opts = systemone_request(body)
-            budget = _num(opts, "max_reasoning_tokens", 768, int)
-            temperature = _num(opts, "temperature", None, float)
+            request, opts = systemone_request(body)   # also checks the extension values (systemone_options)
             # the image, if any, is in the request (base64 or a data URL): requests never name server files
-            result = await engine.adecide(request, None, temperature, bool(opts.get("reasoning")),
-                                          max_reasoning_tokens=budget)
+            result = await engine.adecide(request, None, opts.get("temperature"), opts.get("reasoning", False),
+                                          max_reasoning_tokens=opts.get("max_reasoning_tokens", 768))
         except RequestError as e:
             raise invalid(str(e)) from e
-        except HTTPException as e:   # a malformed extension value from _num
-            raise invalid(e.detail) from e
         return systemone_response(result, name)
 
     @app.post("/v1/decide", deprecated=True)

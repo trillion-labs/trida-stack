@@ -232,6 +232,37 @@ def test_systemone_request_rejects(bad, msg):
         systemone_request(bad)
 
 
+@pytest.mark.parametrize("ext, msg", [
+    ({"temperature": -1}, "'temperature' must be a finite number above 0"),
+    ({"temperature": 0}, "'temperature' must be a finite number above 0"),
+    ({"temperature": True}, "'temperature'"),
+    ({"max_reasoning_tokens": 0}, "'max_reasoning_tokens' must be an integer from 1 to 8192"),
+    ({"max_reasoning_tokens": -5}, "'max_reasoning_tokens'"),
+    ({"max_reasoning_tokens": 8193}, "'max_reasoning_tokens'"),
+    ({"max_reasoning_tokens": 64.0}, "'max_reasoning_tokens'"),
+    ({"reasoning": "false"}, "'reasoning' must be true or false"),
+    ({"reasoning": "auto"}, 'this server has no "auto"'),
+    ({"reasoning": 1}, "'reasoning'"),
+    ({"threshold": 1.5}, "'threshold' must be a number from 0 to 1"),
+])
+def test_systemone_options_are_checked_the_same_on_both_servers(ext, msg):
+    from decide_request import systemone_request
+    body = {"state": "s", "model": "m", "questions": REQ["questions"], **ext}
+    with pytest.raises(RequestError, match=msg):
+        systemone_request(body, extensions=("threshold",))
+
+
+def test_systemone_options_accept_valid_and_null_values():
+    from decide_request import systemone_request
+    body = {"state": "s", "model": "m", "questions": REQ["questions"]}
+    ok = {"reasoning": False, "max_reasoning_tokens": 8192, "temperature": 0.5}
+    assert systemone_request({**body, **ok})[1] == ok
+    nulls = {"reasoning": None, "max_reasoning_tokens": None, "temperature": None}
+    assert systemone_request({**body, **nulls})[1] == {}   # null means unset, as OpenAI-style clients send it
+    assert systemone_request({**body, "reasoning": "auto", "threshold": 0.9}, extensions=("threshold",),
+                             auto_reasoning=True)[1] == {"reasoning": "auto", "threshold": 0.9}
+
+
 def test_systemone_response_shape():
     from decide_request import systemone_response
     result = {"answers": {"n": {"type": "noul", "noul": 0.9},
@@ -279,12 +310,23 @@ def test_systemone_endpoint():
     pytest.importorskip("PIL")
     for bad in ({**body, "model": None}, {k: v for k, v in body.items() if k != "model"},
                 {**body, "questions": {"x": {"type": "rank"}}}, {**body, "images": ["/etc/hosts"]},
-                {**body, "max_reasoning_tokens": "many"}):
+                {**body, "max_reasoning_tokens": "many"}, {**body, "temperature": -1}, {**body, "temperature": 0},
+                {**body, "max_reasoning_tokens": 0}, {**body, "reasoning": "false"}, {**body, "reasoning": "auto"}):
         r = client.post("/v1/systemone", json=bad)
         assert r.status_code == 422, (bad, r.text)
         detail = r.json()["detail"]
         assert isinstance(detail, list) and detail[0]["loc"] == ["body"] and detail[0]["msg"]
         assert "/etc" not in r.text
+    assert all(call["temperature"] in (None, 0.5) for call in engine.calls)   # no rejected value reached the engine
+
+
+def test_engine_rejects_a_non_positive_temperature():
+    import asyncio
+    from decide_engine import DecideEngine
+    engine = object.__new__(DecideEngine)
+    for bad in (-1, 0, float("nan"), True):
+        with pytest.raises(RequestError, match="temperature"):
+            asyncio.run(engine.adecide(REQ, temperature=bad))
 
 
 def test_decide_alias_is_deprecated_but_works():
