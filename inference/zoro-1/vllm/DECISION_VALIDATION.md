@@ -396,3 +396,10 @@ inference. CPU HTTP regressions cover the response envelope, usage, reasoning,
 422 errors and both routes' cancellation wrapper. Focused CPU regressions: **174 passed**. The approved Linux setuptools
 exception is recorded above. No H100 evaluation was rerun; benchmark inputs and
 all probability/parity tolerances remain unchanged.
+
+
+Python 3.10 HTTP regressions exposed a disconnect-watcher cleanup hang: ASGI
+polling could swallow task cancellation after inference completed. The helper
+now also signals an explicit stop event. All 49 vLLM boundary tests pass on
+Python 3.10, including the new System One HTTP paths; native capture and sampling
+are unchanged. No GPU reevaluation was run for this fix.
