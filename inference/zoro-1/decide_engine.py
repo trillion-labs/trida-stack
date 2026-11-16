@@ -180,8 +180,8 @@ class DecideEngine:
             text = "".join(pieces).strip()
             extra = {"reasoning": text, "reasoning_stats": stats,
                      "reasoning_ms": round((time.perf_counter() - t0) * 1000, 1)}
-            if stats.get("finish_reason") == "length":
-                extra["cut"] = "length"
+            if stats.get("finish_reason") != "stop":   # out of budget ("length"), aborted, or no finish reported
+                extra["cut"] = stats.get("finish_reason") or "unknown"
             elif not text:
                 extra["cut"] = "empty"
             else:
@@ -267,7 +267,11 @@ class DecideEngine:
             piece = piece.replace(END_THINK, "")
             if piece:
                 yield piece
-        yield {"finish_reason": self._finish(meta), "prompt_tokens": prompt_tokens,
+        # The raw finish type, not _finish() (which folds everything but "length" into "stop"): an "abort", or no
+        # finish reported at all, leaves the reasoning as unfinished as running out of budget.
+        f = meta.get("finish_reason") or {}
+        finish = (f.get("type") if isinstance(f, dict) else f) or "unknown"
+        yield {"finish_reason": finish, "prompt_tokens": prompt_tokens,
                "completion_tokens": meta.get("completion_tokens", 0)}
 
     def _chat_request(self, messages, tools, max_new_tokens, temperature, top_p, top_k, presence_penalty,
