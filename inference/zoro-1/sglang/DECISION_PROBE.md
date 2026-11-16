@@ -418,3 +418,10 @@ completed reasoning response by the benchmark. No H100 reevaluation was run.
 Focused CPU regressions: **182 passed**; MLX decision/server: **61 passed, 1 skipped**.
 Benchmark inputs, parity fixtures and tolerances are unchanged, including both
 previously failing parity cases. Existing GPU results above remain historical.
+
+
+Python 3.10 exposed a disconnect-watcher cleanup hang hidden by the Python 3.13
+run: ASGI polling could swallow cancellation after inference completed. An
+explicit watcher stop event now ends it cooperatively. The same 182 focused CPU
+tests pass on Python 3.10, including HTTP auto and disconnect paths; no native
+model execution or sampling settings changed.

@@ -157,8 +157,10 @@ async def _decision_while_connected(coro, request):
     """Cancel nonstreaming decision work when its HTTP client disconnects."""
     from fastapi import HTTPException
 
+    stop_watch = asyncio.Event()
+
     async def disconnected():
-        while not await request.is_disconnected():
+        while not stop_watch.is_set() and not await request.is_disconnected():
             await asyncio.sleep(0.05)
 
     work = asyncio.create_task(coro)
@@ -170,6 +172,9 @@ async def _decision_while_connected(coro, request):
         await watch
         raise HTTPException(499, "decision client disconnected")
     finally:
+        # ASGI disconnect polling can swallow cancellation (notably on Python 3.10).
+        # The explicit stop signal also lets the watcher exit cooperatively.
+        stop_watch.set()
         watch.cancel()
         if not work.done():
             work.cancel()
