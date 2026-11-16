@@ -21,7 +21,7 @@ In the spirit of nanoGPT, this directory serves **one model** and nothing else, 
 |---|---|
 | `causal` | native autoregressive decoding — the reference |
 | **`self-spec`** (default) | the diffusion stream drafts a block, the model's own AR stream verifies it in the same forward pass: generation block 8 (`b15_g8`), several tokens per forward, the AR model's output distribution |
-| `decide` | typed decisions (`/v1/decide`: yes/no, choice, score with probabilities), reason-then-decide, and OpenAI chat from one engine ([Decisions](#decisions)) |
+| `decide` | typed decisions (`/v1/systemone`: yes/no, choice, score with probabilities), reason-then-decide, and OpenAI chat from one engine ([Decisions](#decisions)) |
 
 Zoro-1 does not support pure iterative diffusion decoding, so there is no `diffusion` mode. Other models get their own nano-inference next to this one (`inference/<model>/`).
 
@@ -84,7 +84,7 @@ Three levels, from no hardware to the full stack:
      wait_up 30000 $pid && python eval.py gsm8k --num-problems 200
      kill $pid; wait $pid
    done
-   python serve.py --mode decide --port 30001        # then the /v1/decide example under Decisions
+   python serve.py --mode decide --port 30001        # then the /v1/systemone example under Decisions
    ```
 
 ## Usage
@@ -129,7 +129,7 @@ Defaults: temp 1.0 / top_p 0.95 / top_k 20, no presence penalty, thinking on, `-
 
 ## Decisions
 
-`serve_decide.py` serves a **decision checkpoint**: one that carries a pointer head (`jev_head.pt`, see [`MODEL_CONTRACT.md`](MODEL_CONTRACT.md#decision-checkpoints-serve_decidepy)). It answers typed questions about a state with calibrated probabilities. It can also reason first and then decide, and it chats with tool calls. All three run from one in-process engine and one copy of the weights, on **stock SGLang ≥ 0.5.22** with causal decoding. No fork or patch is needed.
+`serve_decide.py` serves a **decision checkpoint**: one that carries a pointer head (`decision_head.pt`, or `jev_head.pt` as training writes it; see [`MODEL_CONTRACT.md`](MODEL_CONTRACT.md#decision-checkpoints-serve_decidepy)). It answers typed questions about a state with calibrated probabilities. It can also reason first and then decide, and it chats with tool calls. All three run from one in-process engine and one copy of the weights, on **stock SGLang ≥ 0.5.22** with causal decoding. No fork or patch is needed.
 
 ```bash
 pip install "sglang>=0.5.22" fastapi uvicorn             # a stock SGLang env, separate from the diffusion backend's
@@ -139,27 +139,62 @@ python serve.py --mode decide --port 30001
 ```
 
 ```bash
-curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
-  "request": {
-    "state": {"ticket": "Order #W1 arrived broken. I want my money back.", "order": {"status": "delivered", "total": 42.0}},
-    "questions": {
-      "intent":  {"type": "choice", "instructions": "What does the customer want?",
-                  "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
-      "urgent":  {"type": "noul", "instructions": "Should this jump the queue?"},
-      "anger":   {"type": "score", "instructions": "How upset is the customer?", "criteria": ["calm", "annoyed", "angry"]}}},
-  "reasoning": false}'
-# -> {"answers": {"intent": {"type": "choice", "choice": "refund", "confidence": 0.9794,
-#                             "probabilities": {"refund": 0.9863, "exchange": 0.011, "info": 0.0027}},
+curl -s localhost:30001/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "zoro-1",
+  "state": {"ticket": "Order #W1 arrived broken. I want my money back.", "order": {"status": "delivered", "total": 42.0}},
+  "questions": {
+    "intent":  {"type": "choice", "instructions": "What does the customer want?",
+                "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
+    "urgent":  {"type": "noul", "instructions": "Should this jump the queue?"},
+    "anger":   {"type": "score", "instructions": "How upset is the customer?", "criteria": ["calm", "annoyed", "angry"]}}}'
+# -> {"model": "zoro-1",
+#     "answers": {"intent": {"type": "choice", "choice": "refund", "confidence": 0.9794,
+#                            "probabilities": {"refund": 0.9863, "exchange": 0.011, "info": 0.0027}},
 #                 "urgent": {"type": "noul", "noul": 0.9256},
-#                 "anger":  {"type": "score", "score": 1.6872, "legend": ["calm", "annoyed", "angry"], ...}}, ...}
+#                 "anger":  {"type": "score", "score": 1.6872, "legend": {"0": "calm", "1": "annoyed", "2": "angry"}, ...}},
+#     "usage": {"input_tokens": ..., "output_tokens": 0}, "timing_ms": ...}
 ```
 
+- **The API:** `POST /v1/systemone` takes and returns TypeSafe's System One API (0.2.0) shapes, so System One clients, such as the TypeSafe SDK and WorkflowEvals' `typesafe` provider, work
+  against this server.
+  - `model` is required, as in System One; any name is accepted and the response names the served model.
+  - `usage.input_tokens` counts the decision-row tokens scored and `usage.output_tokens` the reasoning generated.
+  - Validation errors return 422 with System One's `{"detail": [{"loc", "msg", "type"}]}` body.
+  - Our extensions: `images` (one image: base64, a data URL, or `{"url": ...}`), `reasoning`,
+    `max_reasoning_tokens` and `temperature`; the response then also carries the reasoning and timing fields.
+    Both servers check them the same way, and a bad value is a 422: `reasoning` is `true` / `false` (MLX also
+    takes `"auto"`), `max_reasoning_tokens` an integer from 1 to the configured cap (at most 8192), `temperature` a finite number above 0.
+    `null` means unset.
+  - `POST /v1/decide`, the earlier `{"request": {...}, "reasoning", "temperature"}` envelope, still answers, with a
+    `Deprecation` header, and goes away in the next release. Its score `legend` is a list and it has no `model`.
+  - Not System One's: `GET /v1/models` keeps the OpenAI shape that `chat.py` and `eval.py` read.
 - **Question types:**
   - `noul`: yes/no; the answer is P(yes).
   - `choice`: `{key: description}`.
   - `score`: a list of levels, lowest first; the answer is the expected level.
 - **`"reasoning": true`:** the model first writes its reasoning (returned as `reasoning`), then decides with that reasoning added to the state.
-- **Images:** add an `image` (path, base64 or data URL) to the request.
+  `max_reasoning_tokens` defaults to the configured cap (4,096 by default) and must be between 1 and the server's
+  `--reasoning-token-limit` (default 4,096; configurable up to 8,192). The prompt
+  plus this budget must fit the configured context; invalid budgets return HTTP 422 on `/v1/systemone` (400 on the deprecated alias).
+  Responses include `reasoning_stats.finish_reason`. Both CUDA and MLX use this contract:
+  - `answers_source: "reasoned"` means the decision used reasoning. If only the
+    conclusion fits the state budget, `reasoning_trimmed: true` reports that trimming;
+    the full generated text is still returned as `reasoning`.
+  - `cut: "length"` (generation budget), `"empty"` (empty completed text), or
+    `"state_limit"` (no room for reasoning) means `answers` holds **direct answers**.
+    Every unfinished pass, including aborts or missing completion metadata, uses
+    `cut: "length"`; `reasoning_stats.finish_reason` preserves the actual reason.
+    `answers_source` is `"direct"`. MLX also retains its `direct` result object.
+    `cut: "state_limit"` also sets `reasoning_trimmed: true`: none of the generated
+    reasoning fits, so the returned direct answers use no reasoning.
+    Clients must check these fields before treating the answers as reasoned.
+  WorkflowEvals rejects every `cut` and any `reasoning_trimmed` response in reasoning mode.
+  CUDA's decision encoding defaults to `--decision-max-state 7552` and
+  `--decision-max-row 8192`. Experimental longer inputs can opt into larger limits,
+  with `1 <= state <= row - 640` and `row <= --context-length`. The 640-token
+  gap reserves question space; longer questions may need a wider gap. Reasoning
+  fitting reserves the longest question's actual encoded length, including delimiters. Existing defaults and strict completion checks are unchanged.
+- **Images:** add `"images": [...]` with one base64 string or data URL. Requests never name server files.
 - **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
   - It takes `tools`; tool calls come back as `tool_calls`.
   - The thinking comes back as `reasoning_content` (streamed as `reasoning_content` deltas before the content).

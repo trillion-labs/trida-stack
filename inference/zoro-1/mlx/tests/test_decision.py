@@ -202,10 +202,10 @@ def test_http_decisions(checkpoint):
     )
     base = f"http://127.0.0.1:{port}/v1"
 
-    def post(body):
+    def post(body, route="decide"):
         return urllib.request.urlopen(
             urllib.request.Request(
-                f"{base}/decide",
+                f"{base}/{route}",
                 data=json.dumps(body).encode(),
                 headers={"Content-Type": "application/json"},
             ),
@@ -225,7 +225,21 @@ def test_http_decisions(checkpoint):
         else:
             pytest.fail("MLX server did not start")
         expected = decision.Decider(Engine(str(checkpoint), prefill_chunk=7)).decide(REQ)["answers"]
-        assert json.load(post({"request": REQ}))["answers"] == expected
+        with post({"request": REQ}) as response:
+            assert json.load(response)["answers"] == expected
+            assert response.headers["Deprecation"] == "true"
+        one = json.load(post({**REQ, "model": "zoro-1"}, "systemone"))
+        assert one["answers"] == decide_request.systemone_response({"answers": expected}, "")["answers"]
+        assert one["answers"]["severity"]["legend"] == {"0": "low", "1": "medium", "2": "high"}
+        assert one["usage"]["input_tokens"] > 0
+        assert one["usage"]["output_tokens"] == 0 and one["model"]
+        for body in ({"state": REQ["state"], "questions": REQ["questions"]},
+                     {**REQ, "model": "m", "images": ["/etc/hosts"]},
+                     {**REQ, "model": "m", "reasoning": False, "max_reasoning_tokens": 4097},
+                     {**REQ, "model": "m", "reasoning": True, "max_reasoning_tokens": 4097}):
+            with pytest.raises(urllib.error.HTTPError) as err:
+                post(body, "systemone")
+            assert err.value.code == 422 and json.load(err.value)["detail"][0]["loc"] == ["body"]
         image = "data:image/png;base64," + base64.b64encode(tiny_vl.png(2)).decode()
         assert "answers" in json.load(post({"request": {**REQ, "image": image}}))
         assert "reasoning" in json.load(
@@ -291,3 +305,13 @@ def test_comparison_detects_contract_and_probability_drift():
     assert differences({"p": 0.5}, {"p": float("nan")}, 0.002)
     assert differences({"choice": "a"}, {"choice": "b"}, 1.0)
     assert differences({"p": 0.5}, {"other": 0.5}, 1.0)
+
+
+def test_load_head_prefers_decision_head_name(tmp_path):
+    torch = pytest.importorskip("torch")
+    for name, dp in (("jev_head.pt", 8), ("decision_head.pt", 16)):
+        head = {"q.weight": torch.zeros(dp, 4), "q.bias": torch.zeros(dp), "k.weight": torch.zeros(dp, 4), "k.bias": torch.zeros(dp)}
+        torch.save({"head": head, "head_dim": dp}, tmp_path / name)
+    assert decision.load_head(tmp_path, 4).w["q.weight"].shape[0] == 16   # decision_head.pt wins
+    (tmp_path / "decision_head.pt").unlink()
+    assert decision.load_head(tmp_path, 4).w["q.weight"].shape[0] == 8    # jev_head.pt still loads

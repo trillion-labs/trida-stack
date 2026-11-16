@@ -48,7 +48,7 @@ def save_hf(model, args, tag):
         model.tokenizer.save_pretrained(out)
         if getattr(model, "image_processor", None) is not None:
             model.image_processor.save_pretrained(out)  # preprocessor_config.json for VL checkpoints
-        if getattr(model, "decision_head", None) is not None:   # the decision pointer head (export: train/tools/export_kev_checkpoint.py)
+        if getattr(model, "decision_head", None) is not None:   # the decision pointer head (export: train/tools/export_decision_checkpoint.py)
             torch.save({"head": {k[len("jev_head."):]: v for k, v in sd.items() if k.startswith("jev_head.")},
                         "head_dim": model.decision_head.q.out_features}, os.path.join(out, "jev_head.pt"))
         with open(os.path.join(out, "block_diffusion.json"), "w") as f:

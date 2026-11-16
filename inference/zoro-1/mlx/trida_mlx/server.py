@@ -4,8 +4,9 @@
     curl localhost:8080/v1/chat/completions -d '{"messages":[{"role":"user","content":"hi"}]}'
 
 Endpoints: GET /v1/models, GET /health, GET /stats, POST /v1/chat/completions,
-POST /v1/completions, POST /v1/decide (typed decisions through the checkpoint's pointer head,
-``jev_head.pt``, with optional reasoning first; see decision.py). Chat supports ``tools`` (rendered by the model's chat template,
+POST /v1/completions, POST /v1/systemone (typed decisions through the checkpoint's pointer head,
+``decision_head.pt`` or ``jev_head.pt``, with optional reasoning first, in TypeSafe's System One API shape; see decision.py and
+decide_request.systemone_request), and POST /v1/decide (its deprecated alias, removed in the next release). Chat supports ``tools`` (rendered by the model's chat template,
 parsed from ``<tool_call>`` blocks into OpenAI ``tool_calls``), ``stream``, reasoning split
 (``message.reasoning_content``), ``stop``, ``seed`` and per-request
 ``chat_template_kwargs`` (e.g. ``{"enable_thinking": false}``). Extra body field
@@ -26,13 +27,14 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .decision import Decider
-from .decide_request import RequestError as DecisionError, parse as parse_decision
+from .decide_request import (RequestError as DecisionError, parse as parse_decision, systemone_request,
+                             systemone_response)
 from .decode import DecodeStats, SamplingParams
 from .engine import Engine, IncrementalDetokenizer
 from .parsing import StreamSplitter, parse_tool_calls, split_reasoning, to_openai_tool_calls
 
 ENGINE: Engine = None  # set in main()
-DECIDER: Optional[Decider] = None  # set when the checkpoint has a pointer head (jev_head.pt)
+DECIDER: Optional[Decider] = None  # set when the checkpoint has a pointer head (decision_head.pt or jev_head.pt)
 DEFAULTS: dict = {}
 
 
@@ -166,6 +168,10 @@ class ContextOverflow(Exception):
 
 class BadRequest(Exception):
     pass
+
+
+class SystemOneInvalid(Exception):
+    """A /v1/systemone request System One would refuse: 422 with its {"detail": [...]} body."""
 
 
 class _StopMatcher:
@@ -311,7 +317,8 @@ class _Worker(threading.Thread):
             DECIDER = Decider.load(ENGINE, DEFAULTS.get("decision_text_temperature"),
                                    DEFAULTS.get("decision_image_temperature"),
                                    context_length=DEFAULTS["context_length"],
-                                   cache_mb=DEFAULTS.get("decision_cache_mb", 1024))
+                                   cache_mb=DEFAULTS.get("decision_cache_mb", 1024),
+                                   reasoning_token_limit=DEFAULTS.get("reasoning_token_limit", 4096))
         except BaseException as e:  # noqa: BLE001
             self.error = e
             self.ready.set()
@@ -340,11 +347,13 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("[trida-mlx] " + (fmt % args) + "\n")
 
     # -- helpers ----------------------------------------------------------------
-    def _json(self, code: int, obj: dict):
+    def _json(self, code: int, obj: dict, headers: Optional[dict] = None):
         data = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(data)
@@ -421,11 +430,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if route in ("/v1/chat/completions", "/chat/completions"):
                 return self._chat(body)
+            if route in ("/v1/systemone", "/systemone"):
+                return self._systemone(body)
             if route in ("/v1/decide", "/decide"):
                 return self._decide(body)
             if route in ("/v1/completions", "/completions"):
                 return self._completion(body)
             return self._json(404, {"error": {"message": f"no route {self.path}"}})
+        except SystemOneInvalid as e:
+            return self._json(422, {"detail": [{"loc": ["body"], "msg": str(e), "type": "value_error"}]})
         except BadRequest as e:
             return self._json(400, {"error": {"message": str(e), "type": "invalid_request_error"}})
         except ContextOverflow as e:
@@ -583,33 +596,55 @@ class Handler(BaseHTTPRequestHandler):
                        "choices": [], "usage": self._usage(stats)})
         self._sse("[DONE]")
 
-    def _decide(self, body: dict):
-        """The SGLang envelope plus optional auto reasoning and SSE progress."""
+    def _systemone(self, body: dict):
+        """System One's {"state", "model", "questions"} body; the extensions are /v1/decide's options."""
         if DECIDER is None:
-            raise BadRequest("this checkpoint has no decision head (jev_head.pt or jev_head.safetensors)")
+            raise SystemOneInvalid("this checkpoint has no decision head (decision_head.pt / .safetensors, or jev_head.pt / .safetensors)")
+        try:
+            request, opts = systemone_request(body, extensions=("threshold", "trida_mode", "stream"),
+                                              auto_reasoning=True,
+                                              reasoning_token_limit=getattr(DECIDER, "reasoning_token_limit", 4096))
+            parse_decision(request)
+        except DecisionError as error:
+            raise SystemOneInvalid(str(error)) from error
+        return self._run_decision(request, opts, invalid=SystemOneInvalid,
+                                  wrap=lambda result: systemone_response(result, DEFAULTS["served_name"]))
+
+    def _decide(self, body: dict):
+        """Deprecated: the SGLang envelope plus optional auto reasoning and SSE progress (use /v1/systemone)."""
+        if DECIDER is None:
+            raise BadRequest("this checkpoint has no decision head (decision_head.pt / .safetensors, or jev_head.pt / .safetensors)")
         if not isinstance(body, dict) or "request" not in body:
             raise BadRequest('body must be {"request": {...}, "reasoning"?: bool | "auto"}')
-        if not isinstance(body.get("stream", False), bool):
-            raise BadRequest("stream must be a boolean")
         try:
             parse_decision(body["request"])
         except DecisionError as error:
             raise BadRequest(str(error)) from error
-        kw = dict(reasoning=body.get("reasoning", False), threshold=body.get("threshold", 0.7),
-                  max_reasoning_tokens=body.get("max_reasoning_tokens"),
-                  temperature=body.get("temperature"), mode=body.get("trida_mode"))
-        job = _FnJob(lambda emit: DECIDER.decide(body["request"], on_event=emit, **kw))
+        return self._run_decision(body["request"], body, invalid=BadRequest,
+                                  headers={"Deprecation": "true", "Link": '</v1/systemone>; rel="successor-version"'})
+
+    def _run_decision(self, request: dict, opts: dict, invalid=BadRequest, wrap=None, headers=None):
+        if not isinstance(opts.get("stream", False), bool):
+            raise invalid("stream must be a boolean")
+        wrap = wrap or (lambda result: result)
+        kw = dict(reasoning=opts.get("reasoning", False), threshold=opts.get("threshold", 0.7),
+                  max_reasoning_tokens=opts.get("max_reasoning_tokens"),
+                  temperature=opts.get("temperature"), mode=opts.get("trida_mode"))
+        job = _FnJob(lambda emit: DECIDER.decide(request, on_event=emit, **kw))
         WORKER.submit(job)
-        if not body.get("stream"):
+        if not opts.get("stream"):
             while True:
                 kind, *val = job.out.get()
                 if kind == "error":
+                    if isinstance(val[0], (BadRequest, DecisionError)):   # _FnJob turns them into BadRequest
+                        raise invalid(str(val[0])) from val[0]
                     raise val[0]
                 if kind == "done":
+                    response = wrap(val[0])
                     if getattr(self, "_log_record", None) is not None:
-                        self._log_record["response"] = val[0]
+                        self._log_record["response"] = response
                         self._write_log()
-                    return self._json(200, val[0])
+                    return self._json(200, response, headers)
         self._sse_start()
         try:
             while True:
@@ -626,7 +661,7 @@ class Handler(BaseHTTPRequestHandler):
                 if ev == "piece":
                     self._sse({"type": "reasoning", "text": payload})
                 else:
-                    self._sse({"type": ev, **payload})
+                    self._sse({"type": ev, **(wrap(payload) if ev == "result" else payload)})
             self._sse("[DONE]")
         except BaseException:
             job.cancelled = True
@@ -724,6 +759,8 @@ def main(argv=None):
                     help="conversations whose prompt cache is kept (main loop + side requests)")
     ap.add_argument("--no-think", action="store_true", help="default enable_thinking=false")
     ap.add_argument("--no-fused-gdn", action="store_true")
+    ap.add_argument("--reasoning-token-limit", type=int, default=4096,
+                    help="maximum decision reasoning budget (1-8192; default: 4096)")
     ap.add_argument("--decision-cache-mb", type=float, default=1024,
                     help="decision state cache budget in MiB; 0 disables cross-request reuse")
     ap.add_argument("--decision-text-temperature", type=float, default=None,
@@ -744,7 +781,7 @@ def main(argv=None):
     DEFAULTS.update(temperature=a.temperature, top_k=a.top_k, top_p=a.top_p, max_tokens=a.max_tokens,
                     enable_thinking=not a.no_think, context_length=a.context_length,
                     served_name=a.served_model_name, log_requests=a.log_requests,
-                    decision_cache_mb=a.decision_cache_mb,
+                    decision_cache_mb=a.decision_cache_mb, reasoning_token_limit=a.reasoning_token_limit,
                     decision_text_temperature=a.decision_text_temperature,
                     decision_image_temperature=a.decision_image_temperature,
                     tool_call_gate=a.tool_call_gate, loop_guard=a.loop_guard,
@@ -759,7 +796,7 @@ def main(argv=None):
         raise WORKER.error
     print(f"[trida-mlx] ready in {ENGINE.load_s:.1f}s  mode={a.mode} N={ENGINE.n} mask_id={ENGINE.mask_id} "
           f"eos={sorted(ENGINE.eos_ids)} ctx={a.context_length} vision={ENGINE.supports_vision} "
-          f"decision={'yes (T text %.2f, image %.2f)' % (DECIDER.temps['text'], DECIDER.temps['image']) if DECIDER else 'no (no jev_head.pt)'} "
+          f"decision={'yes (T text %.2f, image %.2f)' % (DECIDER.temps['text'], DECIDER.temps['image']) if DECIDER else 'no (no decision head file)'} "
           f"model={a.served_model_name!r}  ->  "
           f"http://{a.host}:{a.port}/v1", flush=True)
     srv = ThreadingHTTPServer((a.host, a.port), Handler)

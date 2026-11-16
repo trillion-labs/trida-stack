@@ -9,12 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `export_kev_checkpoint.py` is renamed `export_decision_checkpoint.py`, in both places it lives
+  (`scripts/` and `train/tools/`); the arguments and output (kev's checkpoint layout) are unchanged.
+- Released checkpoints name the decision head `decision_head.pt` (Zoro-1 on the Hub ships it under that name).
+  Every reader (`serve_decide.py` / `decide_engine.py`, both export scripts, training's head init, the MLX
+  loader, download filter and converter) prefers `decision_head.pt` and falls back to `jev_head.pt`, which
+  training still writes, so existing checkpoints load unchanged. Zoro-1 Chat's *Decision head → Download*
+  fetches `decision_head.pt`. The MLX converter still writes `jev_head.safetensors`, so folders it converts
+  keep loading in older MLX builds. Older `serve_decide.py`, MLX builds and Zoro-1 Chat apps do not look for
+  `decision_head.pt` and lose `/v1/systemone` on the renamed Zoro-1; update them.
 - MLX server: `tool_choice: "none"` now keeps the tool schemas in the prompt and bans `<tool_call>`
   (before, the tools were dropped from the prompt), so clients sending it (evals, Hermes) get a different
   prompt than earlier baselines.
 
 ### Added
 
+- `benchmark/workflow_evals/`: [TypeSafe WorkflowEvals](https://github.com/typesafe-ai/WorkflowEvals),
+  pinned and patched at setup with a `trida` provider, runs the four business workflows against
+  `/v1/systemone`, directly or with reasoning, and rejects every cut or trimmed reasoning response.
+  Code and dataset revisions are pinned. The invoice dataset is Apache-2.0; the other three state no
+  licence and run only locally behind `--allow-unverified-datasets` (maintainer exception,
+  [intake 0011](docs/oss/intake/0011-workflowevals.md)); no dataset content is committed. CI runs the
+  adapter and setup tests offline with a read-only token.
+
+- `POST /v1/systemone` on the SGLang decision server (`serve_decide.py`) and the MLX server: typed
+  decisions in TypeSafe's System One API 0.2.0 shape (`{"state", "model", "questions"}` ->
+  `{"model", "answers", "usage"}`, score `legend` as `{"0": level, ...}`, 422 validation errors), so
+  System One clients such as the TypeSafe SDK work unchanged. `images`, `reasoning`,
+  `max_reasoning_tokens` and `temperature` are extensions (#92),
+  checked the same way on both servers (a bad value is a 422).
+- System One reasoning: `POST /v1/systemone` (and its deprecated `/v1/decide` alias) with `"reasoning": true` (CUDA `inference/zoro-1/serve_decide.py`
+  and the MLX server): `max_reasoning_tokens` (default: the configured cap, 4,096) must be between 1 and the server's
+  `--reasoning-token-limit` (default 4,096, at most 8,192) and fit the context with the prompt, or the
+  request gets HTTP 422 (400 on the deprecated alias). Responses add `reasoning_stats` and `answers_source`. Reasoning that does not
+  finish (`cut: "length"`, with the actual reason in `reasoning_stats.finish_reason`), that finishes empty (`"empty"`), or that
+  has no room in the state (`"state_limit"`) returns the **direct** answers with `answers_source: "direct"` instead of
+  deciding on partial reasoning; reasoning too long for the state keeps its end and reports
+  `reasoning_trimmed`. Clients that treated every reasoning response as reasoned must check these
+  fields. CUDA adds opt-in `--decision-max-state` / `--decision-max-row` limits (defaults unchanged).
+  The shared option validator uses the configured server cap, including requests with reasoning disabled.
 - `inference/gravityocr/`: serving for `trillionlabs/GravityOCR`, a GLM-OCR-based document OCR
   model, with self-speculative decoding. It runs on upstream SGLang v0.5.10 (Apache-2.0) plus a
   committed patch and the seven new files the patch needs, in a separate Python 3.12
@@ -135,10 +168,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stream answers typed questions (yes/no, pick one, score) over a state. kev's
   encoding, augmentation and loss are ported. It runs alone or interleaved with SFT,
   with `--decision_head_lr_scale`, `--decision_loss_weight` and `--decision_micro_per_step`.
-  `train/tools/export_kev_checkpoint.py` exports a checkpoint to kev's layout for
+  `train/tools/export_decision_checkpoint.py` exports a checkpoint to kev's layout for
   `kev.benchmark` / `kev.serve`.
 - `--fp32_master` (fp32 weights and AdamW state over bf16 compute; needed at small
   LRs) and `--adam_beta2`.
+
+### Deprecated
+
+- `POST /v1/decide` (the `{"request": {...}}` envelope) on both decision servers: it still answers, with a
+  `Deprecation` header and a `Link` to `/v1/systemone`, and will be removed in the next release.
 
 ### Changed
 
@@ -323,7 +361,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `inference/test_jev_golden.py` checks the rows against golden fixtures from the
   training encoder (provenance in `inference/fixtures/jev_golden/PROVENANCE.md`).
   Derived from kev (Apache-2.0); attributed in `NOTICE` and `COMPLIANCE.md` §1.
-- `scripts/export_kev_checkpoint.py` — exports a checkpoint to kev's layout. The
+- `scripts/export_decision_checkpoint.py` — exports a checkpoint to kev's layout. The
   Trida2.1-4B model card points here for scoring and serving with kev's tools.
 
 - `inference/mlx/`: on-device (Apple Silicon, MLX) serving of Trida2.0-4B with lossless

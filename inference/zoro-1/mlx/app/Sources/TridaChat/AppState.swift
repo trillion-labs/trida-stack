@@ -1000,22 +1000,22 @@ final class AppState: ObservableObject {
     /// Whether the selected model folder has the decision head the server loads.
     var modelHasDecisionHead: Bool {
         guard let m = selectedModel else { return false }
-        return ["jev_head.pt", "jev_head.safetensors"].contains {
+        return ["decision_head.pt", "decision_head.safetensors", "jev_head.pt", "jev_head.safetensors"].contains {
             FileManager.default.fileExists(atPath: m.url.appendingPathComponent($0).path)
         }
     }
 
-    /// Fetches jev_head.pt from trillionlabs/Zoro-1 into the selected model folder (checkpoints converted
+    /// Fetches decision_head.pt from trillionlabs/Zoro-1 into the selected model folder (checkpoints converted
     /// before the decision support did not carry it), then restarts the server so it loads the head.
     func downloadDecisionHead() {
         guard !headDownloading, let model = selectedModel else { return }
         headDownloading = true
-        headMessage = "Downloading jev_head.pt from trillionlabs/Zoro-1…"
+        headMessage = "Downloading decision_head.pt from trillionlabs/Zoro-1…"
         let rt = runtime
         let runner = CommandRunner()
         Task {
             defer { headDownloading = false }
-            let (exe, args) = rt.downloadFile(repo: "trillionlabs/Zoro-1", file: "jev_head.pt", to: model.url)
+            let (exe, args) = rt.downloadFile(repo: "trillionlabs/Zoro-1", file: "decision_head.pt", to: model.url)
             headLog = ""
             let code = (try? await runner.run(exe, args, cwd: rt.workingDirectory, extraEnv: rt.environment,
                                               onOutput: { t in Task { @MainActor in self.headLog += t } })) ?? -1

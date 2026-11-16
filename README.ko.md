@@ -36,7 +36,7 @@
 
 | 모델 | 설명 | 서빙 방법 |
 |---|---|---|
-| [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) | Qwen3.5-4B 기반의 4B 투스트림 블록 디퓨전 모델입니다. 에이전트 작업과 **의사결정 작업**을 함께 학습했습니다(`jev_head.pt` 포인터 헤드). 접근이 제한된 모델이므로 접근 권한을 요청한 뒤 `hf auth login`으로 인증해야 합니다. | [`inference/zoro-1/`](inference/zoro-1/): `--mode self-spec`(기본) / `causal` / `decide` |
+| [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) | Qwen3.5-4B 기반의 4B 투스트림 블록 디퓨전 모델입니다. 에이전트 작업과 **의사결정 작업**을 함께 학습했습니다(`decision_head.pt` 포인터 헤드). 접근이 제한된 모델이므로 접근 권한을 요청한 뒤 `hf auth login`으로 인증해야 합니다. | [`inference/zoro-1/`](inference/zoro-1/): `--mode self-spec`(기본) / `causal` / `decide` |
 | [![Zoro](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro-yellow)](https://huggingface.co/trillionlabs/Zoro) | Qwen3.5-4B 기반의 4B 블록 디퓨전 모델로, 하이브리드 어텐션을 사용합니다(이전 이름 `Trida2.0-4B`). 자기회귀 생성 기능을 유지해 무손실 self-speculative 디코딩을 지원합니다. Apache-2.0 라이선스로 배포됩니다. | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) (Apple Silicon), [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) |
 
 [`benchmark/`](benchmark/)의 에이전트 평가 도구는 아직 이전 모델인
@@ -130,7 +130,7 @@ Fast-dLLM v2 방식의 블록 디퓨전 SFT를 사용합니다. 각 학습 시�
 추가합니다(`train/data/decision.py` / `train/models/decision.py`). 노이즈가 없는 인과적 스트림에 연결된 작은 **포인터 헤드**가 각 선택지의 `</opt>` 상태를
 질문의 `<decide>` 상태와 비교해 점수를 계산합니다. 각 옵티마이저 스텝에서는 일반 SFT 마이크로배치를 처리한 뒤
 `--decision_micro_per_step`개의 의사결정 마이크로배치를 처리하고, 해당 손실에 `--decision_loss_weight`를 곱해 더합니다.
-각 체크포인트에는 `jev_head.pt`가 함께 저장됩니다. `train/tools/export_kev_checkpoint.py`를 사용하면 kev 디렉터리 구조로 내보낼 수 있습니다.
+각 체크포인트에는 `jev_head.pt`가 함께 저장됩니다. `train/tools/export_decision_checkpoint.py`를 사용하면 kev 디렉터리 구조로 내보낼 수 있습니다.
 자세한 내용: [`train/README.md`](train/README.md#typed-decision-training-decisionpy).
 
 ### 이미지 입력 (비전-언어 체크포인트)
@@ -195,21 +195,22 @@ Self-speculative 디코딩은 동일한 샘플링 설정에서 **무손실**로 
 ### 의사결정 서빙 (`--mode decide`)
 
 `--mode decide`는 **기본 SGLang 배포판**(≥ 0.5.22)에서 `serve_decide.py`를 실행합니다. 별도의 포크나 패치가 필요하지 않습니다.
-단일 엔진과 동일한 모델 가중치로 `POST /v1/decide`를 통한 유형별 의사결정, 추론 후 의사결정(`"reasoning": true`),
-도구 호출이 가능한 OpenAI 호환 채팅을 모두 지원합니다.
+단일 엔진과 동일한 모델 가중치로 `POST /v1/systemone`(TypeSafe의 System One API)을 통한 유형별 의사결정,
+추론 후 의사결정(`"reasoning": true`), 도구 호출이 가능한 OpenAI 호환 채팅을 모두 지원합니다.
 
 ```bash
-curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
-  "request": {
-    "state": {"ticket": "Order #W1 arrived broken. I want my money back."},
-    "questions": {
-      "intent": {"type": "choice", "instructions": "What does the customer want?",
-                 "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
-      "urgent": {"type": "noul", "instructions": "Should this jump the queue?"}}},
-  "reasoning": false}'
-# -> {"answers": {"intent": {"type": "choice", "choice": "refund", "probabilities": {...}},
-#                 "urgent": {"type": "noul", "noul": 0.93}}, ...}
+curl -s localhost:30001/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "zoro-1",
+  "state": {"ticket": "Order #W1 arrived broken. I want my money back."},
+  "questions": {
+    "intent": {"type": "choice", "instructions": "What does the customer want?",
+               "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
+    "urgent": {"type": "noul", "instructions": "Should this jump the queue?"}}}'
+# -> {"model": "...", "answers": {"intent": {"type": "choice", "choice": "refund", "probabilities": {...}},
+#                                 "urgent": {"type": "noul", "noul": 0.93}},
+#     "usage": {"input_tokens": ..., "output_tokens": 0}, ...}
 ```
+기존 `{"request": {...}}` 형식의 `POST /v1/decide`도 계속 동작하지만 더 이상 권장하지 않으며, 다음 릴리스에서 제거됩니다.
 자세한 내용: [`inference/zoro-1/README.md#decisions`](inference/zoro-1/README.md#decisions).
 
 ### 백엔드
@@ -245,7 +246,7 @@ inference/                     nano-inference: 모델별로 구성된 간결한 
     MODEL_CONTRACT.md          서빙 코드가 요구하는 체크포인트 규격
     serve.py                   서버 실행 (--mode causal | self-spec | decide)
     serve_decide.py, decide_*.py, jev*.py
-                               기본 SGLang 배포판에서 실행하는 의사결정 서버 (/v1/decide)
+                               기본 SGLang 배포판에서 실행하는 의사결정 서버 (/v1/systemone)
     chat.py                    OpenAI 호환 클라이언트
     eval.py / eval_ifeval.py   gsm8k / mmlu_pro / ifeval 품질·처리량 평가
     ifeval_lib/                저장소에 포함된 IFEval 채점 코드

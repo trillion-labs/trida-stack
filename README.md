@@ -36,7 +36,7 @@ Checkpoints trained with this repo, on Hugging Face:
 
 | model | what it is | serve it with |
 |---|---|---|
-| [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) | 4B two-stream block-diffusion model (Qwen3.5-4B), jointly trained as an agent model **and** a decision model (`jev_head.pt` pointer head). Gated: request access, then `hf auth login`. | [`inference/zoro-1/`](inference/zoro-1/): `--mode self-spec` (default) / `causal` / `decide` |
+| [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) | 4B two-stream block-diffusion model (Qwen3.5-4B), jointly trained as an agent model **and** a decision model (`decision_head.pt` pointer head). Gated: request access, then `hf auth login`. | [`inference/zoro-1/`](inference/zoro-1/): `--mode self-spec` (default) / `causal` / `decide` |
 | [![Zoro](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro-yellow)](https://huggingface.co/trillionlabs/Zoro) | 4B block-diffusion model (Qwen3.5-4B, hybrid attention), formerly `Trida2.0-4B`, with a causal head for lossless self-speculative decoding. Apache-2.0. | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) (Apple Silicon), [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) |
 
 The agentic benchmark harnesses in [`benchmark/`](benchmark/) still default to the legacy
@@ -136,7 +136,7 @@ optional image) and typed *questions*, it returns calibrated probabilities inste
 scheme (`train/data/decision.py` / `train/models/decision.py`): a small **pointer head** on the clean causal stream scores each option's
 `</opt>` state against the question's `<decide>` state. Each optimizer step runs the usual SFT
 micro-batches, then `--decision_micro_per_step` decision micro-batches whose loss is added with weight
-`--decision_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_kev_checkpoint.py`
+`--decision_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_decision_checkpoint.py`
 exports kev's layout. Details: [`train/README.md`](train/README.md#typed-decision-training-decisionpy).
 
 ### Images (vision-language checkpoints)
@@ -198,20 +198,22 @@ for chat, decisions, benchmarks and the model contract.
 
 ### Decisions (`--mode decide`)
 `--mode decide` runs `serve_decide.py` on **stock SGLang ≥ 0.5.22** (no fork or patch): typed
-decisions at `POST /v1/decide`, reason-then-decide (`"reasoning": true`), and OpenAI chat with tool
-calls, from one engine and one copy of the weights.
+decisions at `POST /v1/systemone` (TypeSafe's System One API), reason-then-decide
+(`"reasoning": true`), and OpenAI chat with tool calls, from one engine and one copy of the weights.
 ```bash
-curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
-  "request": {
-    "state": {"ticket": "Order #W1 arrived broken. I want my money back."},
-    "questions": {
-      "intent": {"type": "choice", "instructions": "What does the customer want?",
-                 "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
-      "urgent": {"type": "noul", "instructions": "Should this jump the queue?"}}},
-  "reasoning": false}'
-# -> {"answers": {"intent": {"type": "choice", "choice": "refund", "probabilities": {...}},
-#                 "urgent": {"type": "noul", "noul": 0.93}}, ...}
+curl -s localhost:30001/v1/systemone -H 'content-type: application/json' -d '{
+  "model": "zoro-1",
+  "state": {"ticket": "Order #W1 arrived broken. I want my money back."},
+  "questions": {
+    "intent": {"type": "choice", "instructions": "What does the customer want?",
+               "criteria": {"refund": "money back", "exchange": "a replacement", "info": "just information"}},
+    "urgent": {"type": "noul", "instructions": "Should this jump the queue?"}}}'
+# -> {"model": "...", "answers": {"intent": {"type": "choice", "choice": "refund", "probabilities": {...}},
+#                                 "urgent": {"type": "noul", "noul": 0.93}},
+#     "usage": {"input_tokens": ..., "output_tokens": 0}, ...}
 ```
+`POST /v1/decide`, the earlier `{"request": {...}}` envelope, still works but is deprecated and goes
+away in the next release.
 See [`inference/zoro-1/README.md#decisions`](inference/zoro-1/README.md#decisions).
 
 ### Backends
@@ -235,7 +237,7 @@ train/                   AR -> diffusion SFT trainer    (entry: train.py -> trai
   distributed.py             distributed setup and FSDP sharding
   optimizer.py, checkpoint.py optimizer updates, saving and resume
   train.py                   training helpers and main()
-  tools/                     export_kev_checkpoint.py, compose_vl_checkpoint.py, parity/FSDP checks
+  tools/                     export_decision_checkpoint.py, compose_vl_checkpoint.py, parity/FSDP checks
   getting_started.ipynb      training tutorial
   block_gated_delta_rule/    fetch recipe for the block-causal gated-delta Triton kernels
                              (PolyForm-NC upstream, NOT vendored -- run fetch_kernels.sh first)
@@ -245,7 +247,7 @@ inference/               nano-inference: one small serving stack per model
     getting_started.ipynb      serving tutorial
     MODEL_CONTRACT.md          what the serving code expects from the checkpoint
     serve.py                   --mode causal | self-spec | decide; launches the server
-    serve_decide.py, decide_*.py, jev*.py   typed-decision server (/v1/decide) on stock SGLang
+    serve_decide.py, decide_*.py, jev*.py   typed-decision server (/v1/systemone) on stock SGLang
     chat.py                    OpenAI-compatible client
     eval.py / eval_ifeval.py   gsm8k / mmlu_pro / ifeval quality + throughput
     ifeval_lib/                vendored IFEval scorers
