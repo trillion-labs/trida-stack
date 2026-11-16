@@ -25,7 +25,9 @@
 #   EVAL_HOME           install directory (default $HOME/.gravityocr-eval)
 #   SKIP_SGLANG=1       skip step 5 (scoring only, or VBIN comes from elsewhere)
 #   SKIP_TEXLIVE=1      skip step 4 and use the pdflatex on PATH (it must be TeX Live 2022.06 or newer)
-#   TL_REPO             TeX Live package repository (default https://mirror.ctan.org/systems/texlive/tlnet)
+#   TL_REPO             TeX Live package repository (default https://mirror.ctan.org/systems/texlive/tlnet, which
+#                       picks a nearby mirror; a failed install is retried there, then on TL_FALLBACK)
+#   TL_FALLBACK         mirrors tried after TL_REPO, space-separated (default: JAIST, Japan, then RIT, US)
 #   CUDA_HOME, PY       passed to the SGLang setup (defaults there: /usr/local/cuda-12.8, Python 3.12)
 set -euo pipefail
 
@@ -37,7 +39,7 @@ SCORE_PACKAGES="datasets==5.2.0 sacrebleu==2.6.0 pymupdf==1.28.2"
 for kv in "$@"; do
   case "$kv" in
     -h|--help) sed -n '/^# One-time /,/^set -euo pipefail$/{/^set /d;s/^# \{0,1\}//;p;}' "$0"; exit 0 ;;
-    EVAL_HOME=*|SKIP_SGLANG=*|SKIP_TEXLIVE=*|TL_REPO=*|CUDA_HOME=*|PY=*) export "${kv?}" ;;
+    EVAL_HOME=*|SKIP_SGLANG=*|SKIP_TEXLIVE=*|TL_REPO=*|TL_FALLBACK=*|CUDA_HOME=*|PY=*) export "${kv?}" ;;
     *) echo "setup.sh: unknown argument: $kv" >&2; exit 2 ;;
   esac
 done
@@ -48,6 +50,7 @@ die() { echo "setup.sh: $*" >&2; exit 1; }
 log() { echo "[setup] $*"; }
 EVAL_HOME=${EVAL_HOME:-$HOME/.gravityocr-eval}
 TL_REPO=${TL_REPO:-https://mirror.ctan.org/systems/texlive/tlnet}
+TL_FALLBACK=${TL_FALLBACK:-https://ftp.jaist.ac.jp/pub/CTAN/systems/texlive/tlnet https://mirrors.rit.edu/CTAN/systems/texlive/tlnet}
 mkdir -p "$EVAL_HOME"
 EVAL_HOME=$(cd "$EVAL_HOME" && pwd)
 log "EVAL_HOME=$EVAL_HOME"
@@ -89,19 +92,21 @@ else
   TEXBIN=$(ls -d "$TL"/bin/*/ 2>/dev/null | head -1 || true)
   if [ -z "$TEXBIN" ] || [ ! -x "$TEXBIN/pdflatex" ]; then
     log "installing TeX Live (scheme-basic) into $TL from $TL_REPO; this takes a few minutes"
-    work=$(mktemp -d)
-    # mirror.ctan.org redirects each request to a random mirror, and some have broken TLS: retry until one
-    # works, then use that same mirror for the installer and tlmgr.
-    for _ in 1 2 3 4 5 6; do
-      if url=$(curl -fsSL -o "$work/install-tl.tar.gz" -w '%{url_effective}' "$TL_REPO/install-tl-unx.tar.gz"); then
-        TL_REPO=${url%/install-tl-unx.tar.gz}; break
-      fi
-      rm -f "$work/install-tl.tar.gz"
-    done
-    [ -s "$work/install-tl.tar.gz" ] || die "could not download install-tl from $TL_REPO (set TL_REPO to a mirror)"
-    log "TeX Live mirror: $TL_REPO"
-    tar xzf "$work/install-tl.tar.gz" -C "$work" --strip-components=1
-    cat > "$work/eval.profile" <<EOF
+    # mirror.ctan.org redirects each request to a random nearby mirror, and some are broken: bad TLS, or the
+    # installer but not every package (from Korea, mirror.kakao.com has no archive/texlive-scripts.tar.xz). So
+    # each try runs the whole install on one mirror, and a failed try moves on: TL_REPO (three times if it is
+    # the redirector, a new mirror each time), then TL_FALLBACK. The mirror that worked is then used for tlmgr too.
+    ok=
+    tries="$TL_REPO"
+    case "$TL_REPO" in *//mirror.ctan.org/*) tries="$TL_REPO $TL_REPO $TL_REPO" ;; esac
+    # shellcheck disable=SC2086
+    for repo in $tries $TL_FALLBACK; do
+      work=$(mktemp -d)
+      if url=$(curl -fsSL -o "$work/install-tl.tar.gz" -w '%{url_effective}' "$repo/install-tl-unx.tar.gz"); then
+        mirror=${url%/install-tl-unx.tar.gz}
+        log "TeX Live mirror: $mirror"
+        tar xzf "$work/install-tl.tar.gz" -C "$work" --strip-components=1
+        cat > "$work/eval.profile" <<EOF
 selected_scheme scheme-basic
 TEXDIR $TL
 TEXMFLOCAL $TL/texmf-local
@@ -115,19 +120,31 @@ tlpdbopt_install_docfiles 0
 tlpdbopt_install_srcfiles 0
 tlpdbopt_autobackup 0
 EOF
-    perl "$work/install-tl" --no-interaction --profile "$work/eval.profile" --repository "$TL_REPO" > "$EVAL_HOME/texlive-install.log" 2>&1 \
-      || { tail -20 "$EVAL_HOME/texlive-install.log" >&2; die "TeX Live install failed (log: $EVAL_HOME/texlive-install.log)"; }
-    rm -rf "$work"
+        rm -rf "$TL"  # what a failed try left behind
+        # From $work: on failure install-tl writes install-tl.log into its working directory
+        if (cd "$work" && perl ./install-tl --no-interaction --profile eval.profile --repository "$mirror") \
+             > "$EVAL_HOME/texlive-install.log" 2>&1; then
+          TL_REPO=$mirror; ok=1; rm -rf "$work"; break
+        fi
+        log "install-tl failed from $mirror; trying another mirror (log: $EVAL_HOME/texlive-install.log)"
+      fi
+      rm -rf "$work"
+    done
+    [ -n "$ok" ] || { tail -20 "$EVAL_HOME/texlive-install.log" >&2 2>/dev/null || true
+      die "TeX Live install failed from every mirror tried; set TL_REPO to a working mirror, e.g. TL_REPO=https://ftp.jaist.ac.jp/pub/CTAN/systems/texlive/tlnet (log: $EVAL_HOME/texlive-install.log)"; }
     TEXBIN=$(ls -d "$TL"/bin/*/ | head -1)
   fi
   TEXBIN=${TEXBIN%/}
   log "installing TeX packages: $TEX_PACKAGES"
+  # TL_REPO (twice: the redirector may pick another mirror), then TL_FALLBACK
+  ok=
   # shellcheck disable=SC2086
-  for try in 1 2 3; do
-    if "$TEXBIN/tlmgr" --repository "$TL_REPO" install $TEX_PACKAGES > "$EVAL_HOME/tlmgr.log" 2>&1; then break; fi
-    [ "$try" = 3 ] && { tail -20 "$EVAL_HOME/tlmgr.log" >&2; die "tlmgr install failed (log: $EVAL_HOME/tlmgr.log)"; }
-    log "tlmgr failed (try $try); retrying"
+  for repo in "$TL_REPO" "$TL_REPO" $TL_FALLBACK; do
+    if "$TEXBIN/tlmgr" --repository "$repo" install $TEX_PACKAGES > "$EVAL_HOME/tlmgr.log" 2>&1; then ok=1; break; fi
+    log "tlmgr failed from $repo; trying another mirror"
   done
+  [ -n "$ok" ] || { tail -20 "$EVAL_HOME/tlmgr.log" >&2
+    die "tlmgr install failed from every mirror tried; set TL_REPO to a working mirror (log: $EVAL_HOME/tlmgr.log)"; }
 fi
 
 # ── 5. patched SGLang ────────────────────────────────────────────────────────────────────────────

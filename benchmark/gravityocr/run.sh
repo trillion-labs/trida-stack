@@ -20,6 +20,8 @@
 #   MODEL          checkpoint dir or Hub id (required unless ENDPOINT is set)
 #   DATASET        Hub dataset id or datasets.save_to_disk directory (default trillionlabs/gravityocr-dev, the
 #                  dev split of docr-ko-eval-v2; it is private: log in with `hf auth login` or set HF_TOKEN)
+#   DATASET_REVISION  Hub revision of DATASET (default: the pinned 447ce14 for trillionlabs/gravityocr-dev, the
+#                  revision the README's reference numbers use; otherwise the latest; "main" for the latest)
 #   OUT            output directory (default runs/<model>-<mode>-<YYYYmmdd-HHMMSS>)
 #   MODE           self-spec (default) | causal
 #   CONCURRENCY    concurrency levels, space-separated (default 128)
@@ -37,7 +39,10 @@
 #   OMNIDOCBENCH   OmniDocBench checkout (default $OMNIDOCBENCH_ROOT)
 #   SCORE_WORKERS  scoring processes (default: number of CPUs)
 #   SERVE_TIMEOUT  seconds to wait for the server to come up (default 900)
-#   Other serve.sh settings (GPU, MEMFRAC, CUDA_HOME, SKIP_PREFLIGHT, HF_HOME, ...) pass through.
+#   ALLOW_ERRORS=1 score even when requests failed (by default the run stops: a failed request would score 0)
+#   API_KEY        sent as the bearer key; serve.sh requires it from clients when it is set
+#   GPU            device for serve.sh (default: the first of CUDA_VISIBLE_DEVICES if set, e.g. by Slurm, else 0)
+#   Other serve.sh settings (MEMFRAC, CUDA_HOME, SKIP_PREFLIGHT, HF_HOME, ...) pass through.
 #
 # CDM renders formulas with pdflatex: setup.sh installs TeX Live 2022.06 or newer (xcolor 2.14, for \mathcolor;
 # with Ubuntu 22.04's apt TeX Live every formula scores 0). `magick` is used if it is on PATH, otherwise run.sh
@@ -66,6 +71,9 @@ EVAL_HOME=${EVAL_HOME:-$HOME/.gravityocr-eval}
 [ ! -f "$EVAL_HOME/env.sh" ] || . "$EVAL_HOME/env.sh"
 
 DATASET=${DATASET:-trillionlabs/gravityocr-dev}
+DEFAULT_DATASET_REVISION=447ce144d6d13d087b5cb819312581cc2affad5c  # trillionlabs/gravityocr-dev, 2026-11-13
+[ "$DATASET" != trillionlabs/gravityocr-dev ] || DATASET_REVISION=${DATASET_REVISION:-$DEFAULT_DATASET_REVISION}
+DATASET_REVISION=${DATASET_REVISION:-}
 [ -n "${ENDPOINT:-}" ] || : "${MODEL:?set MODEL to a checkpoint dir or Hub id (or ENDPOINT to a running server)}"
 MODE=${MODE:-self-spec}
 CONCURRENCY=${CONCURRENCY:-128}
@@ -78,6 +86,9 @@ SCORE_WORKERS=${SCORE_WORKERS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu)}
 SERVE_TIMEOUT=${SERVE_TIMEOUT:-900}
 SCORE_PY=${SCORE_PY:-$HERE/score.py}
 SERVE_SH=${SERVE_SH:-$REPO/inference/gravityocr/serve.sh}
+ALLOW_ERRORS=${ALLOW_ERRORS:-0}
+# Inside a scheduler allocation (Slurm sets CUDA_VISIBLE_DEVICES), serve on the assigned GPU, not physical GPU 0
+if [ -z "${GPU:-}" ] && [ -n "${CUDA_VISIBLE_DEVICES:-}" ]; then export GPU=${CUDA_VISIBLE_DEVICES%%,*}; fi
 case "$MODE" in self-spec|causal) ;; *) die "MODE must be self-spec or causal" ;; esac
 NAME=$(basename "${MODEL:-endpoint}")
 OUT=${OUT:-runs/$NAME-$MODE-$(date +%Y%m%d-%H%M%S)}
@@ -89,19 +100,19 @@ if [ "$SCORE_LEVELS" != none ]; then
 fi
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
-log "out=$OUT model=${MODEL:-$ENDPOINT} mode=$MODE concurrency=[$CONCURRENCY] dataset=$DATASET"
+log "out=$OUT model=${MODEL:-$ENDPOINT} mode=$MODE concurrency=[$CONCURRENCY] dataset=$DATASET${DATASET_REVISION:+@${DATASET_REVISION:0:7}}"
 
 # ---- 1. export: Hub or save_to_disk -> data.jsonl + images/<id>.png + splits.json (the layout score.py reads) -------
 t0=$(now)
-"$PYTHON" - "$DATASET" "$OUT/data" <<'PY'
+"$PYTHON" - "$DATASET" "$OUT/data" "$DATASET_REVISION" <<'PY'
 import io, json, sys
 from pathlib import Path
 import datasets
 from PIL import Image
-src, out = sys.argv[1], Path(sys.argv[2])
+src, out, rev = sys.argv[1], Path(sys.argv[2]), sys.argv[3] or None
 (out / "images").mkdir(parents=True, exist_ok=True)
 # A local save_to_disk directory, else a Hub dataset id (a private one needs `hf auth login` or HF_TOKEN)
-dd = datasets.load_from_disk(src) if Path(src).is_dir() else datasets.load_dataset(src)
+dd = datasets.load_from_disk(src) if Path(src).is_dir() else datasets.load_dataset(src, revision=rev)
 if isinstance(dd, datasets.Dataset):  # one unsplit Dataset: score it whole
     dd = {"all": dd}
 rows, split_of = [], {}
@@ -135,9 +146,14 @@ SRV=
 stop_server() {
   [ -n "$SRV" ] || return 0
   log "stopping the server"
-  kill -TERM -- "-$SRV" 2>/dev/null || true
-  for _ in $(seq 30); do kill -0 -- "-$SRV" 2>/dev/null || break; sleep 1; done
-  kill -KILL -- "-$SRV" 2>/dev/null || true
+  # stderr off for the whole stop: bash reports a killed job ("line N: PID Killed ...") whenever it notices, and
+  # SGLang's own shutdown kills its group, so that line would show on every normal run.
+  {
+    kill -TERM -- "-$SRV" || true
+    for _ in $(seq 30); do kill -0 -- "-$SRV" || break; sleep 1; done
+    kill -KILL -- "-$SRV" || true
+    wait "$SRV" || true
+  } 2>/dev/null
   SRV=
 }
 trap stop_server EXIT
@@ -165,14 +181,16 @@ else
 fi
 
 # ---- 3. predict: warm-up, then one measured pass per concurrency level -------------------------------------------
+# shellcheck disable=SC2086  # CONCURRENCY is a space-separated list: one argument per level
 "$PYTHON" - "$OUT" "$ENDPOINT" "$SCORE_PY" "$WARMUP" $CONCURRENCY <<'PY'
-import base64, importlib.util, json, statistics as st, sys, time, urllib.request
+import base64, importlib.util, json, os, statistics as st, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 out, endpoint, score_py, warmup = sys.argv[1], sys.argv[2].rstrip("/"), sys.argv[3], sys.argv[4] == "1"
 levels = [int(x) for x in sys.argv[5:]]
 spec = importlib.util.spec_from_file_location("score", score_py)
 score = importlib.util.module_from_spec(spec); spec.loader.exec_module(score)
 recs = [json.loads(l) for l in open(f"{out}/data/data.jsonl", encoding="utf-8")]
+KEY = os.environ.get("API_KEY") or "x"  # serve.sh checks it only when API_KEY is set
 imgs = {r["id"]: base64.b64encode(open(f"{out}/data/images/{r['id']}.png", "rb").read()).decode() for r in recs}
 
 def one(r):
@@ -181,7 +199,7 @@ def one(r):
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{imgs[r['id']]}"}},
                 {"type": "text", "text": r["prompt"]}]}]}
     req = urllib.request.Request(f"{endpoint}/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "Authorization": "Bearer x"})
+                                 headers={"Content-Type": "application/json", "Authorization": f"Bearer {KEY}"})
     t = time.time()
     try:
         with urllib.request.urlopen(req, timeout=600) as resp:
@@ -224,6 +242,18 @@ json.dump(summary, open(f"{out}/sweep.json", "w"), indent=1)
 PY
 t_pred=$(now)
 stop_server
+
+# A failed request has pred "" and would score 0: a lower Overall that looks real. Stop unless ALLOW_ERRORS=1.
+errs=$("$PYTHON" -c 'import json, sys; print(" ".join("c=%s:%s" % (l["concurrency"], l["errors"]) for l in json.load(open(sys.argv[1]))["levels"] if l["errors"]))' "$OUT/sweep.json")
+if [ -n "$errs" ]; then
+  first=$(grep -h -m1 -o '"error": "[^"]*' "$OUT"/preds_c*.jsonl | head -1 | sed 's/.*"error": "//' || true)
+  if [ "$ALLOW_ERRORS" = 1 ] || [ "$SCORE_LEVELS" = none ]; then
+    log "warning: failed requests ($errs), e.g. $first. They count as empty predictions."
+  else
+    die "failed requests ($errs), e.g. $first. They would score 0, so the run stops before scoring.
+  A 401 means the server wants API_KEY. Otherwise see $OUT/serve.log. ALLOW_ERRORS=1 scores anyway."
+  fi
+fi
 
 # ---- 4. score ----------------------------------------------------------------------------------------------------
 t_score0=$(now)

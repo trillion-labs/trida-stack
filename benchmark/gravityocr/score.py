@@ -18,8 +18,9 @@ checkout given by --omnidocbench (or $OMNIDOCBENCH_ROOT):
            Edit_dist   on OmniDocBench `normalized_formula`.
   Overall  = mean of (1 - text Edit_dist[sample avg]), table TEDS, formula CDM   (OmniDocBench v1.5 style), x100
 
-CDM needs pdflatex (+ CJK for Hangul \\text{}), Ghostscript and ImageMagick's `magick` (IM6's `convert`
-works through a one-line `magick` shim on PATH), and node.
+CDM needs pdflatex from TeX Live 2022.06 or newer (xcolor 2.14 for \\mathcolor; CJK for Hangul \\text{}) and a
+`magick` on PATH to render its PDFs to PNG: ImageMagick's, or the PyMuPDF stand-in run.sh writes. setup.sh installs
+both TeX Live and the PyMuPDF venv; Ghostscript and node are not needed.
 
 Usage
   python score.py --data data --endpoint http://localhost:30500/v1 --model gravityocr --out runs/spec
@@ -126,7 +127,7 @@ def predict(rec, data_dir, endpoint, model, timeout):
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
                 {"type": "text", "text": rec["prompt"]}]}]}
     req = urllib.request.Request(f"{endpoint.rstrip('/')}/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json", "Authorization": "Bearer x"})
+                                 headers={"Content-Type": "application/json", "Authorization": f"Bearer {os.environ.get('API_KEY') or 'x'}"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         out = json.load(r)
     return out["choices"][0]["message"]["content"] or ""
