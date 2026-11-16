@@ -83,3 +83,6 @@ dist/
 
 # inference/zoro-1/mlx/filesearch/eval.py output
 filesearch_results/
+
+# Pinned WorkflowEvals checkout, environment, data and run outputs
+/benchmark/workflow_evals/.upstream/

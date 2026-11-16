@@ -317,7 +317,8 @@ class _Worker(threading.Thread):
             DECIDER = Decider.load(ENGINE, DEFAULTS.get("decision_text_temperature"),
                                    DEFAULTS.get("decision_image_temperature"),
                                    context_length=DEFAULTS["context_length"],
-                                   cache_mb=DEFAULTS.get("decision_cache_mb", 1024))
+                                   cache_mb=DEFAULTS.get("decision_cache_mb", 1024),
+                                   reasoning_token_limit=DEFAULTS.get("reasoning_token_limit", 4096))
         except BaseException as e:  # noqa: BLE001
             self.error = e
             self.ready.set()
@@ -601,7 +602,8 @@ class Handler(BaseHTTPRequestHandler):
             raise SystemOneInvalid("this checkpoint has no decision head (jev_head.pt or jev_head.safetensors)")
         try:
             request, opts = systemone_request(body, extensions=("threshold", "trida_mode", "stream"),
-                                              auto_reasoning=True)   # checks the values before any streaming
+                                              auto_reasoning=True,
+                                              reasoning_token_limit=getattr(DECIDER, "reasoning_token_limit", 4096))
             parse_decision(request)
         except DecisionError as error:
             raise SystemOneInvalid(str(error)) from error
@@ -757,6 +759,8 @@ def main(argv=None):
                     help="conversations whose prompt cache is kept (main loop + side requests)")
     ap.add_argument("--no-think", action="store_true", help="default enable_thinking=false")
     ap.add_argument("--no-fused-gdn", action="store_true")
+    ap.add_argument("--reasoning-token-limit", type=int, default=4096,
+                    help="maximum decision reasoning budget (1-8192; default: 4096)")
     ap.add_argument("--decision-cache-mb", type=float, default=1024,
                     help="decision state cache budget in MiB; 0 disables cross-request reuse")
     ap.add_argument("--decision-text-temperature", type=float, default=None,
@@ -777,7 +781,7 @@ def main(argv=None):
     DEFAULTS.update(temperature=a.temperature, top_k=a.top_k, top_p=a.top_p, max_tokens=a.max_tokens,
                     enable_thinking=not a.no_think, context_length=a.context_length,
                     served_name=a.served_model_name, log_requests=a.log_requests,
-                    decision_cache_mb=a.decision_cache_mb,
+                    decision_cache_mb=a.decision_cache_mb, reasoning_token_limit=a.reasoning_token_limit,
                     decision_text_temperature=a.decision_text_temperature,
                     decision_image_temperature=a.decision_image_temperature,
                     tool_call_gate=a.tool_call_gate, loop_guard=a.loop_guard,

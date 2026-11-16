@@ -173,10 +173,11 @@ def create_app(engine):
         def invalid(msg):
             return HTTPException(422, [{"loc": ["body"], "msg": msg, "type": "value_error"}])
         try:
-            request, opts = systemone_request(body)   # also checks the extension values (systemone_options)
+            request, opts = systemone_request(
+                body, reasoning_token_limit=getattr(engine, "reasoning_token_limit", 4096))
             # the image, if any, is in the request (base64 or a data URL): requests never name server files
             result = await engine.adecide(request, None, opts.get("temperature"), opts.get("reasoning", False),
-                                          max_reasoning_tokens=opts.get("max_reasoning_tokens", 768))
+                                          max_reasoning_tokens=opts.get("max_reasoning_tokens"))
         except RequestError as e:
             raise invalid(str(e)) from e
         return systemone_response(result, name)
@@ -186,10 +187,12 @@ def create_app(engine):
         response.headers["Deprecation"] = "true"
         response.headers["Link"] = '</v1/systemone>; rel="successor-version"'
         if "request" not in body:
-            raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float}")
+            raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float, \"max_reasoning_tokens\"?: int (within server reasoning-token-limit; default server cap)}")
         try:
-            # the image, if any, is in the request (base64 or a data URL): requests never name server files
-            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")))
+            budget = _num(body, "max_reasoning_tokens", None, int)
+            # Images use the shared request contract; server file paths are not accepted.
+            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
+                                        max_reasoning_tokens=budget)
         except RequestError as e:
             raise HTTPException(400, str(e)) from e
 
@@ -259,13 +262,21 @@ def main():
     ap.add_argument("--port", type=int, default=30001)
     ap.add_argument("--mem-fraction", type=float, default=0.8)
     ap.add_argument("--context-length", type=int, default=16384)
+    ap.add_argument("--decision-max-state", type=int, default=7552,
+                    help="state token limit including delimiters; default 7552")
+    ap.add_argument("--decision-max-row", type=int, default=8192,
+                    help="complete decision-row token limit; default 8192")
+    ap.add_argument("--reasoning-token-limit", type=int, default=4096,
+                    help="maximum requested reasoning budget, up to 8192; default 4096")
     a = ap.parse_args()
     if not a.model:
         ap.error("give a decision checkpoint (positional) or set TRIDA_DECIDE_MODEL")
     import uvicorn
 
     from decide_engine import DecideEngine
-    engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length)
+    engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length,
+                          decision_max_state=a.decision_max_state, decision_max_row=a.decision_max_row,
+                          reasoning_token_limit=a.reasoning_token_limit)
     # The HTTP server runs on the engine's own event loop, so concurrent requests batch in the engine.
     server = uvicorn.Server(uvicorn.Config(create_app(engine), host=a.host, port=a.port, loop="none"))
     engine.loop.run_until_complete(server.serve())
