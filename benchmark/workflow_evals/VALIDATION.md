@@ -182,5 +182,32 @@ MLX now enforces the configured reasoning cap (default 4,096, opt-in up to 8,192
 including auto mode. Local verification: 191 CPU tests passed (2 skipped), 20
 adapter/setup tests and 55 MLX decision/server tests passed (1 skipped), plus Ruff.
 Benchmark inputs, reference answers, and strict completion checks are unchanged.
-License-exception approval and the disposition of Luke's seven #83 commits remain
-maintainer decisions; this change does not grant approval or supersede that work.
+License-exception approval and the disposition of Luke's seven #83 commits were
+maintainer decisions at the time; both are settled in the next section.
+
+## Maintainer review (2026-11-16)
+
+**Licence exception approved.** Luke Kim (@usik-luke-trl, maintainer) approved local
+evaluation of the three datasets without a stated licence (customer service, security
+incidents, agent-trace observability) behind `--allow-unverified-datasets`. Scope: the
+pinned revisions are downloaded to the user's own cache only when the flag is passed;
+nothing is committed, bundled or redistributed; their licence stays recorded as
+unverified (미확인). Re-check when upstream states a licence, or by 2027-05-16. The
+record is in [intake 0011](../../docs/oss/intake/0011-workflowevals.md) and both
+registers.
+
+**The seven #83 commits, compared with this branch:**
+
+| #83 commit | What it fixed | Here |
+|---|---|---|
+| `dd5e515` | an aborted reasoning pass was decided on as if it had finished | ported in `7696ad6`: any finish other than `stop` is a cut with direct answers |
+| `11c73c4` | long reasoning lost its conclusion to the encoder's state cut | covered by `fit_reasoning` in the shared request contract (keeps the end, reports `reasoning_trimmed`) |
+| `1abe57f` | CI token write-capable and persisted while setup runs third-party code | ported in `12763e6` (`permissions: contents: read`, `persist-credentials: false`) |
+| `f0c884f` | `run.sh` arguments could override the pinned dataset revision and model | covered: `run.sh` refuses `--dataset-revision` and requires `--model trida:…` |
+| `a6a3869` | empty reasoning reported as a misleading "did not complete: stop" | covered: `cut: "empty"` and the adapter's message |
+| `fb41554` | the reasoning budget was validated even without reasoning | covered: only the reasoning pass checks the budget |
+| `3165c47` | no CHANGELOG / COMPLIANCE entries | ported in `5fd236b`, rewritten for the current contract |
+
+Checks after these commits: 555 CPU tests passed (69 skipped) on Python 3.10 with CPU
+torch as in CI; 20 adapter/setup tests passed from a fresh clone; Ruff, shellcheck and
+pre-commit on all files pass. No GPU inference was rerun.

@@ -376,8 +376,10 @@ def _reasoning_engine(finish="stop", context_length=16384, text="Check it."):
 
             async def chunks():
                 yield {"text": text, "meta_info": {}}
-                yield {"text": text + "</think>" if finish == "stop" else text,
-                       "meta_info": {"finish_reason": {"type": finish}, "completion_tokens": 3}}
+                meta = {"completion_tokens": 3}
+                if finish is not None:   # None: the last chunk reports no finish at all
+                    meta["finish_reason"] = {"type": finish}
+                yield {"text": text + "</think>" if finish == "stop" else text, "meta_info": meta}
             return chunks()
 
     engine = object.__new__(DecideEngine)
@@ -394,7 +396,7 @@ def _reasoning_engine(finish="stop", context_length=16384, text="Check it."):
     return engine
 
 
-@pytest.mark.parametrize("finish", ["stop", "length", "abort"])
+@pytest.mark.parametrize("finish", ["stop", "length", "abort", None])
 def test_decide_exposes_real_reasoning_finish_status(finish):
     from fastapi.testclient import TestClient
     from serve_decide import create_app
@@ -405,9 +407,10 @@ def test_decide_exposes_real_reasoning_finish_status(finish):
     assert response.status_code == 200
     body = response.json()
     assert body["reasoning"] == "Check it."
-    assert body["reasoning_stats"]["finish_reason"] == finish
+    reported = finish or "unknown"   # no finish reported counts as unfinished too
+    assert body["reasoning_stats"]["finish_reason"] == reported
     if finish != "stop":   # an abort leaves the reasoning as unfinished as running out of budget
-        assert body["cut"] == finish and body["answers_source"] == "direct"
+        assert body["cut"] == reported and body["answers_source"] == "direct"
         assert engine.scored.rows == parse(REQ).encode(engine.tok).rows
     else:
         assert "cut" not in body and body["answers_source"] == "reasoned"

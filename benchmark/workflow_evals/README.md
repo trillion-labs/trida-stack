@@ -21,8 +21,8 @@ setup and each run reject unexpected changes to the upstream checkout.
 
 The invoice dataset is Apache-2.0. The other three have no verified license
 declaration. They require `--allow-unverified-datasets` for local evaluation. This
-opt-in is a proposal awaiting maintainer approval, not an approved license exception.
-It does not verify their licenses or authorize redistribution. Keep downloaded
+opt-in is a maintainer-approved exception for local evaluation only (2026-11-16; see the
+intake record). It does not verify their licenses or authorize redistribution. Keep downloaded
 data outside Git. See the
 [intake record](../../docs/oss/intake/0011-workflowevals.md).
 

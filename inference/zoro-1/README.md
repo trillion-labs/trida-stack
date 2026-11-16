@@ -170,7 +170,10 @@ curl -s localhost:30001/v1/decide -H 'content-type: application/json' -d '{
     `"state_limit"` (no room for reasoning) means `answers` holds **direct answers**.
     CUDA reports any other unfinished generation by its SGLang finish type, for
     example `cut: "abort"` when the reasoning pass was aborted, or `"unknown"` when
-    no finish was reported; these also mean `answers` holds **direct answers**
+    no finish was reported. MLX reports every unfinished pass, including a
+    repetition stop or a cancelled request, as `cut: "length"`; its
+    `reasoning_stats.finish_reason` names the actual reason. These also mean
+    `answers` holds **direct answers**
     and `answers_source` is `"direct"`. MLX also retains its `direct` result object.
     `cut: "state_limit"` also sets `reasoning_trimmed: true`: none of the generated
     reasoning fits, so the returned direct answers use no reasoning.

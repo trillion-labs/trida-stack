@@ -11,9 +11,9 @@ WorkflowEvals code is Apache-2.0 at [0ac3b8a](https://github.com/typesafe-ai/Wor
 | Component | Pinned revision | License evidence | Decision |
 |---|---|---|---|
 | typesafe/evalsafe-invoice-processing | `6beeb2d2acd65c086c835022f5f4d7434114cafc` | [Apache-2.0 LICENSE](https://huggingface.co/datasets/typesafe/evalsafe-invoice-processing/blob/6beeb2d2acd65c086c835022f5f4d7434114cafc/LICENSE) | Adopt |
-| typesafe/evalsafe-customer-service | `b1342f5a704587dbc465867c38c2694348ff86e4` | [No license in files/card/manifest](https://huggingface.co/datasets/typesafe/evalsafe-customer-service/tree/b1342f5a704587dbc465867c38c2694348ff86e4) | License unverified; local opt-in proposal awaiting maintainer approval |
-| typesafe/evalsafe-security-incidents | `fbe1ea5c69cf494157fd23f2002a0d9d9a418443` | [No license in files/card/manifest](https://huggingface.co/datasets/typesafe/evalsafe-security-incidents/tree/fbe1ea5c69cf494157fd23f2002a0d9d9a418443) | License unverified; local opt-in proposal awaiting maintainer approval |
-| typesafe/evalsafe-agent-trace-observability | `8635540973910a92465fe2bc53e195375aa6e1a8` | [No license in files/card/manifest](https://huggingface.co/datasets/typesafe/evalsafe-agent-trace-observability/tree/8635540973910a92465fe2bc53e195375aa6e1a8) | License unverified; local opt-in proposal awaiting maintainer approval |
+| typesafe/evalsafe-customer-service | `b1342f5a704587dbc465867c38c2694348ff86e4` | [No license in files/card/manifest](https://huggingface.co/datasets/typesafe/evalsafe-customer-service/tree/b1342f5a704587dbc465867c38c2694348ff86e4) | License unverified; local evaluation only, maintainer exception (2026-11-16) |
+| typesafe/evalsafe-security-incidents | `fbe1ea5c69cf494157fd23f2002a0d9d9a418443` | [No license in files/card/manifest](https://huggingface.co/datasets/typesafe/evalsafe-security-incidents/tree/fbe1ea5c69cf494157fd23f2002a0d9d9a418443) | License unverified; local evaluation only, maintainer exception (2026-11-16) |
+| typesafe/evalsafe-agent-trace-observability | `8635540973910a92465fe2bc53e195375aa6e1a8` | [No license in files/card/manifest](https://huggingface.co/datasets/typesafe/evalsafe-agent-trace-observability/tree/8635540973910a92465fe2bc53e195375aa6e1a8) | License unverified; local evaluation only, maintainer exception (2026-11-16) |
 
 ## Evaluation and conditions
 
