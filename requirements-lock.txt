@@ -2,7 +2,7 @@
 #
 # requirements.txt declares what we depend on; this records what that resolves to.
 # It exists because an SBOM generated from requirements.txt alone described ONE
-# package: syft can only report a version it can see, and torch==2.11.0 was the only
+# package: syft can only report a version it can see, and torch==2.13.0 was the only
 # pin. The other 15 declarations produced nothing, so the release SBOM would have told
 # consumers this project has a single Python dependency.
 #
@@ -252,7 +252,7 @@ tiktoken==0.14.0
     # via -r requirements.txt
 tokenizers==0.22.2
     # via transformers
-torch==2.11.0
+torch==2.13.0
     # via
     #   -r requirements.txt
     #   accelerate
