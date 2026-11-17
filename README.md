@@ -26,7 +26,7 @@ Two independent stacks:
 | ⚡ | **`inference/<model>/`** | **nano-inference: one small, nanoGPT-style serving stack per model.** [`inference/zoro-1/`](inference/zoro-1/) serves `trillionlabs/Zoro-1`: self-speculative generation and typed decisions from one checkpoint, OpenAI-compatible, on **SGLang**, **vLLM** or **MLX**. [`inference/gravityocr/`](inference/gravityocr/) serves `trillionlabs/GravityOCR` (document OCR, GLM-OCR based) with self-speculative decoding on upstream SGLang. |
 
 `train/` and `inference/` do not import each other. `benchmark/` holds the heavier agentic eval
-harnesses; `inference/` ships its own quick quality/throughput benchmarks (gsm8k / mmlu_pro / ifeval).
+harnesses; `inference/` ships its own quick quality/throughput benchmarks (gsm8k / mmlu_pro).
 
 ---
 
@@ -249,8 +249,7 @@ inference/               nano-inference: one small serving stack per model
     serve.py                   --mode causal | self-spec | decide; launches the server
     serve_decide.py, decide_*.py, jev*.py   typed-decision server (/v1/systemone) on stock SGLang
     chat.py                    OpenAI-compatible client
-    eval.py / eval_ifeval.py   gsm8k / mmlu_pro / ifeval quality + throughput
-    ifeval_lib/                vendored IFEval scorers
+    eval.py                    gsm8k / mmlu_pro quality + throughput
     configs/                   self-spec decode config (b15_g8)
     sglang/                    recipe for the patched SGLang backend
     vllm/                      out-of-tree vLLM plugin (self-spec)

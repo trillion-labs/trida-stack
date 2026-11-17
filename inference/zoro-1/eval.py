@@ -11,7 +11,7 @@ and, given the server's log (`--server-log`, see `serve.py --log`), tokens per f
 Every request is written to `<out>/requests.jsonl`; the totals to `<out>/summary.json`.
 Sampling defaults: temp 1.0 / top_p 0.95 / top_k 20 / no presence penalty — Zoro-1's self-spec
 setting, identical to the SGLang self-spec config (zoro1_self_spec_b15_g8.yaml) so both backends
-decode the same way; `enable_thinking` is on. IFEval lives in eval_ifeval.py.
+decode the same way; `enable_thinking` is on.
 
 Adding a task = adding one entry to TASKS below (loader, prompt, extract, gold).
 """

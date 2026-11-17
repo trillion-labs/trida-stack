@@ -75,9 +75,7 @@ line-length = 100
 # style backlog. Widen this (and enable `ruff format --check` in CI) in follow-ups.
 select = ["E9", "F63", "F7", "F82"]
 
-# Ad-hoc cluster diagnostics and sweep drivers, kept in the repo as worked examples of how the
-# measurements in the docs were produced. They are not importable library code and are not linted
+# Ad-hoc diagnostics and checkpoint tools (train/tools/). They are not importable library code and are not linted
 # to library standards.
 [tool.ruff.lint.per-file-ignores]
 "train/tools/**" = ["F821"]
-"inference/zoro-1/vllm/tools/**" = ["F821"]

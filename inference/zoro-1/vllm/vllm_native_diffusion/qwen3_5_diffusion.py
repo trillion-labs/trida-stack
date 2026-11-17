@@ -161,8 +161,7 @@ _SS_CARRY_P = float(os.environ.get("TRIDA_SS_CARRY_P", "0") or 0)
 _SIGNALS_ON = bool(os.environ.get("TRIDA_TRACE_JSONL", "")) and os.environ.get("TRIDA_SIGNALS", "0") == "1"
 # TRIDA_SS_BIDIR=1 (experiment E3): let the MASK half of the canvas attend to LATER mask slots, as it
 # does in training. The verify half stays strictly causal, so the accept test -- and therefore the
-# output -- is unchanged. See docs/E3_BIDIR_CANVAS.md; the merge is CPU-verified exact in
-# tools/experiments/bidir_merge.py.
+# output -- is unchanged. Experimental and off by default.
 _SS_BIDIR = _SELFSPEC and os.environ.get("TRIDA_SS_BIDIR", "0") == "1"
 _BIDIR: dict[str, Any] = {"on": False, "lse": None, "warned": False}
 

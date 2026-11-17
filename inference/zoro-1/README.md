@@ -112,7 +112,6 @@ python chat.py                         # interactive REPL
 python serve.py --port 30000 --log server.log &          # any mode; self-spec also logs tok/fwd + acceptance
 python eval.py gsm8k --server-log server.log              # full test set
 python eval.py mmlu_pro --num-problems 1000               # random subsample (seed 42)
-python eval_ifeval.py --port 30000                        # IFEval strict/loose
 ```
 
 ```text
@@ -125,7 +124,7 @@ gsm8k: 36/40 = 90.00%   errors=0   wall=110s
 
 From the *same* requests you get **accuracy**, **tok/s** (aggregate at the client concurrency `--max-workers`, and per request), **latency** p50/p90/mean, mean output length, and — with `--server-log` — **tokens per forward** (vLLM: from its `DiffusionDecoding` counters; SGLang self-spec: from the algorithm's stats line; SGLang causal logs no counter → `n/a`; causal is 1 by definition). Every request is written to `requests.jsonl` (prediction, gold, tokens, latency) so you can re-slice without re-running. For a per-stream latency profile use `--max-workers 1`; for aggregate throughput raise it. Keep `--max-tokens` a *budget*, not a knob: if the truncation percentage is not ~0, the number measures the budget, not the model. On the vLLM script use `LOG=server.log bash vllm/serve_diffusion.sh`.
 
-Defaults: temp 1.0 / top_p 0.95 / top_k 20, no presence penalty, thinking on, `--max-tokens 8192` — Zoro-1's self-spec sampling setting (the model card's), identical to the SGLang self-spec config. The sampling matches on either backend, but the default draft block does not yet: `serve.py` runs `b15_g8`, `vllm/serve_diffusion.sh` defaults to `SELFSPEC_N=4`, so compare tok/forward and speed across backends only at a matching block setting. Both backends honor these fields in self-spec (vLLM via its stock rejection sampler, `TRIDA_SS_SAMPLE=0` for exact greedy). `gsm8k`/`mmlu_pro` are self-contained (extraction-based); **ifeval** uses the Google Research IFEval scorer vendored in `ifeval_lib/` (Apache-2.0). `chat.py`/`eval.py` pick the served model id up from `/v1/models`, so they work unchanged against either backend.
+Defaults: temp 1.0 / top_p 0.95 / top_k 20, no presence penalty, thinking on, `--max-tokens 8192` — Zoro-1's self-spec sampling setting (the model card's), identical to the SGLang self-spec config. The sampling matches on either backend, but the default draft block does not yet: `serve.py` runs `b15_g8`, `vllm/serve_diffusion.sh` defaults to `SELFSPEC_N=4`, so compare tok/forward and speed across backends only at a matching block setting. Both backends honor these fields in self-spec (vLLM via its stock rejection sampler, `TRIDA_SS_SAMPLE=0` for exact greedy). `gsm8k`/`mmlu_pro` are self-contained (extraction-based). For IFEval and the other suites, use `benchmark/` (lm-evaluation-harness). `chat.py`/`eval.py` pick the served model id up from `/v1/models`, so they work unchanged against either backend.
 
 ## Decisions
 
@@ -264,7 +263,6 @@ Open directions:
 - prefer server-parsed `content`/`reasoning_content` in `chat.py`/`eval.py` when `--reasoning-parser` is set
 - decisions on vLLM and MLX ([#60](https://github.com/trillion-labs/trida-stack/issues/60), [#61](https://github.com/trillion-labs/trida-stack/issues/61))
 - packaging: pin the SGLang backend dependency (currently the `SGLANG_PYTHON` seam)
-- slim / refactor (e.g. compact the vendored IFEval scorer)
 
 Read [`MODEL_CONTRACT.md`](MODEL_CONTRACT.md) for what the serving code expects from the checkpoint, and the repo's [`CONTRIBUTING.md`](../../CONTRIBUTING.md) for the PR process.
 
