@@ -1,14 +1,19 @@
+# Copyright 2026 Trillion Labs
+# SPDX-License-Identifier: Apache-2.0
+# Licensed under the Apache License, Version 2.0; see the repository LICENSE.
+# This patch does not change the upstream backend's PolyForm-NC license.
+
 --- a/eval/sglang/srt/layers/logits_processor.py
 +++ b/eval/sglang/srt/layers/logits_processor.py
 @@ -327,6 +327,7 @@
  
  
  class LogitsProcessor(nn.Module):
-+    trida_decision_readout_version = 1
++    trida_decision_readout_version = 2
      def __init__(
          self,
          config,
-@@ -397,7 +398,17 @@
+@@ -397,7 +398,21 @@
  
          # Diffusion LLM only.
          if logits_metadata.forward_mode.is_dllm_extend():
@@ -18,9 +23,13 @@
 +            # The head needs normalized prompt states, not draft/verify states.
 +            if logits_metadata.capture_hidden_mode.need_capture():
 +                lengths = logits_metadata.extend_seq_lens
-+                if lengths is None or bool((lengths <= 0).any()):
-+                    raise RuntimeError("decision readout requires nonempty whole-prompt prefill")
++                if lengths is None or lengths.numel() == 0 or bool((lengths <= 0).any()):
++                    output.trida_decision_readout_error = "decision readout requires nonempty whole-prompt prefill"
++                    return output
 +                last = torch.cumsum(lengths, dim=0) - 1
++                if int(last[-1]) >= hidden_states.shape[0] or int(last[-1]) >= input_ids.shape[0]:
++                    output.trida_decision_readout_error = "decision readout prefill endpoint is out of bounds"
++                    return output
 +                output.hidden_states = hidden_states[last].detach().clone()
 +                output.trida_decision_end_ids = input_ids[last].detach().cpu().tolist()
 +            return output
@@ -29,35 +38,45 @@
          (
 --- a/eval/sglang/srt/dllm/mixin/scheduler.py
 +++ b/eval/sglang/srt/dllm/mixin/scheduler.py
-@@ -63,6 +63,27 @@
+@@ -63,6 +63,37 @@
          new_batch = self._create_dllm_batch(can_run_list, forward_mode)
          return new_batch
  
 +    def _capture_trida_decision_prefill(self, batch, result):
-+        states = result.logits_output.hidden_states
++        output = result.logits_output
++        states = output.hidden_states
 +        for i, req in enumerate(batch.reqs):
 +            if not req.return_hidden_states or req.hidden_states:
 +                continue
-+            if not getattr(result.logits_output, "trida_decision_prefill", False):
++            error = getattr(output, "trida_decision_readout_error", None)
++            if error is None and not getattr(output, "trida_decision_prefill", False):
 +                continue
-+            if states is None or states.shape[0] != len(batch.reqs):
-+                raise RuntimeError("decision readout hidden-state batch mismatch")
-+            end_ids = result.logits_output.trida_decision_end_ids
-+            lengths = result.logits_output.trida_decision_seq_lens
-+            if end_ids[i] != req.origin_input_ids[-1] or lengths[i] != len(req.origin_input_ids):
-+                raise RuntimeError("decision readout captured the wrong prompt endpoint")
-+            req.hidden_states.append(states[i:i + 1].float().cpu().tolist())
++            if error is None:
++                end_ids = getattr(output, "trida_decision_end_ids", None)
++                lengths = getattr(output, "trida_decision_seq_lens", None)
++                if states is None or states.shape[0] != len(batch.reqs):
++                    error = "decision readout hidden-state batch mismatch"
++                elif end_ids is None or lengths is None or len(end_ids) != len(batch.reqs) or len(lengths) != len(batch.reqs):
++                    error = "decision readout missing prompt endpoints"
++                elif not req.origin_input_ids or end_ids[i] != req.origin_input_ids[-1] or lengths[i] != len(req.origin_input_ids):
++                    error = "decision readout captured the wrong prompt endpoint"
++            if error is not None:
++                logger.warning("%s; aborting decision request %s", error, req.rid)
++                req.set_finish_with_abort(error)
++                continue
++            exported = states[i:i + 1].float().cpu()
 +            if os.environ.get("TRIDA_DECISION_READOUT_AUDIT") == "1":
 +                import torch
-+                exported = torch.tensor(req.hidden_states[-1], dtype=torch.float32)
-+                if not torch.equal(exported, states[i:i + 1].float().cpu()):
-+                    raise RuntimeError("decision readout export changed hidden states")
++                if not torch.equal(torch.tensor(exported.tolist(), dtype=torch.float32), exported):
++                    req.set_finish_with_abort("decision readout export changed hidden states")
++                    continue
 +                print("trida_decision_readout_verified", lengths[i], end_ids[i], flush=True)
++            req.hidden_states.append(exported.tolist())
 +
      def _process_dllm_critical_inline(
          self: Scheduler,
          batch: ScheduleBatch,
-@@ -79,6 +100,8 @@
+@@ -79,6 +110,8 @@
  
          if result.copy_done is not None:
              result.copy_done.synchronize()

@@ -618,12 +618,9 @@ def test_reasoning_budget_reserves_prompt_space():
 
     engine = _reasoning_engine(context_length=10)
     client = TestClient(create_app(engine))
-    response = client.post("/v1/decide", json={"request": REQ, "reasoning": True,
-                                              "max_reasoning_tokens": 5})
-    assert response.status_code == 200
-    assert response.json()["cut"] == "state_limit"
-    assert response.json()["answers_source"] == "direct"
-    assert response.json()["reasoning_stats"]["finish_reason"] == "context_limit"
+    response = client.post("/v1/systemone", json={"model": "zoro-1", **REQ, "reasoning": True,
+                                                 "max_reasoning_tokens": 5})
+    assert response.status_code == 422
     assert engine.engine.calls == 0
     assert client.post("/v1/decide", json={"request": REQ, "reasoning": True,
                                         "max_reasoning_tokens": 4}).status_code == 200

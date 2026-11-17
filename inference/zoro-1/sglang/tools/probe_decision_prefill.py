@@ -18,13 +18,13 @@ import torch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from decide_engine import (  # noqa: E402
-    DecideEngine, PointerHead, load_image_processor, prefix_prompts, serving_temperatures,
+    DecideEngine, PointerHead, head_file, load_image_processor, prefix_prompts, serving_temperatures,
 )
 from decide_request import parse, to_answer  # noqa: E402
 
 
 def score(checkpoint, encoded, states):
-    saved = torch.load(Path(checkpoint) / "jev_head.pt", map_location="cpu", weights_only=True)
+    saved = torch.load(Path(head_file(checkpoint)), map_location="cpu", weights_only=True)
     head = PointerHead(saved["head"]["q.weight"].shape[1], saved["head_dim"]).eval()
     head.load_state_dict(saved["head"])
     temperatures = serving_temperatures(checkpoint)
@@ -72,7 +72,7 @@ def run(args):
     result = {"mode": args.mode, "checkpoint": args.checkpoint,
               "requests_sha256": hashlib.sha256(args.requests.read_bytes()).hexdigest(),
               "prefix_layout": args.reference_layout if args.mode == "reference" else "serial",
-              "head_sha256": hashlib.sha256((Path(args.checkpoint) / "jev_head.pt").read_bytes()).hexdigest(),
+              "head_sha256": hashlib.sha256((Path(head_file(args.checkpoint))).read_bytes()).hexdigest(),
               "multimodal_enabled": bool(engine.tokenizer_manager.model_config.is_multimodal),
               "cases": []}
     captured_states = []

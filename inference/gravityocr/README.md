@@ -16,16 +16,16 @@ One layout region per request, behind an OpenAI-compatible API: a launcher, a on
 
 ---
 
-GravityOCR is [`zai-org/GLM-OCR`](https://huggingface.co/zai-org/GLM-OCR) (a CogViT vision encoder and a 0.5B GLM text decoder) fine-tuned as a block-diffusion model: the text decoder learns to fill a block of 32 masked tokens in parallel, and an AR auxiliary loss keeps its causal head. The architecture is unchanged, so the checkpoint loads as a stock `GlmOcrForConditionalGeneration`. The weights were trained outside this repo; this folder only serves them.
+GravityOCR is [`zai-org/GLM-OCR`](https://huggingface.co/zai-org/GLM-OCR) (a CogViT vision encoder and a 0.5B GLM text decoder) fine-tuned as a block-diffusion model with a single output head that decodes both ways: with bidirectional attention over a block of 32 masked tokens it fills them in parallel, and with causal attention it predicts the next token, a skill an AR auxiliary loss keeps. The architecture is unchanged, so the checkpoint loads as a stock `GlmOcrForConditionalGeneration`. The weights were trained outside this repo; this folder only serves them.
 
-Self-speculative decoding uses both heads of that one checkpoint. Each round runs two forward passes. The **draft** pass reads the boundary token followed by 32 masks, bidirectional within that window, and proposes the next block. The **verify** pass runs the causal path over the draft, accepts the longest prefix the AR head agrees with (its greedy choices; with sampling, speculative sampling against its distribution), and adds the AR head's own next token. A round commits up to K + 1 = 34 tokens (K = `DRAFT` = 33). [What self-spec reproduces](#what-self-spec-reproduces) says exactly how the result relates to causal decoding.
+Self-speculative decoding uses both modes of that one model. Each round runs two forward passes. The **draft** pass reads the boundary token followed by 32 masks, bidirectional within that window, and proposes the next block. The **verify** pass runs the causal path over the draft, accepts the longest prefix the model's AR prediction agrees with (its greedy choices; with sampling, speculative sampling against its distribution), and adds its own next AR token. A round commits up to K + 1 = 34 tokens (K = `DRAFT` = 33). [What self-spec reproduces](#what-self-spec-reproduces) says exactly how the result relates to causal decoding.
 
 | `MODE` | what it does |
 |---|---|
 | **`self-spec`** (default) | block-diffusion draft, AR verify, inside SGLang's speculative-decoding loop (`--speculative-algorithm SELFSPEC_DIFFUSION --speculative-num-draft-tokens 33 --page-size 1`) |
 | `causal` | the same weights decoded autoregressively, one token per forward pass: the reference |
 
-The model reads **one layout region per request**: a text block, a table or a formula crop. Page layout detection and page assembly are out of scope for this folder; a full page needs a layout detector in front of the server.
+The model reads **one layout region per request**: a text block, a table or a formula crop. Page layout detection and page assembly are out of scope for this folder; a full page needs a layout detector in front of the server. Section 5 of the [tutorial notebook](#tutorial-notebook) shows one: [PP-DocLayoutV3](https://huggingface.co/PaddlePaddle/PP-DocLayoutV3_safetensors) (Apache-2.0, the detector GLM-OCR and the Gravity app use) finds typed regions in reading order, and each crop goes to the server with its task prompt.
 
 This is the second nano-inference next to [`../zoro-1/`](../zoro-1/). The two do not share a backend. This one is upstream SGLang v0.5.10 plus an Apache-2.0 patch; zoro-1's SGLang backend is a different, noncommercial-licensed fork. Build each in its own environment.
 
@@ -161,9 +161,9 @@ A standard OpenAI chat completion, `POST /v1/chat/completions`, with the image f
 
 ## What self-spec reproduces
 
-Self-spec commits a token only where the AR head, with the same request settings and given the tokens committed before it, would have produced it, at the position layout described under 1. below. The draft decides how many tokens a round commits, not which ones. For every request parameter SGLang's causal decoding applies, self-spec applies the same processing at every position it verifies:
+Self-spec commits a token only where causal (AR) decoding of the same model, with the same request settings and given the tokens committed before it, would have produced it, at the position layout described under 1. below. The draft decides how many tokens a round commits, not which ones. For every request parameter SGLang's causal decoding applies, self-spec applies the same processing at every position it verifies:
 
-- **Greedy decoding** (`temperature: 0`): every committed token is the AR head's highest-scoring token given the tokens before it.
+- **Greedy decoding** (`temperature: 0`): every committed token is the model's highest-scoring AR token given the tokens before it.
 - **Sampling** (`temperature`, `top_k`, `top_p`, `min_p`): the first token of each round is drawn by SGLang's own sampler from the request's settings. Each drafted token is then accepted with the probability that AR sampling gives it, and at the first rejection the token is drawn from the AR distribution with the rejected token removed (speculative sampling against a deterministic draft). Each committed token therefore follows the AR sampling distribution for its prefix, with the filters SGLang's sampler applies, `min_p` and the joint top-k / top-p rule included. This holds with SGLang's speculative acceptance thresholds at their default of 1.0; the server refuses to start with any other value (`EXTRA_ARGS` cannot set them anyway).
 - **Penalties and token constraints** (`repetition_penalty`, `frequency_penalty`, `presence_penalty`, `min_tokens`, `logit_bias`, stop tokens and stop strings): applied at every position with that position's own prefix, tokens drafted earlier in the same round included, and every committed token is counted, as causal decoding counts it.
 - **Structured output** (`response_format` with a JSON schema, `regex`, `ebnf`): every position is masked by the grammar state after its prefix. The default grammar backend, xgrammar, and llguidance are supported; a backend without rollback is refused at startup. A token the grammar still rejects ends that request with an abort, as in causal decoding, and the server keeps running.
@@ -174,7 +174,7 @@ A batch that is greedy and uses none of these options skips all of this: it runs
 
 What still separates the two modes:
 
-1. **The position layout.** At the default `SELFSPEC_POS_OFFSET=1`, every generated token sits one RoPE position later than causal decoding puts it ([Serve](#serve)). Self-spec then commits the AR head's choices for that shifted layout, which is a slightly different computation from `MODE=causal`. `SELFSPEC_POS_OFFSET=0` removes this difference.
+1. **The position layout.** At the default `SELFSPEC_POS_OFFSET=1`, every generated token sits one RoPE position later than causal decoding puts it ([Serve](#serve)). Self-spec then commits the model's AR choices for that shifted layout, which is a slightly different computation from `MODE=causal`. `SELFSPEC_POS_OFFSET=0` removes this difference.
 2. **Floating point.** The verify pass scores K positions in one forward, with other kernels and batch shapes than causal decoding's one-token steps. Under bf16, a token whose two best candidates are within a rounding step of each other can come out differently, and the outputs diverge from that token on.
 3. **SGLang's own run-to-run behaviour.** SGLang runs without deterministic inference by default, so the same mode can resolve such a near-tie differently from one server run to the next: in two `DP=2` causal runs over the same 100 crops, one crop came out differently in one run (it stopped before a trailing `\tag`). With `repetition_penalty` together with `frequency_penalty` or `presence_penalty`, SGLang applies the penalizers in an order that differs between server processes, so two causal servers can differ as well; self-spec follows the order of its own process. And SGLang's overlap scheduler, which `MODE=causal` uses by default, counts each generated token for the penalties one step late; self-spec counts it at once, as causal decoding with `EXTRA_ARGS=--disable-overlap-schedule` does. Compare penalties against that.
 
@@ -237,6 +237,7 @@ pytest -q inference/gravityocr/      # CPU only, no downloads; also runs under `
 | `test_gravityocr_gating.py` | the patch leaves SGLang's diffusion-LLM and EAGLE draft-runner modules untouched and adds no code that depends on diffusion-LLM state; with the patched SGLang: the shared functions it changes behave exactly as v0.5.10 for every server that is not self-spec (differential tests against verbatim copies), EAGLE-family CUDA-graph capture, `--dllm-algorithm` refused together with self-spec, and nothing left of the removed `SELFSPEC_NOMASK` path |
 | `test_gravityocr_dist_init.py` | the single-node torch.distributed rendezvous: the patch's store function, run on CPU torch, listens on loopback only (both TCPStore backends, IPv4 and IPv6), serves two ranks, closes its port with the store and leaves every other init method to torch; with the patched SGLang: a single-node server rendezvouses on `127.0.0.1` whatever `--host` is, the override and `--dist-init-addr` keep their precedence, and `init_distributed_environment` with gloo (one and two ranks) runs its collectives over a loopback-only store |
 | `test_gravityocr_vit_graph.py` | the ViT graph settings parser, the replay / eager dispatch, the single caller thread, and the fallback after a failed capture (memory released after the exception is handled, eager forward kept); with the patched SGLang: the runner's copy of the encoder forward in sync with the model's, and the model keeping its eager forward after a failed capture |
+| `test_gravityocr_mac.py` | `serve_mac.py` with a stub engine: the three task prompts, the payload `ocr_request.py` sends, refusal of non-`data:` image URLs and other bad requests (400), an engine error answered with 500 while the server keeps running, refusal of a non-loopback `--host` or a missing engine, and `mac/ocr` against `mac/VENDORED.sha256` |
 
 `test_gravityocr_auth.py`, and the parts of `test_gravityocr_selfspec_cpu.py`, `test_gravityocr_gating.py`, `test_gravityocr_dist_init.py` and `test_gravityocr_vit_graph.py` that need the patched SGLang, skip without it, as in CI. To run them, use the server's Python with the checkout first on the path (otherwise `inference/gravityocr/sglang/` shadows the editable install) and pytest from a separate directory, so the server venv stays as locked:
 
@@ -255,6 +256,83 @@ MODE=causal GPU=1 PORT=30001 bash inference/gravityocr/serve.sh &   # causal on 
 "$VBIN/python" inference/gravityocr/ocr_request.py crop.png --url http://127.0.0.1:30001
 ```
 
+## Tutorial notebook
+
+[`getting_started.ipynb`](getting_started.ipynb) serves GravityOCR, reads a text, a table and a formula
+crop, and compares self-spec with causal decoding, in about 5–10 minutes after a one-time setup. It
+runs on Linux with an L40S, L40 or H100 (`serve.sh`) or on an Apple Silicon Mac (`serve_mac.py`, see
+[On a Mac](#on-a-mac)), and is driven by environment variables:
+
+| variable | default | meaning |
+|---|---|---|
+| `BACKEND` | `auto` | `sglang` (Linux) or `mac`; `auto` picks `mac` on an Apple Silicon Mac |
+| `GPU`, `CAUSAL_GPU` | `auto` | the least-loaded L40S / L40 / H100, and a second one for the causal server if there is one (else they take turns) |
+| `PAGE_LAYOUT` | `1` | `0` skips section 5 (a whole page with PP-DocLayoutV3; installs `torch` CPU, `transformers` ≥ 5.1 and OpenCV into the kernel) |
+| `COMPARE_CAUSAL` | `1` | `0` skips section 6 |
+| `SGLANG_SRC`, `VBIN` | `~/src/sglang-gravityocr` | where `sglang/setup.sh` built the server environment |
+| `GRAVITYOCR_MODEL` | `trillionlabs/GravityOCR` | Hub id or local checkpoint |
+| `MAC_PYTHON` | `mac/.venv/bin/python` | the Mac engine env built by `mac/setup.sh`, for `BACKEND=mac` |
+| `PORT`, `CAUSAL_PORT` | `30000`, `30001` | the two servers' ports |
+| `CUDA_HOME` | `$CUDA_HOME`, else `/usr/local/cuda-12.8` or `/usr/local/cuda`, whichever has `nvcc` | a CUDA 12.x toolkit |
+| `API_KEY` | as for `serve.sh` | |
+
+The first code cell checks the kernel: Python 3.10 or newer, with Pillow and matplotlib. It installs
+whichever is missing into that kernel, with uv if there is one, so any Python ≥ 3.10 kernel works,
+including an environment that has no `pip`.
+
+**On an L40S or L40.** `serve.sh` accepts only compute capability 9.0 (H100); the L40S and the L40
+are 8.9. For them the notebook runs `serve.sh`'s other startup checks itself (a CUDA 12.x `nvcc`,
+`ninja` in `VBIN`) and passes `SKIP_PREFLIGHT=1`. The patch's vision-encoder CUDA graphs need FA3, which
+is Hopper-only, so they switch themselves off; the other `FAST=1` paths run. On an L40S (Brev
+`l40s-48gb.1x`, CUDA 12.6 at `/usr/local/cuda`) the whole notebook ran in 2.7 minutes, the first server
+start took 90 s, and self-spec was 3.5–5.7× faster than causal with identical text on all four crops.
+The L40 was not tested; it has the same compute capability and memory.
+
+### With a coding agent
+
+Settings come from the environment and every server stops when the kernel exits, even after a failed
+cell, so an agent can run the notebook headless. From `inference/gravityocr/`:
+
+```bash
+uv run --no-project --python 3.12 --with jupyter --with pillow --with matplotlib \
+  jupyter nbconvert --to notebook --execute getting_started.ipynb --output-dir /tmp/gravityocr-run
+```
+
+`--no-project` keeps `uv` from installing the repository's own dependencies, and `--output-dir` keeps
+the executed copy out of the repository.
+
+- **Claude Code** (`claude`): approve the commands it asks to run. If you turned on its sandbox, let
+  this command run outside it.
+- **Codex**: start it with `codex -s danger-full-access -a on-request` (it still asks before commands
+  that need approval). Its default `workspace-write` sandbox blocks the network, including the
+  servers on `127.0.0.1`, and writes to `~/.cache`. On a Mac it also blocks the GPU: with network
+  access and `~/.cache` allowed, the Mac backend still fails with *No Metal device available* (tested
+  with Codex CLI 0.166).
+
+## On a Mac
+
+`serve_mac.py` answers the same requests as `serve.sh` on an Apple Silicon Mac, for trying the model,
+running [`getting_started.ipynb`](getting_started.ipynb) and evaluating
+([`benchmark/gravityocr`](../../benchmark/gravityocr/)) without an NVIDIA GPU. It is not a second serving
+recipe. It runs the MLX engine of the [Gravity](https://gravityocr.trillionlabs.co) app, which is in
+this folder as [`mac/ocr`](mac/VENDORED.md) (copied unchanged from Gravity 0.3.4), so the app does not
+have to be installed. `mac/setup.sh` builds its env once (about 10 s; the package versions Gravity 0.3.4
+bundles, from a hashed lock). The server downloads `trillionlabs/GravityOCR` once into
+`~/.cache/gravityocr-mac/` (pinned to a commit, SHA-256 checked):
+
+```bash
+bash inference/gravityocr/mac/setup.sh
+inference/gravityocr/mac/.venv/bin/python -I inference/gravityocr/serve_mac.py
+python3 inference/gravityocr/ocr_request.py --synthetic 'Hello GravityOCR'
+```
+
+Its numbers are not this recipe's: MLX instead of SGLang, text layers quantized to 6 bits, a 16-token
+draft block instead of 32, crops downscaled to a 1344 px long side, and Gravity's own per-task token
+limits (`max_tokens` is ignored). `--mode causal` swaps in the autoregressive decoder that ships with
+the engine. It binds loopback only and accepts `data:` image URLs only. It calls the engine's internal
+entry points; [`mac/VENDORED.md`](mac/VENDORED.md) says how to update the copy to a newer Gravity.
+`--engine /Applications/Gravity.app/Contents/Resources/project` runs an installed app's own copy instead.
+
 ## Files
 
 ```
@@ -262,6 +340,13 @@ inference/gravityocr/
   README.md, MODEL_CONTRACT.md, NOTICE
   serve.sh                   launcher: MODE=self-spec | causal, env-driven
   ocr_request.py             one-crop OpenAI-compatible client (stdlib; Pillow for --synthetic)
+  serve_mac.py               Mac option: the same API on the Gravity app's MLX engine (see below)
+  mac/
+    ocr/                       the Gravity app's MLX engine, copied unchanged (VENDORED.md, VENDORED.sha256)
+    requirements.in            the package versions Gravity 0.3.4 bundles
+    requirements-lock.txt      the same, with hashes
+    setup.sh                   builds mac/.venv for serve_mac.py; no Gravity app needed
+  getting_started.ipynb      5-10 minute tutorial; runs on an L40S / L40 / H100 or on a Mac
   test_gravityocr_*.py       CPU tests
   sglang/
     BASE_COMMIT.txt            upstream sgl-project/sglang pin (tag v0.5.10)
@@ -275,6 +360,7 @@ inference/gravityocr/
 
 - **Code.** Apache-2.0, like the rest of this repo ([`LICENSE`](../../LICENSE)). It comes from [`trillion-labs/GravityOCR`](https://github.com/trillion-labs/GravityOCR), which Trillion Labs also publishes. There, the SGLang patch and the seven new SGLang files are likewise Apache-2.0, and the launcher and client are MIT; Trillion Labs contributes them here under Apache-2.0.
 - **Upstream SGLang.** [`sgl-project/sglang`](https://github.com/sgl-project/sglang), Apache-2.0, at `1519acf37c23f2189adb93f57ca9cd2db1bebf18` (tag v0.5.10). It is not vendored: `setup.sh` fetches it. This folder carries only the patch, which modifies 22 upstream source files and `python/pyproject.toml`, and the seven new files. Five of the new files adapt SGLang code and carry SGLang's copyright notice; [`NOTICE`](NOTICE) lists them with their sources.
+- **Mac engine.** [`mac/ocr`](mac/VENDORED.md) is the Python engine of Trillion Labs' Gravity app for macOS (0.3.4), from [`trillion-labs/GravityOCR-macOS`](https://github.com/trillion-labs/GravityOCR-macOS), which Trillion Labs also publishes, without a licence file. Trillion Labs contributes it here under Apache-2.0, like the rest of this folder. The files are copied unchanged, so they carry no licence header; this bullet, [`NOTICE`](NOTICE) and `COMPLIANCE.md` §1 state their licence. Its packages (MLX and mlx-vlm, MIT; coremltools, protobuf, NumPy, SymPy and mpmath, BSD; tokenizers, Apache-2.0; Pillow, MIT-CMU; and the rest of `mac/requirements-lock.txt`) are not vendored: `mac/setup.sh` installs them from PyPI at the locked versions, which are Gravity 0.3.4's except Pillow (13.0.0 for security fixes; see `mac/requirements.in`).
 - **Weights.** [`trillionlabs/GravityOCR`](https://huggingface.co/trillionlabs/GravityOCR) is MIT-licensed and fine-tuned from [`zai-org/GLM-OCR`](https://huggingface.co/zai-org/GLM-OCR) (MIT). Neither is redistributed here; `serve.sh` downloads the checkpoint from the Hub.
 - **Design notes.** Comments in the new SGLang files mention "natcache", `src/fast_sampling.py` and `docs/SGLANG_SELFSPEC_IMPL.md`. These are the in-process reference decoder and the implementation notes in the [GravityOCR repository](https://github.com/trillion-labs/GravityOCR), which is the place to read about the design. Some of those comments also say that a path matches causal decoding; they record checks made while the patch was developed, on test sets and at a given position layout, not a guarantee for every input. [What self-spec reproduces](#what-self-spec-reproduces) states what holds. The files keep those comments so that they stay identical to GravityOCR's, and the header of `selfspec_diffusion_worker.py` points here.
 

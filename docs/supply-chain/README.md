@@ -86,7 +86,7 @@ recorded hashes additionally detect the history being rewritten under the same r
 |---|---|---|
 | Pinned-commit drift | PR, push | the recorded pin disagreeing with `fetch_kernels.sh` |
 | Action pins | PR, push | a workflow running a GitHub Action from a tag instead of a commit SHA |
-| Dependency advisories | PR, push, weekly | a finding with no unexpired exception, or no report from the GravityOCR lock scan |
+| Dependency advisories | PR, push, weekly | a finding with no unexpired exception, or no report from a GravityOCR lock scan (server or Mac) |
 | Fetch recipe | weekly | the recipe or its integrity check failing, or GravityOCR's SGLang patch no longer applying at its pinned commit |
 | Published model card | weekly | HF licence or visibility disagreeing with `COMPLIANCE.md` §4b |
 | Release SBOM | on release | invalid SBOM, or a finding with no exception |
@@ -185,7 +185,14 @@ Apache-2.0 patch.
   something real. The GravityOCR lock is scanned as pinned (`pip-audit --no-deps
   --disable-pip`), since it targets Python 3.12 and CI runs 3.10; that mode skips the
   four `+cu128` builds (torchvision, torchaudio, torchao, torchcodec), which PyPI does not
-  carry.
+  carry. The GravityOCR Mac engine env (`serve_mac.py`) has its own lock,
+  `inference/gravityocr/mac/requirements-lock.txt` (17 packages, Python 3.12 on macOS arm64,
+  installed `--no-deps`, wheels only, from PyPI only): the package versions the Gravity app 0.3.4
+  bundles, except Pillow, raised to 13.0.0 for its advisories. It is scanned the same way.
+- **GravityOCR's Mac engine env is not built in CI.** CI runners are not Apple Silicon Macs.
+  `test_gravityocr_mac.py` checks the copied engine (`mac/ocr`) against `mac/VENDORED.sha256` and
+  that it imports no torch, torchvision or transformers, but nothing in CI installs the lock or
+  runs MLX, so a change to `inference/gravityocr/mac/` needs a manual run on a Mac.
 - **GravityOCR's SGLang environment is not built in CI.** The weekly fetch-recipe job
   (`tools/verify_fetch.sh`) checks that the pinned SGLang commit resolves, that the patch
   applies and that the patched sources parse, but no job builds the environment or starts

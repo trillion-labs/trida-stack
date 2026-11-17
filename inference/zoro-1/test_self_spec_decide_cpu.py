@@ -109,6 +109,10 @@ def test_full_reasoning_context_returns_direct_over_http(reasoning, budget, over
         body["max_reasoning_tokens"] = budget
     with TestClient(create_app(e)) as client:
         response = client.post("/v1/decide", json=body)
+    if budget is not None:
+        assert response.status_code == 400, response.text
+        assert calls == ["direct"]
+        return
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["answers"] == result["direct"]["answers"] and "cut" in result
@@ -117,7 +121,7 @@ def test_full_reasoning_context_returns_direct_over_http(reasoning, budget, over
     assert result["answers_source"] == "direct" and result["usage"]["output_tokens"] == 0
 
 
-def test_explicit_reasoning_budget_that_does_not_fit_preserves_direct():
+def test_explicit_reasoning_budget_that_does_not_fit_is_rejected():
     async def run():
         e = engine()
         # Tok renders an eight-token reasoning prompt, leaving sixteen tokens.
@@ -127,8 +131,8 @@ def test_explicit_reasoning_budget_that_does_not_fit_preserves_direct():
         async def generate(*args, **kw):
             pytest.fail("explicit oversized budget must not start generation")
         e.alogits, e._generate = logits, generate
-        result = await e.adecide(REQUEST, reasoning=True, max_reasoning_tokens=32)
-        assert result["answers"] == result["direct"]["answers"] and "cut" in result
+        with pytest.raises(RequestError, match="exceeds context"):
+            await e.adecide(REQUEST, reasoning=True, max_reasoning_tokens=32)
     asyncio.run(run())
 
 
@@ -476,13 +480,13 @@ def test_selfspec_http_disconnect_cancels_and_waits_for_cleanup(monkeypatch, pat
             await asyncio.sleep(0.01)
             cleaned.append(True)
     e.adecide = decide
-    original = serve_decide._decision_while_connected
+    original = serve_decide._while_connected
     async def disconnected(work, _request):
         class Disconnected:
             async def is_disconnected(self):
                 return bool(entered)
         return await original(work, Disconnected())
-    monkeypatch.setattr(serve_decide, "_decision_while_connected", disconnected)
+    monkeypatch.setattr(serve_decide, "_while_connected", disconnected)
     from fastapi.testclient import TestClient
     wire = {"request": REQUEST} if path == "/v1/decide" else {"model": "zoro-1", **REQUEST}
     response = TestClient(serve_decide.create_app(e)).post(path, json=wire)

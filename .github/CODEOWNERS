@@ -26,3 +26,6 @@
 # GravityOCR's launcher: approved advisory exceptions rely on its EXTRA_ARGS allowlist, loopback rule
 # and admin key (docs/supply-chain/exceptions.md).
 /inference/gravityocr/serve.sh   @guks-trl @usik-luke-trl
+# The Mac engine copy, its lock and setup.sh: the same reviewers as the server env.
+/inference/gravityocr/mac/       @guks-trl @usik-luke-trl
+/inference/gravityocr/serve_mac.py  @guks-trl @usik-luke-trl

@@ -27,7 +27,10 @@ Patch — two_stream_diffusion.patch
 Optional overlay — decision_readout.patch
   Adds normalized causal-prefill hidden-state export for the experimental
   single-engine decision server. Applied after two_stream_diffusion.patch.
-  It modifies the same noncommercial backend; no model weights are included.
+  Copyright 2026 Trillion Labs. Our overlay is licensed under Apache-2.0,
+  as marked in its header (see the repository LICENSE). This does not relicense
+  HybridDiffusion: the resulting backend remains subject to PolyForm-NC.
+  No model weights are included.
 ------------------------------------------------------------------------------
 
 Because the HybridDiffusion base is distributed under the PolyForm Noncommercial

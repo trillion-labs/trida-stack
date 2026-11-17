@@ -7,6 +7,7 @@ import asyncio
 from contextlib import aclosing
 from pathlib import Path
 import uuid
+import sys
 
 import torch
 
@@ -16,6 +17,8 @@ from decide_request import MAX_STATE, MAX_BRANCH, DEFAULT_REASONING_TOKEN_LIMIT,
 
 class SelfSpecDecideEngine(DecideEngine):
     cancel_disconnected_decisions = True
+    readout_timeout = 30.0
+    backend_name = "self-spec"
 
     def __init__(self, ckpt, mem_fraction_static=0.5, context_length=16384, config=None,
                  decision_max_state=MAX_STATE, decision_max_row=MAX_BRANCH,
@@ -39,8 +42,9 @@ class SelfSpecDecideEngine(DecideEngine):
         import sglang as sgl
         from sglang.srt.layers.logits_processor import LogitsProcessor
         from serve import for_sglang
-        if getattr(LogitsProcessor, "trida_decision_readout_version", None) != 1:
-            raise RuntimeError("Apply sglang/decision_readout.patch after two_stream_diffusion.patch; rebuild the backend")
+        if getattr(LogitsProcessor, "trida_decision_readout_version", None) != 2:
+            raise RuntimeError(f"{sys.executable}: requires readout version 2. Apply sglang/decision_readout.patch "
+                               "after two_stream_diffusion.patch; rebuild the self-spec backend")
         return sgl.Engine(model_path=for_sglang(ckpt), mem_fraction_static=mem_fraction_static,
                           context_length=context_length, dllm_algorithm="HybridDiffusionSelfSpec",
                           dllm_algorithm_config=str(self.config), enable_return_hidden_states=True,
@@ -100,31 +104,49 @@ class SelfSpecDecideEngine(DecideEngine):
         if kw.get("image_data") is not None:
             raise RequestError("self-spec decision serving currently supports text only")
         self._check_generation(ids, params)
-        async with self._admission:
-            self._check_generation(ids, params)
-            rid, queue = uuid.uuid4().hex, asyncio.Queue()
+        queue = asyncio.Queue()
 
-            async def produce():
-                try:
-                    generator = await self.engine.async_generate(input_ids=ids, sampling_params=params,
-                                                                  stream=True, rid=rid, **kw)
-                    async with aclosing(generator):
-                        async for chunk in generator:
-                            queue.put_nowait(chunk)
-                finally:
-                    queue.put_nowait(None)
-
-            task = asyncio.create_task(produce())
-            seen = ""
+        async def produce():
+            # Generation owns admission; an unread HTTP response never does.
             try:
-                while (chunk := await queue.get()) is not None:
-                    text = chunk["text"]
-                    piece = text[len(seen):] if text.startswith(seen) else text
-                    seen = text if text.startswith(seen) else seen + text
-                    yield piece, chunk.get("meta_info", {})
-                task.result()
+                async with self._admission:
+                    self._check_generation(ids, params)
+                    rid = uuid.uuid4().hex
+                    async def generate():
+                        seen = ""
+                        generator = await self.engine.async_generate(input_ids=ids, sampling_params=params,
+                                                                      stream=True, rid=rid, **kw)
+                        async with aclosing(generator):
+                            async for chunk in generator:
+                                text = chunk["text"]
+                                piece = text[len(seen):] if text.startswith(seen) else text
+                                seen = text if text.startswith(seen) else seen + text
+                                queue.put_nowait((piece, chunk.get("meta_info", {})))
+                    native = asyncio.create_task(generate())
+                    try:
+                        await asyncio.shield(native)
+                    finally:
+                        await self._cleanup(native, rid)
             finally:
-                await self._cleanup(task, rid)
+                queue.put_nowait(None)
+
+        task = asyncio.create_task(produce())
+        try:
+            while (chunk := await queue.get()) is not None:
+                yield chunk
+            task.result()
+        finally:
+            if not task.done():
+                task.cancel()
+            import anyio
+            with anyio.CancelScope(shield=True):
+                while not task.done():
+                    try:
+                        await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        continue
+                if not task.cancelled():
+                    task.result()
 
     async def alogits(self, enc, image=None):
         if image is not None or enc.has_image:
@@ -141,7 +163,7 @@ class SelfSpecDecideEngine(DecideEngine):
                 task = asyncio.create_task(self.engine.async_generate(input_ids=ids, sampling_params=params,
                                                                       return_hidden_states=True, rid=rid))
                 try:
-                    out = await asyncio.shield(task)
+                    out = await asyncio.wait_for(asyncio.shield(task), self.readout_timeout)
                 finally:
                     await self._cleanup(task, rid)
                 h = torch.tensor(out["meta_info"].get("hidden_states", []), dtype=torch.float32)

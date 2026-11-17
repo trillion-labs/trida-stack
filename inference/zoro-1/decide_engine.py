@@ -8,8 +8,8 @@
     eng.chat_stream(messages)                             # the same, streamed
     await eng.adecide(...), eng.achat(...), ...           # async versions on eng.loop: concurrent calls batch
 
-A decision checkpoint is a Trida checkpoint plus `jev_head.pt`: a small pointer head that scores each option of a
-typed question against the question (MODEL_CONTRACT.md). It reads the last-layer hidden states at each option's end
+A decision checkpoint is a Trida checkpoint plus `decision_head.pt` (or `jev_head.pt`, the name training writes):
+a small pointer head that scores each option of a typed question against the question (MODEL_CONTRACT.md). It reads the last-layer hidden states at each option's end
 and at `<decide>` in a causal token row (decide_request.py).
 
 How this runs on a stock generation engine: the row is causal, so the hidden state at an option equals the last
@@ -37,7 +37,7 @@ import torch.nn as nn
 
 from decide_request import (MAX_IMAGE_PIXELS, MAX_STATE, MAX_BRANCH, VISION, RequestError,
                             DEFAULT_REASONING_TOKEN_LIMIT, finish_reasoning, image_input, parse,
-                            prompt, reasoning_budget, rows_tokens, to_answer, top_probability,
+                            prompt, reasoning_budget, reasoning_complete, rows_tokens, to_answer, top_probability,
                             validate_decision_limits)
 
 END_THINK = "</think>"
@@ -50,6 +50,15 @@ def _strip_end(text, strip=True):
     for t in ("<|im_end|>", "<|endoftext|>"):
         text = text.replace(t, "")
     return text.strip() if strip else text
+
+
+def head_file(ckpt):
+    """The checkpoint's decision head: decision_head.pt (released checkpoints, e.g. Zoro-1), or jev_head.pt (what
+    training writes, and older releases)."""
+    for name in ("decision_head.pt", "jev_head.pt"):
+        if os.path.exists(os.path.join(ckpt, name)):
+            return os.path.join(ckpt, name)
+    raise FileNotFoundError(f"{ckpt} has no decision head (decision_head.pt or jev_head.pt)")
 
 
 class PointerHead(nn.Module):
@@ -124,9 +133,12 @@ class DecideEngine:
         import sglang as sgl
         from transformers import AutoTokenizer
         self.ckpt, self.reasoning_temperature = ckpt, reasoning_temperature
+        self.context_length = context_length
+        self.decision_max_state, self.decision_max_row = decision_max_state, decision_max_row
+        self.reasoning_token_limit = reasoning_token_limit
         self.tok = AutoTokenizer.from_pretrained(ckpt)
         self.proc = load_image_processor(ckpt)
-        saved = torch.load(os.path.join(ckpt, "jev_head.pt"), map_location="cpu")
+        saved = torch.load(head_file(ckpt), map_location="cpu", weights_only=True)
         self.head = PointerHead(saved["head"]["q.weight"].shape[1], saved["head_dim"]).eval()
         self.head.load_state_dict(saved["head"])
         self.text_T, self.image_T = serving_temperatures(ckpt)
@@ -224,7 +236,8 @@ class DecideEngine:
             image_tokens = int(enc.grid.prod(-1)[0]) // self.proc.merge_size ** 2 if enc.has_image else 0
             augmented, fields = finish_reasoning(request, text, self.tok, stats.get("finish_reason", "length"),
                                                  image_tokens, max_state=self.decision_max_state,
-                                                 max_branch=self.decision_max_row)
+                                                 max_branch=self.decision_max_row,
+                                                 complete=stats.get("reasoning_complete", False))
             result.update(fields)
             if augmented is not None:
                 try:
@@ -275,9 +288,16 @@ class DecideEngine:
             yield piece, chunk.get("meta_info", {})
 
     async def athink_stream(self, request, max_new_tokens=768, image=None):
+        pending = ""
         async for part in self._athink_events(request, max_new_tokens, image):
             if isinstance(part, str):
-                yield part
+                pending = (pending + part).replace(END_THINK, "")
+                keep = len(END_THINK) - 1
+                if len(pending) > keep:
+                    yield pending[:-keep]
+                    pending = pending[-keep:]
+        if pending:
+            yield pending
 
     async def _reasoning_chunks(self, ids, params, **kw):
         async for piece, meta in self._astream(ids, params, **kw):
@@ -299,7 +319,10 @@ class DecideEngine:
         ids = self.tok(text).input_ids
         prompt_tokens = len(ids) + max(0, image_tokens - 1)
         available = self.context_length - prompt_tokens
-        if available < 1 or (not fit_context and max_new_tokens > available):
+        if not fit_context and max_new_tokens > available:
+            raise RequestError(f"reasoning prompt ({prompt_tokens} tokens) plus max_reasoning_tokens "
+                               f"({max_new_tokens}) exceeds context length {self.context_length}")
+        if available < 1:
             yield {"finish_reason": "context_limit", "prompt_tokens": prompt_tokens, "completion_tokens": 0}
             return
         budget = min(max_new_tokens, available) if fit_context else max_new_tokens
@@ -310,12 +333,12 @@ class DecideEngine:
             raw += piece
             if piece:
                 yield piece
-        finish = meta.get("finish_reason") or {}
-        complete = END_THINK in raw or (bool(self._stops) and isinstance(finish, dict) and finish.get("matched") == self._stops[0])
-        native_finish = (finish.get("type") if isinstance(finish, dict) else finish) or "unknown"
-        reported = ("stop" if complete else "length") if native_finish == "stop" else native_finish
-        yield {"finish_reason": reported, "prompt_tokens": prompt_tokens,
-               "completion_tokens": meta.get("completion_tokens", 0)}
+        finish = meta.get("finish_reason") or "unknown"
+        native = (finish.get("type") if isinstance(finish, dict) else finish) or "unknown"
+        complete = reasoning_complete(raw, finish, end_think_id=self._stops[0] if self._stops else None,
+                                      stop_reason=meta.get("stop_reason"))
+        yield {"finish_reason": native, "reasoning_complete": complete, "prompt_tokens": prompt_tokens,
+               "completion_tokens": meta.get("completion_tokens", 0), "sampling": dict(sampling)}
 
     def _chat_request(self, messages, tools, max_new_tokens, temperature, top_p, top_k, presence_penalty,
                       enable_thinking):

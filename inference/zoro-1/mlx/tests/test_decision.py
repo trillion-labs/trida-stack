@@ -133,7 +133,7 @@ def test_reasoning_and_temperature(decider, monkeypatch):
 
     def think(request, image, max_tokens, **kwargs):
         seen.append(max_tokens)
-        return {"text": "IT handles printers", "ended": "complete", "stats": {}}
+        return {"text": "IT handles printers", "ended": "complete", "stats": {"reasoning_complete": True}}
 
     monkeypatch.setattr(decider, "think", think)
     result = decider.decide(REQ, reasoning=True, max_reasoning_tokens=32)
@@ -305,3 +305,13 @@ def test_comparison_detects_contract_and_probability_drift():
     assert differences({"p": 0.5}, {"p": float("nan")}, 0.002)
     assert differences({"choice": "a"}, {"choice": "b"}, 1.0)
     assert differences({"p": 0.5}, {"other": 0.5}, 1.0)
+
+
+def test_load_head_prefers_decision_head_name(tmp_path):
+    torch = pytest.importorskip("torch")
+    for name, dp in (("jev_head.pt", 8), ("decision_head.pt", 16)):
+        head = {"q.weight": torch.zeros(dp, 4), "q.bias": torch.zeros(dp), "k.weight": torch.zeros(dp, 4), "k.bias": torch.zeros(dp)}
+        torch.save({"head": head, "head_dim": dp}, tmp_path / name)
+    assert decision.load_head(tmp_path, 4).w["q.weight"].shape[0] == 16   # decision_head.pt wins
+    (tmp_path / "decision_head.pt").unlink()
+    assert decision.load_head(tmp_path, 4).w["q.weight"].shape[0] == 8    # jev_head.pt still loads

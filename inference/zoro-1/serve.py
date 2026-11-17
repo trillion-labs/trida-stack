@@ -158,8 +158,8 @@ def _install(tmp, out, work, out_is_complete):
 
 def build_decide_command(args):
     backend = getattr(args, "decision_backend", "causal")
-    python = os.environ.get("DECIDE_PYTHON", os.environ.get("SGLANG_PYTHON", sys.executable)
-                            if backend == "self-spec" else sys.executable)
+    python = (os.environ.get("SGLANG_PYTHON", sys.executable) if backend == "self-spec"
+              else os.environ.get("DECIDE_PYTHON", sys.executable))
     extra = ["--backend", "self-spec"] if backend == "self-spec" else []
     return [python, str(Path(__file__).parent / "serve_decide.py"), args.model, "--host", args.host,
             "--port", str(args.port), "--mem-fraction", str(args.mem_fraction)] + extra + args.passthrough
@@ -233,14 +233,14 @@ def main():
     if args.mem_fraction is None:
         args.mem_fraction = 0.5 if args.mode == DECIDE_MODE and args.decision_backend == "self-spec" else 0.8
     if args.model is None and args.mode == DECIDE_MODE:
-        args.model = os.environ.get("TRIDA_DECIDE_MODEL")   # Zoro-1 carries jev_head.pt, so the default works too
+        args.model = os.environ.get("TRIDA_DECIDE_MODEL")   # Zoro-1 carries decision_head.pt, so the default works too
     if args.model is None:
         args.model = os.environ.get("TRIDA_MODEL", DEFAULT_MODEL)
 
     if args.mode in MODES and args.shape and not args.dry_run:
         args.model = for_sglang(args.model)
     elif args.mode == DECIDE_MODE and not args.dry_run:
-        args.model = str(local_checkpoint(args.model))   # serve_decide.py reads <ckpt>/jev_head.pt from disk
+        args.model = str(local_checkpoint(args.model))   # serve_decide.py reads the decision head from disk
     cmd = build_command(args)
     print("[serve]", " ".join(shlex.quote(c) for c in cmd), flush=True)
     if args.dry_run:

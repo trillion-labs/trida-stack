@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Shared reasoning completion now requires native `stop` plus `</think>` or its
+  matching stop token, including MLX and vLLM's stripped-token metadata. EOS without
+  closing thinking returns direct fallback. `reasoning_stats.finish_reason` keeps
+  the native reason; `reasoning_complete` reports the separate check. Explicit
+  budgets that do not fit the context are rejected; only defaults are fitted.
+- Self-spec streaming admission follows native generation rather than client
+  reading speed. Disconnected nonstreaming chats are cancelled. Readout failures
+  abort individual requests; version 2 of the readout overlay and a bounded wait
+  prevent scheduler failures or indefinite admission holds.
+- `/v1/decide` rejects non-boolean/non-auto reasoning values such as `"yes"` and `1`.
+  Models/health expose backend capabilities; reasoning stats include sampling.
+  Self-spec uses `SGLANG_PYTHON`; `DECIDE_PYTHON` remains the stock environment.
+
 - Decision reasoning: CUDA and MLX now use the configured reasoning cap for both
   `reasoning: true` and `"auto"` when the budget is omitted or null (default 4096).
   Boolean reasoning previously defaulted to 768; MLX auto previously used 8192.
@@ -20,6 +33,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Causal `reasoning: true` computes direct answers first for fallback, adding a
   direct pass and the `direct`, `escalated`, `threshold` and `usage` response fields.
 
+- `inference/gravityocr/serve_mac.py` no longer needs the Gravity app: it runs the MLX engine copied into
+  `inference/gravityocr/mac/ocr`, in a venv `mac/setup.sh` builds. **Breaking** for the command from #86:
+  `--gravity-app` is replaced by `--engine` (a directory holding the `ocr` package; pass
+  `/Applications/Gravity.app/Contents/Resources/project` to run an installed app's own copy), the server runs on
+  `mac/.venv/bin/python` instead of Gravity's bundled Python, and the notebook's `GRAVITY_APP` setting is
+  replaced by `MAC_PYTHON`. `serve_mac.py` also gains `--revision`, sends `HF_TOKEN` (or the `hf auth login`
+  token) to the Hub only, and starts from a cached checkpoint without the network.
+- `export_kev_checkpoint.py` is renamed `export_decision_checkpoint.py`, in both places it lives
+  (`scripts/` and `train/tools/`); the arguments and output (kev's checkpoint layout) are unchanged.
+- Released checkpoints name the decision head `decision_head.pt` (Zoro-1 on the Hub ships it under that name).
+  Every reader (`serve_decide.py` / `decide_engine.py`, both export scripts, training's head init, the MLX
+  loader, download filter and converter) prefers `decision_head.pt` and falls back to `jev_head.pt`, which
+  training still writes, so existing checkpoints load unchanged. Zoro-1 Chat's *Decision head → Download*
+  fetches `decision_head.pt`. The MLX converter still writes `jev_head.safetensors`, so folders it converts
+  keep loading in older MLX builds. Older `serve_decide.py`, MLX builds and Zoro-1 Chat apps do not look for
+  `decision_head.pt` and lose `/v1/systemone` on the renamed Zoro-1; update them.
 - MLX server: `tool_choice: "none"` now keeps the tool schemas in the prompt and bans `<tool_call>`
   (before, the tools were dropped from the prompt), so clients sending it (evals, Hermes) get a different
   prompt than earlier baselines.
@@ -33,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `serve_decide.py --backend self-spec` or `serve.py --decision-backend self-spec`.
   The self-spec backend is text-only and serial; probability parity is not yet accepted.
 
+- `inference/gravityocr/mac/`: the Gravity app's MLX engine (0.3.4), copied unchanged into `mac/ocr` with
+  `VENDORED.sha256` (checked by a test), contributed by Trillion Labs under Apache-2.0, and a hashed
+  lock of the package versions the app bundles (Pillow raised to 13.0.0 for 42 advisories) that
+  `mac/setup.sh` installs from PyPI. CI scans the lock with pip-audit. `benchmark/gravityocr/run.sh` evaluates
+  on an Apple Silicon Mac with it (`BACKEND=mac`, the default there).
 - `benchmark/workflow_evals/`: [TypeSafe WorkflowEvals](https://github.com/typesafe-ai/WorkflowEvals),
   pinned and patched at setup with a `trida` provider, runs the four business workflows against
   `/v1/systemone`, directly or with reasoning, and rejects every cut or trimmed reasoning response.
@@ -52,6 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--reasoning-token-limit` (default 4,096, at most 8,192).
   Invalid options get HTTP 422 (400 on the deprecated alias); insufficient context
   returns an explicit direct fallback. Responses add `reasoning_stats` and `answers_source`. Reasoning that does not
+  `--reasoning-token-limit` (default 4,096, at most 8,192) and fit the context with the prompt, or the
+  request gets HTTP 422 (400 on the deprecated alias). Responses add `reasoning_stats` and `answers_source`. Reasoning that does not
   finish (`cut: "length"`, with the actual reason in `reasoning_stats.finish_reason`), that finishes empty (`"empty"`), or that
   has no room in the state (`"state_limit"`) returns the **direct** answers with `answers_source: "direct"` instead of
   deciding on partial reasoning; reasoning too long for the state keeps its end and reports
@@ -178,7 +214,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stream answers typed questions (yes/no, pick one, score) over a state. kev's
   encoding, augmentation and loss are ported. It runs alone or interleaved with SFT,
   with `--decision_head_lr_scale`, `--decision_loss_weight` and `--decision_micro_per_step`.
-  `train/tools/export_kev_checkpoint.py` exports a checkpoint to kev's layout for
+  `train/tools/export_decision_checkpoint.py` exports a checkpoint to kev's layout for
   `kev.benchmark` / `kev.serve`.
 - `--fp32_master` (fp32 weights and AdamW state over bf16 compute; needed at small
   LRs) and `--adam_beta2`.
@@ -371,7 +407,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `inference/test_jev_golden.py` checks the rows against golden fixtures from the
   training encoder (provenance in `inference/fixtures/jev_golden/PROVENANCE.md`).
   Derived from kev (Apache-2.0); attributed in `NOTICE` and `COMPLIANCE.md` §1.
-- `scripts/export_kev_checkpoint.py` — exports a checkpoint to kev's layout. The
+- `scripts/export_decision_checkpoint.py` — exports a checkpoint to kev's layout. The
   Trida2.1-4B model card points here for scoring and serving with kev's tools.
 
 - `inference/mlx/`: on-device (Apple Silicon, MLX) serving of Trida2.0-4B with lossless

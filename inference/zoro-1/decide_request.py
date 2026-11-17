@@ -352,13 +352,21 @@ def top_probability(answer):
     return max(answer["probabilities"].values())
 
 
+def reasoning_complete(text, finish_reason, *, end_think_id=None, stop_reason=None):
+    """One completion rule across native runtimes, including stripped stop tokens."""
+    native = finish_reason.get("type") if isinstance(finish_reason, dict) else finish_reason
+    matched = finish_reason.get("matched") if isinstance(finish_reason, dict) else stop_reason
+    return native == "stop" and ("</think>" in text or matched == "</think>"
+                                or (end_think_id is not None and matched == end_think_id))
+
+
 def finish_reasoning(request, text, tokenizer, finish_reason, image_tokens=0,
-                     *, max_state=MAX_STATE, max_branch=MAX_BRANCH):
+                     *, max_state=MAX_STATE, max_branch=MAX_BRANCH, complete=None):
     """Backend-independent cut/source/trim contract; never change the original state."""
     fields = {"answers_source": "direct"}
     if finish_reason == "context_limit":
         return None, {**fields, "cut": "state_limit", "cut_detail": "context_limit"}
-    if finish_reason != "stop":
+    if finish_reason != "stop" or not (reasoning_complete(text, finish_reason) if complete is None else complete):
         return None, {**fields, "cut": "length"}
     if not text.strip():
         return None, {**fields, "cut": "empty"}

@@ -36,7 +36,7 @@ Checkpoints trained with this repo, on Hugging Face:
 
 | model | what it is | serve it with |
 |---|---|---|
-| [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) | 4B two-stream block-diffusion model (Qwen3.5-4B), jointly trained as an agent model **and** a decision model (`jev_head.pt` pointer head). Gated: request access, then `hf auth login`. | [`inference/zoro-1/`](inference/zoro-1/): `--mode self-spec` (default) / `causal` / `decide` |
+| [![Zoro-1](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro--1-yellow)](https://huggingface.co/trillionlabs/Zoro-1) | 4B two-stream block-diffusion model (Qwen3.5-4B), jointly trained as an agent model **and** a decision model (`decision_head.pt` pointer head). Gated: request access, then `hf auth login`. | [`inference/zoro-1/`](inference/zoro-1/): `--mode self-spec` (default) / `causal` / `decide` |
 | [![Zoro](https://img.shields.io/badge/%F0%9F%A4%97-trillionlabs%2FZoro-yellow)](https://huggingface.co/trillionlabs/Zoro) | 4B block-diffusion model (Qwen3.5-4B, hybrid attention), formerly `Trida2.0-4B`, with a causal head for lossless self-speculative decoding. Apache-2.0. | [`inference/zoro-1/mlx/`](inference/zoro-1/mlx/) (Apple Silicon), [`inference/zoro-1/vllm/`](inference/zoro-1/vllm/) |
 
 The agentic benchmark harnesses in [`benchmark/`](benchmark/) still default to the legacy
@@ -136,7 +136,7 @@ optional image) and typed *questions*, it returns calibrated probabilities inste
 scheme (`train/data/decision.py` / `train/models/decision.py`): a small **pointer head** on the clean causal stream scores each option's
 `</opt>` state against the question's `<decide>` state. Each optimizer step runs the usual SFT
 micro-batches, then `--decision_micro_per_step` decision micro-batches whose loss is added with weight
-`--decision_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_kev_checkpoint.py`
+`--decision_loss_weight`. Every checkpoint gets a `jev_head.pt`; `train/tools/export_decision_checkpoint.py`
 exports kev's layout. Details: [`train/README.md`](train/README.md#typed-decision-training-decisionpy).
 
 ### Images (vision-language checkpoints)
@@ -237,7 +237,7 @@ train/                   AR -> diffusion SFT trainer    (entry: train.py -> trai
   distributed.py             distributed setup and FSDP sharding
   optimizer.py, checkpoint.py optimizer updates, saving and resume
   train.py                   training helpers and main()
-  tools/                     export_kev_checkpoint.py, compose_vl_checkpoint.py, parity/FSDP checks
+  tools/                     export_decision_checkpoint.py, compose_vl_checkpoint.py, parity/FSDP checks
   getting_started.ipynb      training tutorial
   block_gated_delta_rule/    fetch recipe for the block-causal gated-delta Triton kernels
                              (PolyForm-NC upstream, NOT vendored -- run fetch_kernels.sh first)

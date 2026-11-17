@@ -5,7 +5,7 @@
 
 Endpoints: GET /v1/models, GET /health, GET /stats, POST /v1/chat/completions,
 POST /v1/completions, POST /v1/systemone (typed decisions through the checkpoint's pointer head,
-``jev_head.pt``, with optional reasoning first, in TypeSafe's System One API shape; see decision.py and
+``decision_head.pt`` or ``jev_head.pt``, with optional reasoning first, in TypeSafe's System One API shape; see decision.py and
 decide_request.systemone_request), and POST /v1/decide (its deprecated alias, removed in the next release). Chat supports ``tools`` (rendered by the model's chat template,
 parsed from ``<tool_call>`` blocks into OpenAI ``tool_calls``), ``stream``, reasoning split
 (``message.reasoning_content``), ``stop``, ``seed`` and per-request
@@ -34,7 +34,7 @@ from .engine import Engine, IncrementalDetokenizer
 from .parsing import StreamSplitter, parse_tool_calls, split_reasoning, to_openai_tool_calls
 
 ENGINE: Engine = None  # set in main()
-DECIDER: Optional[Decider] = None  # set when the checkpoint has a pointer head (jev_head.pt)
+DECIDER: Optional[Decider] = None  # set when the checkpoint has a pointer head (decision_head.pt or jev_head.pt)
 DEFAULTS: dict = {}
 
 
@@ -380,13 +380,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _capabilities(self):
+        return {"backend": "mlx", "images": ENGINE.supports_vision,
+                "auto_reasoning": DECIDER is not None, "serial": True,
+                "reasoning_sampling": {"temperature": 0.6, "top_p": 0.95, "top_k": 20}}
+
     def _model_card(self):
         ctx = DEFAULTS["context_length"]
         return {"id": DEFAULTS["served_name"], "object": "model", "owned_by": "trillionlabs", "created": 0,
                 "context_length": ctx, "max_model_len": ctx, "root": str(ENGINE.path),
                 "supports_vision": ENGINE.supports_vision,
                 "input_modalities": ["text", "image"] if ENGINE.supports_vision else ["text"],
-                "decision": DECIDER is not None,
+                "decision": DECIDER is not None, "capabilities": self._capabilities(),
                 # generation guards this server runs with (record them with eval / speedrun results)
                 "loop_guard": bool(DEFAULTS.get("loop_guard")), "tool_call_gate": DEFAULTS.get("tool_call_gate", 0.0),
                 "decision_cache": {"max_bytes": DECIDER.cache_bytes} if DECIDER else None,
@@ -401,7 +406,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith(("/v1/models/", "/models/")):
             return self._json(200, self._model_card())
         if path in ("/health", "/v1/health", ""):
-            return self._json(200, {"status": "ok", "mode": ENGINE.mode})
+            return self._json(200, {"status": "ok", "mode": ENGINE.mode, "capabilities": self._capabilities()})
         if path == "/stats":
             return self._json(200, {"last": ENGINE.last_stats, "cache_slots": ENGINE.cached_tokens()})
         self._json(404, {"error": {"message": f"no route {self.path}"}})
@@ -599,7 +604,7 @@ class Handler(BaseHTTPRequestHandler):
     def _systemone(self, body: dict):
         """System One's {"state", "model", "questions"} body; the extensions are /v1/decide's options."""
         if DECIDER is None:
-            raise SystemOneInvalid("this checkpoint has no decision head (jev_head.pt or jev_head.safetensors)")
+            raise SystemOneInvalid("this checkpoint has no decision head (decision_head.pt / .safetensors, or jev_head.pt / .safetensors)")
         try:
             request, opts = systemone_request(body, extensions=("threshold", "trida_mode", "stream"),
                                               auto_reasoning=True,
@@ -613,7 +618,7 @@ class Handler(BaseHTTPRequestHandler):
     def _decide(self, body: dict):
         """Deprecated: the SGLang envelope plus optional auto reasoning and SSE progress (use /v1/systemone)."""
         if DECIDER is None:
-            raise BadRequest("this checkpoint has no decision head (jev_head.pt or jev_head.safetensors)")
+            raise BadRequest("this checkpoint has no decision head (decision_head.pt / .safetensors, or jev_head.pt / .safetensors)")
         if not isinstance(body, dict) or "request" not in body:
             raise BadRequest('body must be {"request": {...}, "reasoning"?: bool | "auto"}')
         try:
@@ -797,7 +802,7 @@ def main(argv=None):
         raise WORKER.error
     print(f"[trida-mlx] ready in {ENGINE.load_s:.1f}s  mode={a.mode} N={ENGINE.n} mask_id={ENGINE.mask_id} "
           f"eos={sorted(ENGINE.eos_ids)} ctx={a.context_length} vision={ENGINE.supports_vision} "
-          f"decision={'yes (T text %.2f, image %.2f)' % (DECIDER.temps['text'], DECIDER.temps['image']) if DECIDER else 'no (no jev_head.pt)'} "
+          f"decision={'yes (T text %.2f, image %.2f)' % (DECIDER.temps['text'], DECIDER.temps['image']) if DECIDER else 'no (no decision head file)'} "
           f"model={a.served_model_name!r}  ->  "
           f"http://{a.host}:{a.port}/v1", flush=True)
     srv = ThreadingHTTPServer((a.host, a.port), Handler)

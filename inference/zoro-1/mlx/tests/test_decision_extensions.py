@@ -84,7 +84,7 @@ def test_auto_reasoning_threshold_and_cutoff(decider, monkeypatch):
     assert uncertain["answers"] == uncertain["direct"]["answers"]
     assert "reasoned" not in uncertain
     monkeypatch.setattr(decider, "think", lambda *a, **k: {
-        "text": "IT handles printers", "ended": "complete", "stats": {}})
+        "text": "IT handles printers", "ended": "complete", "stats": {"reasoning_complete": True}})
     done = decider.decide(REQ, reasoning="auto", threshold=1)
     assert done["escalated"] and "cut" not in done
     assert done["answers"] == done["reasoned"]["answers"]
@@ -94,7 +94,7 @@ def test_auto_reasoning_threshold_and_cutoff(decider, monkeypatch):
 @pytest.mark.parametrize("text,cut", [("  ", "empty"), ("conclusion: facilities", "state_limit")])
 def test_reasoning_without_usable_state_returns_direct_answers(decider, monkeypatch, text, cut):
     monkeypatch.setattr(decider, "think", lambda *a, **k: {
-        "text": text, "ended": "complete", "stats": {"finish_reason": "stop"}})
+        "text": text, "ended": "complete", "stats": {"finish_reason": "stop", "reasoning_complete": True}})
     if cut == "state_limit":
         req = decide_request.parse(REQ)
         monkeypatch.setattr(decider, "context_length", max(len(row["ids"]) for row in decider.encode(req, None)))
@@ -111,7 +111,7 @@ def test_reasoning_without_usable_state_returns_direct_answers(decider, monkeypa
 def test_reasoning_cut_contract_and_usage(decider, monkeypatch, text, ended, cut):
     tokens = 0 if ended == "context_limit" else 3
     monkeypatch.setattr(decider, "think", lambda *a, **kw: {
-        "text": text, "ended": ended, "stats": {"new_tokens": tokens}})
+        "text": text, "ended": ended, "stats": {"new_tokens": tokens, "reasoning_complete": ended == "complete"}})
     result = decider.decide(REQ, reasoning=True, max_reasoning_tokens=8)
     assert result["cut"] == cut and result["answers_source"] == "direct"
     assert result["answers"] == result["direct"]["answers"]
@@ -124,7 +124,7 @@ def test_shared_reasoning_limit_and_conclusion_trimming(decider, monkeypatch):
         decider.decide(REQ, reasoning=True, max_reasoning_tokens=4097)
     thought = "step " * 3000 + "CONCLUSION"
     monkeypatch.setattr(decider, "think", lambda *a, **kw: {
-        "text": thought, "ended": "complete", "stats": {"new_tokens": 10}})
+        "text": thought, "ended": "complete", "stats": {"new_tokens": 10, "reasoning_complete": True}})
     result = decider.decide(REQ, reasoning=True)
     assert result["reasoning_trimmed"] and result["answers_source"] == "reasoned"
     assert "cut" not in result
@@ -137,7 +137,7 @@ def test_reasoned_row_overflow_preserves_direct_answer(decider, monkeypatch):
     req = decide_request.parse(REQ)
     decider.context_length = max(len(row["ids"]) for row in decider.encode(req, None)) + 1
     monkeypatch.setattr(decider, "think", lambda *a, **kw: {
-        "text": "step " * 1000, "ended": "complete", "stats": {"new_tokens": 10}})
+        "text": "step " * 1000, "ended": "complete", "stats": {"new_tokens": 10, "reasoning_complete": True}})
     result = decider.decide(REQ, reasoning=True)
     assert result["cut"] == "state_limit" and result["reasoning_trimmed"]
     assert result["answers_source"] == "direct" and "reasoned" not in result
@@ -146,14 +146,17 @@ def test_reasoned_row_overflow_preserves_direct_answer(decider, monkeypatch):
 
 def test_long_reasoning_keeps_conclusion(decider):
     text = " ".join(f"step{i} checks the jam" for i in range(3000)) + " so: facilities"
-    fitted = decider.fit_reasoning(REQ, text)
+    augmented, fields = decide_request.finish_reasoning(REQ, text, decider.engine.tokenizer, "stop", complete=True)
+    assert fields["reasoning_trimmed"]
+    fitted = augmented["state"]["reasoning"]
     assert fitted.startswith("…") and fitted.endswith("so: facilities")
     assert len(fitted) < len(text)
     req = decide_request.parse(decide_request.with_reasoning(REQ, fitted))
     state = req.encode_rows(decider.engine.tokenizer)[0]["ids"]
     q_id = decider.engine.tokenizer.convert_tokens_to_ids(decide_request.SPECIAL[1])
     assert state.index(q_id) <= decide_request.MAX_STATE
-    assert decider.fit_reasoning(REQ, "short reasoning") == "short reasoning"
+    short, _ = decide_request.finish_reasoning(REQ, "short reasoning", decider.engine.tokenizer, "stop", complete=True)
+    assert short["state"]["reasoning"] == "short reasoning"
 
 
 def test_torch_free_reader_fixture_and_layout_validation():
@@ -240,7 +243,7 @@ def test_reasoning_mode_and_progress_reason(decider, monkeypatch, reasoning, mod
     def think(*args, **kwargs):
         calls.append(kwargs["mode"])
         assert events[0][0] == "direct" and events[0][1]["reason"]
-        return {"text": "IT handles printers", "ended": "complete", "stats": {}}
+        return {"text": "IT handles printers", "ended": "complete", "stats": {"reasoning_complete": True}}
 
     monkeypatch.setattr(decider, "think", think)
     result = decider.decide(REQ, reasoning=reasoning, mode=mode, threshold=1,
@@ -277,3 +280,18 @@ def test_boolean_and_auto_reasoning_default_to_server_cap(decider, monkeypatch, 
     result = decider.decide(REQ, reasoning=reasoning, threshold=1)
     assert budgets == [cap]
     assert result["cut"] == "length" and result["answers_source"] == "direct"
+
+
+@pytest.mark.parametrize("think_stop", [True, False])
+def test_native_stop_without_think_close_is_not_completed(decider, monkeypatch, think_stop):
+    eng = decider.engine
+    end = eng.tokenizer.convert_tokens_to_ids("</think>")
+    def generate(ids, *, stats, **kwargs):
+        stats.finish_reason = "stop"
+        stats.stop_token = end if think_stop else end + 1
+        yield eng.tokenizer.encode("done", add_special_tokens=False)
+    monkeypatch.setattr(eng, "generate_ids", generate)
+    thought = decider.think(REQ, None, 32)
+    assert thought["stats"]["finish_reason"] == "stop"
+    assert thought["stats"]["reasoning_complete"] is think_stop
+    assert (thought["ended"] == "complete") is think_stop

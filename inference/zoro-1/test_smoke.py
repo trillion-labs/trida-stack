@@ -36,7 +36,8 @@ def test_self_spec_decision_launcher_selects_diffusion_environment(monkeypatch):
     assert command[0] == "/diffusion/python"
     assert command[command.index("--backend") + 1] == "self-spec"
     monkeypatch.setenv("DECIDE_PYTHON", "/override/python")
-    assert serve.build_decide_command(Args(mode="decide", decision_backend="self-spec"))[0] == "/override/python"
+    assert serve.build_decide_command(Args(mode="decide", decision_backend="self-spec"))[0] == "/diffusion/python"
+    assert serve.build_decide_command(Args(mode="decide", decision_backend="causal"))[0] == "/override/python"
 
 
 def test_decision_cli_defaults_match_the_tested_memory_budget():
@@ -157,7 +158,7 @@ def test_no_shape_skips_shaping_without_dry_run(monkeypatch):
 
 
 def test_decide_default_model_reaches_serve_decide_as_a_local_dir(monkeypatch, tmp_path):
-    # serve_decide.py opens <ckpt>/jev_head.pt, so it needs a directory, not the HF id
+    # serve_decide.py opens the decision head file in <ckpt>, so it needs a directory, not the HF id
     import types
     snap = tmp_path / "snapshot"
     snap.mkdir()

@@ -12,21 +12,22 @@ serves (§4b).
 | Component | Path | Upstream | License |
 |---|---|---|---|
 | IFEval scorer | `inference/zoro-1/ifeval_lib/` | [google-research · instruction_following_eval](https://github.com/google-research/google-research/tree/master/instruction_following_eval) | **Apache-2.0** |
-| Jev request encoding (vendored, adapted) | `inference/zoro-1/jev.py`, `inference/zoro-1/jev_head.py`, `scripts/export_kev_checkpoint.py`, `inference/zoro-1/decide_request.py`, `inference/zoro-1/decide_engine.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
-| Typed-decision training, kev scheme (vendored, adapted) | `train/data/decision.py`, `train/models/decision.py`, `train/tools/export_kev_checkpoint.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
+| Jev request encoding (vendored, adapted) | `inference/zoro-1/jev.py`, `inference/zoro-1/jev_head.py`, `scripts/export_decision_checkpoint.py`, `inference/zoro-1/decide_request.py`, `inference/zoro-1/decide_engine.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
+| Typed-decision training, kev scheme (vendored, adapted) | `train/data/decision.py`, `train/models/decision.py`, `train/tools/export_decision_checkpoint.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
 | mlx-vlm Qwen3-VL vision encoder (adapted) | `inference/zoro-1/mlx/trida_mlx/vision.py` | [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) `mlx_vlm/models/qwen3_vl/vision.py` | **MIT** |
 | MLX gated-delta Metal kernel (adapted) | `inference/zoro-1/mlx/trida_mlx/kernels.py` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) `mlx_lm/models/gated_delta.py` | **MIT** |
 | Qwen3.5 / Trida chat template (test fixture) | `inference/zoro-1/mlx/tests/fixtures/trida_chat_template.jinja` | shipped with `trillionlabs/Trida2.0-4B` (from Qwen3.5) | **Apache-2.0** |
+| GravityOCR Mac engine (Trillion Labs code, copied unchanged) | `inference/gravityocr/mac/ocr/` | [trillion-labs/GravityOCR-macOS](https://github.com/trillion-labs/GravityOCR-macOS), the Gravity app 0.3.4 (`Contents/Resources/project/ocr`) | **Apache-2.0** (contributed by Trillion Labs) |
 | SGLang self-speculative decoding patch for GravityOCR (derived) | `inference/gravityocr/sglang/` (`gravityocr_selfspec.patch` and the seven files under `sglang/python/`) | [sgl-project/sglang](https://github.com/sgl-project/sglang) v0.5.10 (commit `1519acf37c23f2189adb93f57ca9cd2db1bebf18`) | **Apache-2.0** |
 
 These are the only third-party source code redistributed in the repository (see
 [`NOTICE`](NOTICE)); `inference/zoro-1/jev.py` and `inference/zoro-1/jev_head.py` vendor kev's request
-mapping, encoding and pointer head, and `scripts/export_kev_checkpoint.py` writes kev's
+mapping, encoding and pointer head, and `scripts/export_decision_checkpoint.py` writes kev's
 checkpoint format; `inference/zoro-1/decide_request.py` and `inference/zoro-1/decide_engine.py` (the
 decision server) follow the same encoding and pointer head. On the training side,
 `train/data/decision.py` vendors the same mapping and encoding plus kev's augmentation, and
 `train/models/decision.py` vendors kev's pointer head and loss, both adapted to this
-trainer's packed rows, and `train/tools/export_kev_checkpoint.py` writes the same format.
+trainer's packed rows, and `train/tools/export_decision_checkpoint.py` writes the same format.
 `inference/gravityocr/sglang/gravityocr_selfspec.patch` modifies 22 source files of upstream
 SGLang plus `python/pyproject.toml` (it relaxes the `torchao` and `torchcodec` pins). The
 seven new files the patch needs, which `sglang/setup.sh` copies into the checkout
@@ -40,8 +41,12 @@ SGLang Team", with the files they adapt. Two CPU tests, `test_gravityocr_selfspe
 reference behaviour and say so in their headers. The patch carries upstream
 context lines, so it is listed here as derived Apache-2.0 code; the changes are stated in
 `inference/gravityocr/NOTICE`. `sglang/setup.sh` applies it to a clone of the pinned
-upstream commit at install time. Everything else below is installed or fetched
-separately.
+upstream commit at install time. `inference/gravityocr/mac/ocr/` is not third-party: it is
+the Python engine of Trillion Labs' Gravity app for macOS, which GravityOCR-macOS publishes
+without a licence file. Trillion Labs contributes it here under Apache-2.0. It is copied
+byte for byte (`mac/VENDORED.sha256`, checked by a test), so the files carry no licence
+header; `inference/gravityocr/README.md`, `inference/gravityocr/NOTICE` and this entry state
+the licence. Everything else below is installed or fetched separately.
 
 ## 1b. Noncommercial upstream code (fetched via recipe, NOT bundled)
 
@@ -62,6 +67,11 @@ glue, the HF/AR model code, benchmark wrappers) does not itself redistribute thi
 noncommercial code. The GravityOCR recipe in `inference/gravityocr/` does not use these
 kernels at all: it builds on upstream SGLang (§1, §2), which is Apache-2.0.
 
+The optional `inference/zoro-1/sglang/decision_readout.patch` is Trillion Labs'
+Apache-2.0 overlay (see its header and `sglang/NOTICE`). That covers our patch;
+it does not relicense the fetched HybridDiffusion backend or remove its
+noncommercial-use restriction.
+
 ## 2. Runtime dependencies (installed separately)
 
 | Component | Role | Upstream | License |
@@ -75,6 +85,7 @@ kernels at all: it builds on upstream SGLang (§1, §2), which is Apache-2.0.
 | FlashInfer | attention kernels in the `inference/gravityocr/` server environment (0.6.7.post2, pinned by SGLang v0.5.10; the patch's fast path checks this exact version) | [flashinfer-ai/flashinfer](https://github.com/flashinfer-ai/flashinfer) | **Apache-2.0** |
 | FastAPI / Uvicorn | decision server HTTP layer (optional) | [fastapi/fastapi](https://github.com/fastapi/fastapi), [encode/uvicorn](https://github.com/encode/uvicorn) | **MIT** / **BSD-3-Clause** |
 | vLLM | optional AR serving backend | [vllm-project/vllm](https://github.com/vllm-project/vllm) | **Apache-2.0** |
+| GravityOCR Mac engine env | `inference/gravityocr/serve_mac.py`, in its own Python 3.12 venv from `inference/gravityocr/mac/requirements-lock.txt` (17 packages, `--no-deps`): MLX and mlx-vlm (MIT), coremltools (BSD-3-Clause), protobuf (BSD-3-Clause), NumPy, SymPy and mpmath (BSD), tokenizers (Apache-2.0), Pillow (MIT-CMU), attrs and cattrs (MIT), packaging (Apache-2.0 / BSD-2-Clause), PyYAML and pyaml (MIT), tqdm (MPL-2.0 / MIT), typing-extensions (PSF-2.0) | PyPI | as listed |
 | MLX | on-device backend (`inference/zoro-1/mlx/`) | [ml-explore/mlx](https://github.com/ml-explore/mlx) | **MIT** |
 | mlx-lm | Qwen3.5 model + kernels for `inference/zoro-1/mlx/` | [ml-explore/mlx-lm](https://github.com/ml-explore/mlx-lm) | **MIT** |
 
@@ -95,6 +106,7 @@ run sandboxed (an operational detail, not a licensing one).
 | SWE-bench | `benchmark/swe_bench/` | [princeton-nlp/SWE-bench](https://github.com/princeton-nlp/SWE-bench) | **MIT** |
 | Terminal-Bench | `benchmark/terminal_bench/` | [laude-institute/terminal-bench](https://github.com/laude-institute/terminal-bench) | **Apache-2.0** |
 | WorkflowEvals (pinned; `trida` provider patch applied at setup) | `benchmark/workflow_evals/` | [typesafe-ai/WorkflowEvals](https://github.com/typesafe-ai/WorkflowEvals) | **Apache-2.0** |
+| OmniDocBench metric code (pinned `0604d98`; with sacrebleu, PyMuPDF, Levenshtein, TeX Live in a separate venv) | `benchmark/gravityocr/` | [opendatalab/OmniDocBench](https://github.com/opendatalab/OmniDocBench) | **Apache-2.0**; PyMuPDF (AGPL-3.0) and Levenshtein (GPL-2.0-or-later) under a maintainer exception for this local tool ([intake 0016](docs/oss/intake/0016-gravityocr-eval.md)) |
 
 ## 4. Evaluation datasets (pulled on demand, not redistributed)
 

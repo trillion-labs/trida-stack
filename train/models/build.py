@@ -41,7 +41,8 @@ def build_model(args):
                                        decision_head_dim=args.decision_head_dim if args.decision_data else 0)
     else:
         model = HFBlockDiffusion(**common)
-    head_init = os.path.join(model_source, "jev_head.pt")
+    heads = [os.path.join(model_source, n) for n in ("decision_head.pt", "jev_head.pt")]   # released / trained name
+    head_init = next((h for h in heads if os.path.exists(h)), heads[1])
     if getattr(model, "decision_head", None) is not None and os.path.exists(head_init):   # continue from a Decision checkpoint
         saved = torch.load(head_init, map_location="cpu")
         if saved["head_dim"] != args.decision_head_dim:

@@ -129,7 +129,7 @@ Defaults: temp 1.0 / top_p 0.95 / top_k 20, no presence penalty, thinking on, `-
 
 ## Decisions
 
-`serve_decide.py` serves a **decision checkpoint**: one that carries a pointer head (`jev_head.pt`, see [`MODEL_CONTRACT.md`](MODEL_CONTRACT.md#decision-checkpoints-serve_decidepy)). It answers typed questions about a state with calibrated probabilities. It can also reason first and then decide, and it chats with tool calls. All three run from one in-process engine and one copy of the weights, on **stock SGLang ≥ 0.5.22** with causal decoding. No fork or patch is needed.
+`serve_decide.py` serves a **decision checkpoint**: one that carries a pointer head (`decision_head.pt`, or `jev_head.pt` as training writes it; see [`MODEL_CONTRACT.md`](MODEL_CONTRACT.md#decision-checkpoints-serve_decidepy)). It answers typed questions about a state with calibrated probabilities. It can also reason first and then decide, and it chats with tool calls. All three run from one in-process engine and one copy of the weights, on **stock SGLang ≥ 0.5.22** with causal decoding. No fork or patch is needed.
 
 ```bash
 pip install "sglang>=0.5.22" fastapi uvicorn             # a stock SGLang env, separate from the diffusion backend's
@@ -195,8 +195,8 @@ CUDA causal, CUDA self-spec and MLX share these `/v1/systemone` rules (also on t
 - An omitted or null `max_reasoning_tokens` uses `--reasoning-token-limit`
   (default **4096**, configurable from 1 to 8192) for both modes. An explicit
   budget must be a positive integer no greater than that cap. Default budgets
-  fit the available context; explicit budgets that do not fit return direct
-  fallback. Reasoning is off by default.
+  fit the available context; explicit budgets that do not fit are rejected with
+  HTTP 422 (400 on the deprecated alias). Reasoning is off by default.
 - Completed reasoning keeps its conclusion when fitted to the state and row
   limits, reporting `reasoning_trimmed` and `answers_source: "reasoned"`.
   Fitting reserves the longest encoded question. CUDA's configurable caps require
@@ -205,8 +205,10 @@ CUDA causal, CUDA self-spec and MLX share these `/v1/systemone` rules (also on t
   `answers_source: "direct"` and `cut: "length"`, `"empty"` or `"state_limit"`.
   Optional `cut_detail` distinguishes context and row limits. Clients requiring
   complete, untrimmed reasoning must reject cuts and trimming.
-  `reasoning_stats.finish_reason` retains raw abort/missing-finish metadata; these
-  remain unfinished even if a partial response contains a closing tag.
+  Completion requires both a native `stop` and a `</think>` marker or matching
+  stop token. EOS without closing thinking returns a cut on every backend.
+  `reasoning_stats.finish_reason` preserves the native value; `reasoning_complete`
+  records the separate completion check. Abort/missing finish remains unfinished.
 - Reasoning responses include `direct`, `escalated` and `threshold`. `usage`
   counts all scored decision-row tokens and generated reasoning tokens, including
   on fallback; it does not count the physical K+1 prefix executions.
@@ -225,8 +227,10 @@ The shared [reasoning contract](#reasoning-contract) also applies to this backen
 reasoning is generated with self-spec.
 
 This backend is **text-only and serial**. Chat and decisions share one model;
-**Chat and decisions do not overlap**: a streaming chat holds admission until
-it finishes or cancellation is acknowledged. Each K-option question requires
+**Native chat and decisions do not overlap**. Generation holds admission until
+it finishes or cancellation is acknowledged; a client that stops reading does
+not keep the engine locked after generation finishes. Abandoned nonstreaming
+chats are cancelled too. Each K-option question requires
 K+1 serial eager prefills. Sampling is fixed by the server
 YAML (default temperature 1, top-p 0.95, top-k 20, no presence penalty).
 Conflicting chat options return HTTP 400. Use `serve_decide.py --backend self-spec

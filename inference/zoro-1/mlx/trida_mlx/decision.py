@@ -21,7 +21,7 @@ import mlx.core as mx
 import numpy as np
 
 from .decide_request import (DEFAULT_REASONING_TOKEN_LIMIT, MAX_BRANCH, RequestError, SPECIAL, VISION,
-                             finish_reasoning, fit_reasoning, parse, prompt, reasoning_budget,
+                             finish_reasoning, parse, prompt, reasoning_budget, reasoning_complete,
                              rows_tokens, to_answer, top_probability)
 from .decode import DecodeStats, SamplingParams
 from .engine import IncrementalDetokenizer
@@ -109,7 +109,12 @@ class PointerHead:
 
 def load_head(directory, hidden_size=None):
     directory = Path(directory)
-    safe, pt = directory / "jev_head.safetensors", directory / "jev_head.pt"
+    # decision_head.* is the released name (Zoro-1 on the Hub); jev_head.* is what training writes
+    def found(ext):
+        names = [directory / f"decision_head{ext}", directory / f"jev_head{ext}"]
+        return next((f for f in names if f.exists()), names[1])
+
+    safe, pt = found(".safetensors"), found(".pt")
     if safe.exists():
         weights = mx.load(str(safe))
     elif pt.exists():
@@ -251,7 +256,9 @@ class Decider:
             eng.render([{"role": "user", "content": content}], enable_thinking=True),
             [image] if image else None,
         )
-        if len(ids) >= self.context_length or (not fit_context and len(ids) + max_tokens > self.context_length):
+        if not fit_context and len(ids) + max_tokens > self.context_length:
+            raise RequestError("reasoning prompt plus max_reasoning_tokens exceeds context length")
+        if len(ids) >= self.context_length:
             return {"text": "", "ended": "context_limit", "stats": {
                 "finish_reason": "context_limit", "prompt_tokens": len(ids), "new_tokens": 0}}
         detok, text, stats = IncrementalDetokenizer(eng.tokenizer), "", DecodeStats()
@@ -272,12 +279,13 @@ class Decider:
         finally:
             gen.close()
             eng.cur, eng.slots, eng.use_prompt_cache = previous
+        complete = reasoning_complete(text, stats.finish_reason,
+                                      end_think_id=eng.tokenizer.convert_tokens_to_ids("</think>"),
+                                      stop_reason=stats.stop_token)
+        details = {**stats.as_dict(), "reasoning_complete": complete, "stop_reason": stats.stop_token,
+                   "sampling": {"temperature": 0.6, "top_p": 0.95, "top_k": 20}}
         return {"text": text.replace("</think>", "").strip(),
-                "ended": "complete" if stats.finish_reason == "stop" else "budget",
-                "stats": stats.as_dict()}
-
-    def fit_reasoning(self, request, text, image=None):
-        return fit_reasoning(request, text, self.engine.tokenizer, image[1] if image else 0)
+                "ended": "complete" if complete else "budget", "stats": details}
 
     def decide(
         self,
@@ -293,7 +301,7 @@ class Decider:
         """Decide on the MLX worker; direct callers must hold engine.lock on its owning thread."""
         if self.head is None:
             raise RequestError(
-                "this checkpoint has no decision head (jev_head.pt or jev_head.safetensors)"
+                "this checkpoint has no decision head (decision_head.pt / .safetensors, or jev_head.pt / .safetensors)"
             )
         if not isinstance(reasoning, bool) and reasoning != "auto":
             raise RequestError('reasoning must be a boolean or "auto"')
@@ -361,7 +369,8 @@ class Decider:
                 "context_limit" if thought["ended"] == "context_limit" else "length")
             augmented, fields = finish_reasoning(request, thought["text"], self.engine.tokenizer,
                                                  ended, image[1] if image else 0,
-                                                 max_branch=min(MAX_BRANCH, self.context_length))
+                                                 max_branch=min(MAX_BRANCH, self.context_length),
+                                                 complete=thought["stats"].get("reasoning_complete", False))
             result.update(fields)
             result["usage"]["output_tokens"] = thought["stats"].get("new_tokens", 0)
             if augmented is not None:
