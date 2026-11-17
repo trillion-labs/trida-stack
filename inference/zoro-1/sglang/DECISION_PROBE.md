@@ -73,8 +73,12 @@ native generation finishes. Disconnected nonstreaming chat is cancelled too.
 These review fixes passed 225 focused CPU tests, 63 MLX tests (2 skipped),
 and 21 benchmark adapter/setup tests. Both overlays applied to the pinned
 source and parsed successfully. The historical GPU results above used the
-earlier overlay; **version 2 has not been reevaluated on an H100**. No result here
-changes the two parity failures or closes #81. Latest main is integrated, including
+earlier overlay. [Readout v2 H100 validation](READOUT_V2_VALIDATION.md) now covers
+request-level failure isolation, cancellation, deadlines and fail-closed health.
+All 345 frozen-suite probabilities matched the earlier candidate exactly;
+strict 0.005 still failed and the explicit 0.02 profile remained 38/40.
+The initial cold-start timeout is documented there. No result here changes the
+two parity failures or closes #81. Latest main is integrated, including
 #89 and the `decision_head.pt` / legacy `jev_head.pt` loading convention from #97.
 
 ## Reproduce
