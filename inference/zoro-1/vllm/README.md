@@ -23,7 +23,8 @@ No diffusion plugin, external kernel fetch, or vLLM source patch is required.
 **Experimental:** HTTP end-to-end checks pass, but SGLang probability parity is
 not fully established. A reviewer’s H100 probe found a **0.0222** long-input
 probability gap (the earlier probe found 0.012), exceeding the unchanged 0.01
-target, while selected options agreed. See [validation results](DECISION_VALIDATION.md).
+target, while selected options agreed. See [validation results](DECISION_VALIDATION.md)
+and the [completed strategy/parity comparison](DECISION_COMPARISON.md).
 
 `--mem-fraction` defaults to `0.5` for this one engine. The implementation
 uses one worker with eager execution and disables prefix caching, chunked

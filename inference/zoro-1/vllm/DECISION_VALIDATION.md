@@ -1,5 +1,8 @@
 # Decision serving validation
 
+For the completed November 17 A/B, cache/chunk and numerical-origin audit, see
+[Decision strategy and parity follow-up](DECISION_COMPARISON.md).
+
 ## Environment
 
 2026-11-13, one H100 80GB on `diffusion-compute-000`, allocated through Slurm.
@@ -416,8 +419,9 @@ reasoning-completion contract in #96.
 
 Follow-up checks: **203 CPU tests passed**, **56 MLX tests passed (2 skipped)**,
 and **21 WorkflowEvals adapter tests passed**. Ruff and supply-chain checks passed.
-No GPU reevaluation was performed. Benchmark
-inputs, sampling, comparison formulas and tolerances are unchanged. Luke's
-requested pooling-versus-capture A/B comparison remains pending; the prepared
-experiment could not obtain a free H100. This follow-up does not establish that
-the capture design is faster, nor resolve the 0.0222 cross-backend parity gap.
+The shared-contract follow-up above did not change the capture implementation.
+The later H100 A/B and readout audit are now complete; see
+[the comparison and remaining limitations](DECISION_COMPARISON.md).
+Inputs, sampling, comparison formulas and tolerances are unchanged. The current
+server retains sequential cache-off capture; no experimental strategy has been
+applied, and strict cross-backend parity remains unmet.
