@@ -3,11 +3,12 @@
 
   POST /v1/systemone         TypeSafe's System One API: {"state": ..., "model": ..., "questions": {...}}
                              -> {"model", "answers": {qid: answer}, "usage": {"input_tokens", "output_tokens"}}.
-                             Extensions: "images": [one base64 / data URL / {"url"}], "reasoning", "max_reasoning_tokens",
-                             "temperature"; the response then also carries "reasoning" and timing fields.
+                             Extensions: "images": [one base64 / data URL / {"url"}], "reasoning", "max_reasoning_tokens"
+                             (default: --reasoning-token-limit), "temperature"; the response then also carries "reasoning" and timing fields.
                              Validation errors are 422 {"detail": [{"loc", "msg", "type"}]}, as System One returns them.
   POST /v1/decide            deprecated alias, removed in the next release: {"request": {"state": ..., "questions":
-                             {...}}, "reasoning": false, "temperature": null} -> {"answers", "usage", "timing_ms"}
+                             {...}}, "reasoning": false, "temperature": null, "max_reasoning_tokens": null}
+                             -> {"answers", "usage", "timing_ms"}
   POST /v1/chat/completions  OpenAI-compatible, streaming or not; `tools` supported (tool calls parsed from the
                              model's <tool_call> blocks); the thinking is returned as reasoning_content; honours
                              max_tokens, temperature, top_p, top_k, presence_penalty and
@@ -20,7 +21,7 @@ Usage:
   python serve.py /path/to/decision-checkpoint --mode decide           # the same, through serve.py
 
 Needs stock SGLang >= 0.5.22 (Apache-2.0) plus fastapi and uvicorn in the same environment; see README "Decisions".
-A decision checkpoint is a Trida checkpoint with jev_head.pt (MODEL_CONTRACT.md); an optional temperature.json sets
+A decision checkpoint is a Trida checkpoint with decision_head.pt or jev_head.pt (MODEL_CONTRACT.md); an optional temperature.json sets
 its serving temperatures. Generation here is causal decoding; the two-stream decode modes are serve.py's others.
 """
 import argparse
@@ -152,8 +153,8 @@ def _num(body, key, default, cast):
     return cast(v)
 
 
-async def _decision_while_connected(coro, request):
-    """Cancel nonstreaming decision work when its HTTP client disconnects."""
+async def _while_connected(coro, request):
+    """Cancel nonstreaming work when its HTTP client disconnects."""
     from fastapi import HTTPException
 
     stop_watch = asyncio.Event()
@@ -169,7 +170,7 @@ async def _decision_while_connected(coro, request):
         if work in done:
             return await work
         await watch
-        raise HTTPException(499, "decision client disconnected")
+        raise HTTPException(499, "client disconnected")
     finally:
         # ASGI disconnect polling can swallow cancellation (notably on Python 3.10).
         # The explicit stop signal also lets the watcher exit cooperatively.
@@ -216,7 +217,7 @@ def create_app(engine, cancel_disconnected_decisions=False):
             # the image, if any, is in the request (base64 or a data URL): requests never name server files
             work = engine.adecide(request, None, opts.get("temperature"), opts.get("reasoning", False),
                                    max_reasoning_tokens=opts.get("max_reasoning_tokens"))
-            result = await _decision_while_connected(work, http_request) if cancel_disconnected_decisions else await work
+            result = await _while_connected(work, http_request) if cancel_disconnected_decisions else await work
         except RequestError as e:
             raise invalid(str(e)) from e
         return systemone_response(result, name)
@@ -232,12 +233,12 @@ def create_app(engine, cancel_disconnected_decisions=False):
             # Images use the shared request contract; server file paths are not accepted.
             work = engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
                                    max_reasoning_tokens=budget)
-            return await _decision_while_connected(work, http_request) if cancel_disconnected_decisions else await work
+            return await _while_connected(work, http_request) if cancel_disconnected_decisions else await work
         except RequestError as e:
             raise HTTPException(400, str(e)) from e
 
     @app.post("/v1/chat/completions")
-    async def chat(body: dict = Body(...)):
+    async def chat(http_request: Request, body: dict = Body(...)):
         messages = body.get("messages")
         if not isinstance(messages, list) or not messages:
             raise HTTPException(400, "messages must be a non-empty list")
@@ -278,7 +279,8 @@ def create_app(engine, cancel_disconnected_decisions=False):
                 yield "data: [DONE]\n\n"
             return StreamingResponse(events(), media_type="text/event-stream")
 
-        out = await engine.achat(messages, **kw)
+        work = engine.achat(messages, **kw)
+        out = await _while_connected(work, http_request) if cancel_disconnected_decisions else await work
         reasoning, text, calls = split_turn(out["text"], thinks, out["finish_reason"] == "length", kw["tools"])
         # content is a string (possibly empty) unless the turn is a tool call, as OpenAI's API returns it
         msg = {"role": "assistant", "content": (text or None) if calls else text, "reasoning_content": reasoning or None}
@@ -297,7 +299,7 @@ def create_app(engine, cancel_disconnected_decisions=False):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("model", nargs="?", default=os.environ.get("TRIDA_DECIDE_MODEL"),
-                    help="decision checkpoint directory (with jev_head.pt); default $TRIDA_DECIDE_MODEL")
+                    help="decision checkpoint directory (with decision_head.pt or jev_head.pt); default $TRIDA_DECIDE_MODEL")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=30001)
     ap.add_argument("--mem-fraction", type=float, default=0.8)

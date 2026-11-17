@@ -166,7 +166,7 @@ def test_concurrent_worker_capacity_is_bounded():
 
 def test_http_disconnect_waits_for_decision_cleanup():
     pytest.importorskip("fastapi")
-    from serve_decide import _decision_while_connected
+    from serve_decide import _while_connected
     from fastapi import HTTPException
 
     async def scenario():
@@ -185,7 +185,7 @@ def test_http_disconnect_waits_for_decision_cleanup():
                 cleaning.set()
                 await finish.wait()
 
-        task = asyncio.create_task(_decision_while_connected(work(), Request()))
+        task = asyncio.create_task(_while_connected(work(), Request()))
         await started.wait()
         disconnect.set()
         await cleaning.wait()
@@ -228,7 +228,7 @@ def test_image_prompt_collapses_only_the_image_span():
 
 
 def test_context_smaller_than_decision_rows_rejected_before_loading():
-    with pytest.raises(ValueError, match="context_length"):
+    with pytest.raises(RequestError, match="context"):
         backend.VllmDecideEngine("unused", context_length=4096)
 
 
@@ -344,15 +344,16 @@ def test_reasoning_budget_rejected_before_generation(budget):
         asyncio.run(bare_engine().adecide(REQUEST, reasoning=True, max_reasoning_tokens=budget))
 
 
-def test_generation_preserves_sampling_and_stream_finish_metadata(monkeypatch):
+@pytest.mark.parametrize("terminal", ["length", "stop"])
+def test_generation_preserves_sampling_and_stream_finish_metadata(monkeypatch, terminal):
     monkeypatch.setitem(sys.modules, "vllm", SimpleNamespace(SamplingParams=lambda **kw: kw))
     captured = []
 
     class Generation:
         async def generate(self, request, params, request_id):
             captured.append((request, params))
-            for text, ids, finish in [("a", [1], None), ("ab", [1, 2], "length")]:
-                yield SimpleNamespace(outputs=[SimpleNamespace(text=text, token_ids=ids, finish_reason=finish)])
+            for text, ids, finish in [("a", [1], None), ("ab", [1, 2], terminal)]:
+                yield SimpleNamespace(outputs=[SimpleNamespace(text=text, token_ids=ids, finish_reason=finish, stop_reason=50)])
 
     engine = bare_engine()
     engine.engine = backend._Generation(Generation())
@@ -363,7 +364,7 @@ def test_generation_preserves_sampling_and_stream_finish_metadata(monkeypatch):
 
     events = asyncio.run(consume())
     assert [piece for piece, _ in events] == ["a", "b"]
-    assert events[-1][1] == {"completion_tokens": 2, "finish_reason": "length"}
+    assert events[-1][1] == {"completion_tokens": 2, "finish_reason": terminal, "stop_reason": 50}
     assert captured == [({"prompt_token_ids": [10]}, {
         "max_tokens": 2, "temperature": 0.6, "top_k": 20, "top_p": 0.95})]
 
@@ -548,11 +549,11 @@ def test_both_http_routes_use_disconnect_cleanup(monkeypatch, path):
     from fastapi.testclient import TestClient
     import serve_decide
     called = []
-    original = serve_decide._decision_while_connected
+    original = serve_decide._while_connected
     async def wrapped(work, request):
         called.append(request.url.path)
         return await original(work, request)
-    monkeypatch.setattr(serve_decide, "_decision_while_connected", wrapped)
+    monkeypatch.setattr(serve_decide, "_while_connected", wrapped)
     engine = bare_engine()
     engine.ckpt = "zoro-1"
     async def logits(enc, image):
@@ -562,3 +563,47 @@ def test_both_http_routes_use_disconnect_cleanup(monkeypatch, path):
     response = TestClient(serve_decide.create_app(engine, cancel_disconnected_decisions=True)).post(path, json=body)
     assert response.status_code == 200, response.text
     assert called == [path]
+
+
+def test_small_context_accepted_when_configured_rows_fit(monkeypatch):
+    from transformers import AutoTokenizer
+
+    class ReachedLoading(Exception):
+        pass
+
+    def loading(*args, **kwargs):
+        raise ReachedLoading
+
+    monkeypatch.setattr(AutoTokenizer, "from_pretrained", loading)
+    with pytest.raises(ReachedLoading):
+        backend.VllmDecideEngine("unused", context_length=1024,
+                                 decision_max_state=128, decision_max_row=768)
+
+
+def test_nonstream_chat_disconnect_drains_work(monkeypatch):
+    from fastapi.testclient import TestClient
+    import serve_decide
+    engine = bare_engine()
+    engine.ckpt = "zoro-1"
+    entered, cleaned = [], []
+
+    async def chat(*args, **kwargs):
+        entered.append(True)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaned.append(True)
+
+    engine.achat = chat
+    original = serve_decide._while_connected
+
+    async def disconnected(work, request):
+        class Disconnected:
+            async def is_disconnected(self):
+                return bool(entered)
+        return await original(work, Disconnected())
+
+    monkeypatch.setattr(serve_decide, "_while_connected", disconnected)
+    response = TestClient(serve_decide.create_app(engine, cancel_disconnected_decisions=True)).post(
+        "/v1/chat/completions", json={"messages": [{"role": "user", "content": "hi"}]})
+    assert response.status_code == 499 and entered == cleaned == [True]

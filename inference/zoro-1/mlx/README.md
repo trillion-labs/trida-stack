@@ -95,13 +95,14 @@ model and keeps the vision tower in bf16. Images go through the server as OpenAI
 
 ## Decisions (Zoro-1 pointer head)
 
-A checkpoint with `jev_head.pt` or `jev_head.safetensors` also serves `POST /v1/systemone`
-(TypeSafe's System One API). It uses the same envelope, row encoder, and answer fields as
+A checkpoint with a decision head (`decision_head.pt` / `.safetensors`, or `jev_head.pt` / `.safetensors`) also serves
+`POST /v1/systemone` (TypeSafe's System One API). It uses the same envelope, row encoder, and answer fields as
 [`serve_decide.py`](../serve_decide.py); the MLX-only options `threshold`, `trida_mode` and `stream`
 are extensions here as well. `POST /v1/decide`, the earlier `{"request": {...}}` envelope, still works
 with a `Deprecation` header and goes away in the next release. The canonical `../decide_request.py` is packaged
 unchanged and pinned by a test. Both head formats load without PyTorch. Conversion
-writes an unquantized float32 `jev_head.safetensors` and preserves `temperature.json`.
+writes an unquantized float32 `jev_head.safetensors` (the old name, so older MLX builds can still load the
+converted folder) and preserves `temperature.json`.
 
 ```bash
 curl -s localhost:8080/v1/systemone -H 'Content-Type: application/json' -d '{

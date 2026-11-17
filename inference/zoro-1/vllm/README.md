@@ -12,7 +12,7 @@ uv pip sync -r inference/zoro-1/vllm/requirements-decide-lock.txt
 python inference/zoro-1/vllm/serve_decide.py /path/to/checkpoint --port 30001
 ```
 
-The checkpoint must contain `jev_head.pt`. The encoder, pointer-head definition,
+The checkpoint must contain `decision_head.pt` (preferred) or legacy `jev_head.pt`. The encoder, pointer-head definition,
 answer formatting, and chat HTTP handler are shared with the SGLang path.
 One generation engine handles decisions, reasoning, and chat, loading the
 backbone **once**. Our worker extension reads the last prompt hidden state
@@ -36,7 +36,7 @@ serial execution path.
 For concurrent capture, the extension wraps the V2 worker's `add_requests` and
 `sample` methods. Pre-armed tickets bind each capture to its native request ID
 and final-prefill logits row; normal generation rows are ignored. Missing,
-stale, or ambiguous captures are rejected. HTTP disconnects cancel decision
+stale, or ambiguous captures are rejected. HTTP disconnects cancel nonstreaming decision and chat
 work and clean up its ticket before releasing the slot. The serial fallback
 wraps `compute_logits` instead. Revalidate these internal hooks when upgrading
 vLLM; CUDA graphs, distributed execution, and higher concurrency are unsupported.
@@ -67,7 +67,8 @@ The default context is 16,384 tokens; decision encoding retains the existing
 7,552-token state and 8,192-token row limits. `--decision-max-state`,
 `--decision-max-row`, and `--reasoning-token-limit` use the shared SGLang bounds:
 a state/row gap of at least 640 tokens and a reasoning cap of 4,096 by default,
-configurable up to 8,192. The prompt and budget must fit the context. Unfinished or empty reasoning falls back to direct
+configurable up to 8,192. Smaller contexts are supported when the configured row limit fits.
+The prompt and budget must fit the context. Unfinished or empty reasoning falls back to direct
 answers with `cut` and `answers_source: "direct"`. Reasoning fitting uses the shared SGLang/MLX helper: reserve the longest
 question, preserve the original state and keep the reasoning conclusion. Partial
 reasoning is reported with `reasoning_trimmed: true`; no room yields
@@ -79,10 +80,10 @@ shared HTTP implementation. See [MODEL_CONTRACT.md](../MODEL_CONTRACT.md) for
 the checkpoint and question formats.
 
 The lock captures the tested **Linux x86_64 / Python 3.12** environment. CI scans
-all its pinned packages. A new setuptools advisory, **GHSA-xmj3-9gf7-h52w**, is
-awaiting maintainer disposition: its fix requires 84.1.0, while vLLM 0.32.0 on
-Python 3.12 requires setuptools <81. No new exception has been approved; the
-advisory check blocks until this is resolved. See the validation notes.
+all its pinned packages. Luke approved a Linux-only `not_affected` exception for
+setuptools **GHSA-xmj3-9gf7-h52w**, with re-review on **2026-12-15**. It covers
+only the Windows legacy-install vulnerability; other advisories remain gated.
+See the [recorded scope and evidence](../../../docs/supply-chain/exceptions.md).
 
 ## Native block-diffusion backend (vLLM 0.27.x)
 

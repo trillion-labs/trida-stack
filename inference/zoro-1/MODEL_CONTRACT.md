@@ -67,7 +67,8 @@ on stock SGLang ≥ 0.5.22, so no diffusion architecture or mask token is needed
 1. **An architecture stock SGLang serves** (e.g. `Qwen3_5ForConditionalGeneration`)
    and a chat template, in Hugging Face layout as above. A vision checkpoint also
    ships `preprocessor_config.json`; without it, requests with an image are refused.
-2. **`jev_head.pt`** — the pointer head, saved with `torch.save`:
+2. **`decision_head.pt`** (or `jev_head.pt`, the name training writes; `decision_head.pt` wins if both exist) —
+   the pointer head, saved with `torch.save`:
 
    ```python
    {"head": {"q.weight": [256, d], "q.bias": [256], "k.weight": [256, d], "k.bias": [256]},

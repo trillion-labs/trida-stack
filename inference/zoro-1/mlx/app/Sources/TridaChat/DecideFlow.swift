@@ -46,7 +46,7 @@ extension AppState {
     func startDecide(_ rest: String, chatID: Chat.ID, echo: String = "/decide") {
         append(chatID, prompt(echo, role: .user))   // the command itself, shown like a message
         guard supportsDecision else {
-            append(chatID, prompt("Decision mode needs a model with the decision head (jev_head.pt). "
+            append(chatID, prompt("Decision mode needs a model with the decision head (decision_head.pt). "
                                   + "Settings → Agent → Decision head → Download.", role: .assistant))
             return
         }

@@ -377,8 +377,8 @@ HTTP regression as job 5186. Completed/trimmed reasoning paths are covered by CP
 regressions; this GPU run did not validate a completed reasoning response.
 
 Local checks: **234 CPU tests passed (2 skipped)**, **55 MLX tests passed (1
-skipped)**, Ruff and pinned supply-chain checks passed. The advisory scan remains
-blocked by the unapproved setuptools finding above.
+skipped)**, Ruff and pinned supply-chain checks passed. The advisory scan was blocked at that stage; the later approved Linux-only
+exception is recorded above.
 
 Artifacts on the node are under
 `/mnt/vast/trillion/wonsuk/issue60-vllm-20261113/pr93-review/` (`report.json`,
@@ -403,3 +403,21 @@ polling could swallow task cancellation after inference completed. The helper
 now also signals an explicit stop event. All 49 vLLM boundary tests pass on
 Python 3.10, including the new System One HTTP paths; native capture and sampling
 are unchanged. No GPU reevaluation was run for this fix.
+
+
+### Latest-main review follow-up (2026-11-17)
+
+Merged main after #89 and #97. The engine and probe prefer `decision_head.pt`
+with legacy `jev_head.pt` fallback. Context validation now uses the configured
+row limit instead of a hard-coded 8,192 minimum. Nonstreaming chat shares the
+existing disconnect cancellation and drain helper. Generation metadata retains
+vLLM's native `stop_reason`, including stripped stop-token IDs, for the shared
+reasoning-completion contract in #96.
+
+Follow-up checks: **203 CPU tests passed**, **56 MLX tests passed (2 skipped)**,
+and **21 WorkflowEvals adapter tests passed**. Ruff and supply-chain checks passed.
+No GPU reevaluation was performed. Benchmark
+inputs, sampling, comparison formulas and tolerances are unchanged. Luke's
+requested pooling-versus-capture A/B comparison remains pending; the prepared
+experiment could not obtain a free H100. This follow-up does not establish that
+the capture design is faster, nor resolve the 0.0222 cross-backend parity gap.

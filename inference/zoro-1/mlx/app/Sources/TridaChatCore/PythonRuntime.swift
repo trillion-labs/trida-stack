@@ -103,7 +103,7 @@ public enum PythonRuntime: Equatable, Sendable {
         print("downloaded", hf_hub_download(sys.argv[1], sys.argv[2], local_dir=sys.argv[3]))
         """
 
-    /// One file of a Hugging Face repo into `dir` (e.g. the decision head, jev_head.pt).
+    /// One file of a Hugging Face repo into `dir` (e.g. the decision head, decision_head.pt).
     public func downloadFile(repo: String, file: String, to dir: URL) -> (executable: URL, arguments: [String]) {
         switch self {
         case let .bundled(py): return (py, ["-c", Self.downloadFileScript, repo, file, dir.path])

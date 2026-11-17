@@ -7,14 +7,13 @@ concurrency one retains the original exclusive capture path.
 import asyncio
 from contextlib import aclosing
 import os
-from pathlib import Path
 import threading
 import uuid
 
 import torch
 
 from decide_engine import (DecideEngine, PointerHead, END_THINK, load_image_processor,
-                           serving_temperatures)
+                           serving_temperatures, head_file)
 from decide_request import MAX_STATE, MAX_BRANCH, VISION, validate_decision_limits
 
 
@@ -59,7 +58,8 @@ class _Generation:
                         completion = out.outputs[0]
                         yield {"text": completion.text, "meta_info": {
                             "completion_tokens": len(completion.token_ids),
-                            "finish_reason": completion.finish_reason}}
+                            "finish_reason": completion.finish_reason,
+                            "stop_reason": getattr(completion, "stop_reason", None)}}
 
         if stream:
             return events()
@@ -74,13 +74,13 @@ class _Generation:
 class VllmDecideEngine(DecideEngine):
     """Reuse the decision contract and chat formatting; replace only engine execution."""
 
+    backend_name = "vllm"
+
     def __init__(self, ckpt, mem_fraction=0.5, context_length=16384, reasoning_temperature=0.6,
                  max_concurrency=4, decision_max_state=MAX_STATE, decision_max_row=MAX_BRANCH,
                  reasoning_token_limit=4096):
         if not 0 < mem_fraction < 1:
             raise ValueError("mem_fraction must be > 0 and < 1")
-        if type(context_length) is not int or context_length < MAX_BRANCH:
-            raise ValueError(f"context_length must be at least {MAX_BRANCH} to fit decision rows")
         if type(max_concurrency) is not int or max_concurrency not in (1, 2, 4):
             raise ValueError("max_concurrency must be 1, 2, or 4")
         validate_decision_limits(decision_max_state, decision_max_row, context_length, reasoning_token_limit)
@@ -91,7 +91,7 @@ class VllmDecideEngine(DecideEngine):
         self.context_length = context_length
         self.tok = AutoTokenizer.from_pretrained(ckpt)
         self.proc = load_image_processor(ckpt)
-        saved = torch.load(Path(ckpt) / "jev_head.pt", map_location="cpu", weights_only=True)
+        saved = torch.load(head_file(ckpt), map_location="cpu", weights_only=True)
         self.head = PointerHead(saved["head"]["q.weight"].shape[1], saved["head_dim"]).eval()
         self.head.load_state_dict(saved["head"])
         self.text_T, self.image_T = serving_temperatures(ckpt)

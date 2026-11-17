@@ -14,7 +14,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(1, str(Path(__file__).resolve().parents[1]))
-from decide_engine import DecideEngine, PointerHead, prefix_prompts  # noqa: E402
+from decide_engine import DecideEngine, PointerHead, prefix_prompts, head_file  # noqa: E402
 from decide_request import parse  # noqa: E402
 
 
@@ -36,7 +36,7 @@ def encode(checkpoint):
 
 
 def probabilities(checkpoint, states):
-    saved = torch.load(Path(checkpoint) / "jev_head.pt", map_location="cpu", weights_only=True)
+    saved = torch.load(head_file(checkpoint), map_location="cpu", weights_only=True)
     head = PointerHead(saved["head"]["q.weight"].shape[1], saved["head_dim"]).eval()
     head.load_state_dict(saved["head"])
     temperature_path = Path(checkpoint) / "temperature.json"
@@ -122,7 +122,7 @@ def compare(args):
     report = {"vllm": v["version"], "sglang": s["version"], "checkpoint": args.checkpoint,
               "row_lengths": [len(r["ids"]) for r in v["rows"]],
               "repeat_max_abs": v["repeat_max_abs"], "max_probability_difference": max(differences),
-              "head_sha256": hashlib.sha256((Path(args.checkpoint) / "jev_head.pt").read_bytes()).hexdigest(),
+              "head_sha256": hashlib.sha256(head_file(args.checkpoint).read_bytes()).hexdigest(),
               "min_hidden_cosine_similarity": min(torch.nn.functional.cosine_similarity(a, b).min().item()
                                                   for a, b in zip(v["states"], s["states"])),
               "same_argmax": all(a.argmax() == b.argmax() for a, b in zip(v["probabilities"], s["probabilities"])),

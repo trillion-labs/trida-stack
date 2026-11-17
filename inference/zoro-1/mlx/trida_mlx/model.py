@@ -53,7 +53,7 @@ def resolve_model_path(path_or_id: str) -> Path:
     return Path(
         snapshot_download(
             path_or_id,
-            allow_patterns=["*.json", "*.safetensors", "*.jinja", "*.txt", "*.model", "*.tiktoken", "jev_head.pt"],
+            allow_patterns=["*.json", "*.safetensors", "*.jinja", "*.txt", "*.model", "*.tiktoken", "decision_head.pt", "jev_head.pt"],
         )
     )
 
@@ -82,7 +82,7 @@ def load_model(path_or_id: str = DEFAULT_MODEL, *, dtype=mx.bfloat16, load_visio
     model = build_model(_text_config(cfg))
     weights = {}
     for f in sorted(path.glob("*.safetensors")):
-        if f.name != "jev_head.safetensors":
+        if f.name not in ("decision_head.safetensors", "jev_head.safetensors"):
             weights.update(mx.load(str(f)))
     if not weights:
         raise FileNotFoundError(f"no *.safetensors in {path}")

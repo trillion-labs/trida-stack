@@ -398,10 +398,13 @@ finding into a decision that comes back around.
     ModelOpt export import at srt/model_loader/loader.py:2742 (from modelopt.torch.export
     import export_hf_checkpoint), on an optional export path whose nvidia-modelopt package
     is not in the lock; it writes a checkpoint and loads no pt2 archive. The
-    repository's own torch.load() calls read jev_head.pt pointer-head weights that the
-    trainer writes (train/train.py:231, inference/zoro-1/decide_engine.py:118,
-    scripts/export_kev_checkpoint.py:32, train/tools/export_kev_checkpoint.py:28), and
-    train/tools/jev_parity_trida.py:25 a test head the same tool writes; none are pt2 archives.
+    repository's own torch.load() calls read pointer-head weights (decision_head.pt, or
+    jev_head.pt as the trainer writes it) (train/models/build.py:47,
+    inference/zoro-1/decide_engine.py:127, scripts/export_decision_checkpoint.py:41,
+    train/tools/export_decision_checkpoint.py:37,
+    inference/zoro-1/vllm/vllm_decide_engine.py — VllmDecideEngine.__init__),
+    and train/tools/decision_parity_trida.py:26
+    a test head the same tool writes; none are pt2 archives.
   approver: Trillion Labs research team
   expires: 2026-12-31
 
