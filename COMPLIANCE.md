@@ -11,7 +11,6 @@ serves (§4b).
 
 | Component | Path | Upstream | License |
 |---|---|---|---|
-| IFEval scorer | `inference/zoro-1/ifeval_lib/` | [google-research · instruction_following_eval](https://github.com/google-research/google-research/tree/master/instruction_following_eval) | **Apache-2.0** |
 | Jev request encoding (vendored, adapted) | `inference/zoro-1/jev.py`, `inference/zoro-1/jev_head.py`, `scripts/export_decision_checkpoint.py`, `inference/zoro-1/decide_request.py`, `inference/zoro-1/decide_engine.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
 | Typed-decision training, kev scheme (vendored, adapted) | `train/data/decision.py`, `train/models/decision.py`, `train/tools/export_decision_checkpoint.py` | [jaredpalmer/kev](https://github.com/jaredpalmer/kev) | **Apache-2.0** |
 | mlx-vlm Qwen3-VL vision encoder (adapted) | `inference/zoro-1/mlx/trida_mlx/vision.py` | [Blaizzy/mlx-vlm](https://github.com/Blaizzy/mlx-vlm) `mlx_vlm/models/qwen3_vl/vision.py` | **MIT** |
@@ -112,7 +111,6 @@ None are redistributed from this repo — all are downloaded at eval time. See
 |---|---|---|---|
 | GSM8K | `inference/zoro-1/eval.py` | openai/gsm8k | **MIT** |
 | MMLU-Pro | `inference/zoro-1/eval.py` | [TIGER-Lab/MMLU-Pro](https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro) | **MIT** |
-| IFEval | `inference/zoro-1/eval_ifeval.py` | google/IFEval | **Apache-2.0** |
 | benchmark suites | `benchmark/` | each harness's own datasets | per upstream |
 | evalsafe invoice processing | `benchmark/workflow_evals/` | [typesafe/evalsafe-invoice-processing](https://huggingface.co/datasets/typesafe/evalsafe-invoice-processing) | **Apache-2.0** |
 | evalsafe customer service, security incidents, agent-trace observability | `benchmark/workflow_evals/` (local evaluation only, behind `--allow-unverified-datasets`) | [typesafe](https://huggingface.co/typesafe) | **No licence stated**: maintainer exception for local evaluation, no redistribution ([intake 0011](docs/oss/intake/0011-workflowevals.md)) |

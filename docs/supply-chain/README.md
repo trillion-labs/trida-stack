@@ -175,7 +175,7 @@ Apache-2.0 patch.
   ruleset has `require_code_owner_review: false` and `required_approving_review_count: 0`,
   so the file currently documents intent rather than gating anything.
 - Dependencies are declared as ranges in `requirements.txt`; the resolved set lives in
-  `requirements-lock.txt` (85 packages) and `inference/zoro-1/requirements-lock.txt` (49).
+  `requirements-lock.txt` (85 packages) and `inference/zoro-1/requirements-lock.txt` (38).
   GravityOCR's server environment is resolved separately, for Python 3.12, into
   `inference/gravityocr/sglang/requirements-lock.txt` (177, including SGLang's build
   backend) from the `requirements.in`, `overrides.txt` and `validated-freeze.txt` beside

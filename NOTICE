@@ -10,14 +10,6 @@ retains its own upstream license.
 Bundled third-party code (redistributed in this repository)
 ================================================================================
 
-IFEval — Instruction-Following Eval
-  Copyright The Google Research Authors.
-  License: Apache License 2.0
-  Source:  https://github.com/google-research/google-research/tree/master/instruction_following_eval
-  Bundled: inference/zoro-1/ifeval_lib/ — used (aside from packaging) unmodified to score
-           the eval_ifeval.py benchmark. See inference/zoro-1/NOTICE for the folder-local
-           notice.
-
 Kev — typed-decision (Jev / TypeSafe System One) encoding and training
   Copyright Jared Palmer and the kev contributors.
   License: Apache License 2.0

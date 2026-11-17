@@ -1,8 +1,6 @@
 # Resolved dependency set for the inference client/eval tools.
 # See the header of ../requirements-lock.txt for why this exists and how to regenerate
 # (same flags, with inference/zoro-1/requirements.txt as input).
-absl-py==2.5.1
-    # via -r inference/zoro-1/requirements.txt
 aiohappyeyeballs==2.7.1
     # via aiohttp
 aiohttp==3.14.5
@@ -22,14 +20,8 @@ certifi==2026.10.18
     #   requests
 charset-normalizer==3.5.2
     # via requests
-click==8.5.0
-    # via nltk
-cloudpickle==3.1.2
-    # via joblib
 datasets==5.0.1
     # via -r inference/zoro-1/requirements.txt
-defusedxml==0.7.1
-    # via nltk
 dill==0.4.1
     # via
     #   datasets
@@ -64,20 +56,12 @@ idna==3.20
     #   httpx
     #   requests
     #   yarl
-immutabledict==4.3.1
-    # via -r inference/zoro-1/requirements.txt
-joblib==1.6.0
-    # via nltk
-langdetect==1.0.9
-    # via -r inference/zoro-1/requirements.txt
 multidict==7.1.0
     # via
     #   aiohttp
     #   yarl
 multiprocess==0.70.19
     # via datasets
-nltk==3.10.4
-    # via -r inference/zoro-1/requirements.txt
 numpy==2.2.6
     # via
     #   datasets
@@ -102,22 +86,17 @@ pyyaml==6.0.3
     # via
     #   datasets
     #   huggingface-hub
-regex==2026.9.29
-    # via nltk
 requests==2.34.2
     # via
     #   -r inference/zoro-1/requirements.txt
     #   datasets
     #   huggingface-hub
 six==1.17.0
-    # via
-    #   langdetect
-    #   python-dateutil
+    # via python-dateutil
 tqdm==4.70.1
     # via
     #   datasets
     #   huggingface-hub
-    #   nltk
 typing-extensions==4.16.0
     # via
     #   aiohttp

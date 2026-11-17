@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `inference/zoro-1/eval_ifeval.py` and the bundled Google Research IFEval scorer (`inference/zoro-1/ifeval_lib/`),
+  with their dependencies (`absl-py`, `immutabledict`, `langdetect`, `nltk`) and nltk's advisory exception. Run IFEval
+  through lm-evaluation-harness (`benchmark/`).
+- Development notes and one-off cluster jobs that nothing referenced: `inference/zoro-1/vllm/docs/`,
+  `inference/zoro-1/vllm/tools/`, `train/docs/`, `train/tools/draftalign/`, `train/tools/optimize_training/` and
+  `benchmark/serving/dflash/`. They stay in git history.
+- Unused scripts: `benchmark/scripts/eval_trida_mps.sh`, `benchmark/scripts/eval_trida_vllm_cpu.sh`,
+  `benchmark/bfcl_v4/run_eval_ext.sh`, and the disabled `.github/dependabot.yml.disabled`.
+
 ### Changed
 
 - `inference/gravityocr/serve_mac.py` no longer needs the Gravity app: it runs the MLX engine copied into

@@ -48,7 +48,7 @@ scheme needs its own config — copy one in `configs/` and pass `--config`.
 - [ ] `serve.py --model <you> --mode causal --dry-run` prints the expected command
 - [ ] serves and answers a prompt via `chat.py`
 
-If all five pass, the eval harness (`eval.py`, `eval_ifeval.py`) will score it with
+If all five pass, the eval harness (`eval.py`) will score it with
 no changes.
 
 ## Decision checkpoints (`serve_decide.py`)

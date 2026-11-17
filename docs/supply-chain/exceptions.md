@@ -157,26 +157,6 @@ finding into a decision that comes back around.
     resolution environment.
   approver: Trillion Labs research team
   expires: 2026-12-31
-- id: PYSEC-2026-3740
-  aliases: [GHSA-8mgp-746c-j5xp, CVE-2026-81726]
-  component: nltk
-  status: not_affected
-  reason: >-
-    File sandbox bypass in model import/export helpers - TransitionParser.train/parse,
-    AveragedPerceptron.save/load, PerceptronTagger.save_to_json, save_maxent_params.
-    Not yet patched upstream. The advisory requires the application to enable pathsec
-    enforcement and let untrusted input choose model paths; we do neither.
-  evidence: >-
-    nltk is used only by the vendored IFEval scorer, for word_tokenize,
-    RegexpTokenizer and loading the punkt tokenizer. grep for TransitionParser,
-    AveragedPerceptron, PerceptronTagger, save_maxent_params and pathsec returns
-    0 matches across the repository.
-  note: >-
-    Unrelated to this advisory, instructions_util.py loads punkt via a .pickle. That is
-    NLTK's own downloaded data rather than untrusted input, but it is the kind of
-    deserialization path worth revisiting if the scorer is ever fed external data.
-  approver: Trillion Labs research team
-  expires: 2026-12-31
 
 # ---- inference/gravityocr/ server environment ----
 # Found by scanning inference/gravityocr/sglang/requirements-lock.txt. That environment is
@@ -428,9 +408,7 @@ finding into a decision that comes back around.
     as Qwen/*), as for PYSEC-2026-2289. The early write lands in the local modules cache,
     and executing it still needs trust_remote_code. The repository passes it when a user
     asks for it (train --trust_remote_code), and hard-codes it only in internal tools that
-    load our own Trida checkpoints: benchmark/serving/serve_trida_openai.py:210-212, the
-    draft-alignment tools train/tools/draftalign/longhorizon.py:35-39 and slot_diag.py:44-48
-    (both through HFBlockDiffusionHybrid) and gen_selfdistill.py:21 (a tokenizer), and the
+    load our own Trida checkpoints: benchmark/serving/serve_trida_openai.py:210-212 and the
     zoro-1 serving launchers (inference/zoro-1/serve.py:173 and the vllm/ scripts), which
     pass --trust-remote-code to SGLang or vLLM. Nothing here calls
     generate(custom_generate=...).
@@ -438,8 +416,7 @@ finding into a decision that comes back around.
     grep for 'custom_generate' returns 0 matches in this repository outside the docs/
     records (this file and docs/oss/intake/0008-transformers.md), and 0 matches over
     python/sglang with the patch applied. Generative from_pretrained() call sites:
-    train/hf_block_diffusion.py:122 (HFBlockDiffusionHybrid inherits it, so it also covers
-    train/tools/draftalign/longhorizon.py and slot_diag.py),
+    train/hf_block_diffusion.py:122 (HFBlockDiffusionHybrid inherits it),
     benchmark/serving/serve_qwen3_ar_openai.py:58, serve_qwen3_bd_openai.py:89 and
     serve_trida_openai.py:211. inference/zoro-1/ calls from_pretrained() only for
     tokenizers and image processors, which do not reach load_custom_generate().

@@ -8,7 +8,7 @@
 | 사용 위치 | `benchmark/` |
 | 평가 기록일 | 2026-10-13 |
 | 결정 시점 | vendored when the evaluation harness was first assembled |
-| 결정 | **채택** |
+| 결정 | **폐기** (2026-11-17): removed with `inference/zoro-1/eval_ifeval.py`; IFEval runs through lm-evaluation-harness in `benchmark/` |
 | 총점 | **82 / 100** |
 | 재평가 예정 | 2027-10-13 |
 

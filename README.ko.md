@@ -26,7 +26,7 @@
 | ⚡ | **`inference/<model>/`** | **nano-inference: nanoGPT 스타일의 간결한 모델별 서빙 스택.** [`inference/zoro-1/`](inference/zoro-1/)은 `trillionlabs/Zoro-1`을 서빙합니다. 하나의 체크포인트로 self-speculative 디코딩과 유형별 의사결정을 지원합니다. **SGLang**, **vLLM**, **MLX** 백엔드에서 OpenAI 호환 API를 제공합니다. [`inference/gravityocr/`](inference/gravityocr/)는 업스트림 SGLang에서 self-speculative 디코딩으로 `trillionlabs/GravityOCR`(GLM-OCR 기반 문서 OCR)를 서빙합니다. |
 
 `train/`과 `inference/` 사이에는 상호 임포트 의존성이 없습니다. `benchmark/`는 에이전트 평가를 위한 종합 평가 도구를,
-`inference/`는 품질과 처리량을 간단히 측정할 수 있는 벤치마크(gsm8k / mmlu_pro / ifeval)를 제공합니다.
+`inference/`는 품질과 처리량을 간단히 측정할 수 있는 벤치마크(gsm8k / mmlu_pro)를 제공합니다.
 
 ---
 
@@ -248,8 +248,7 @@ inference/                     nano-inference: 모델별로 구성된 간결한 
     serve_decide.py, decide_*.py, jev*.py
                                기본 SGLang 배포판에서 실행하는 의사결정 서버 (/v1/systemone)
     chat.py                    OpenAI 호환 클라이언트
-    eval.py / eval_ifeval.py   gsm8k / mmlu_pro / ifeval 품질·처리량 평가
-    ifeval_lib/                저장소에 포함된 IFEval 채점 코드
+    eval.py                    gsm8k / mmlu_pro 품질·처리량 평가
     configs/                   self-spec 디코딩 설정 (b15_g8)
     sglang/                    패치된 SGLang 백엔드 설치 절차
     vllm/                      외부 vLLM 플러그인 (self-spec)

@@ -5,10 +5,9 @@
 # ruff config (target-version, line-length) lives in pyproject.toml [tool.ruff].
 # Never rewrite these: .patch files are applied with exact context matching (trimming
 # whitespace breaks `git apply`, and those patches are how the noncommercial kernels are
-# reconstituted); inference/zoro-1/ifeval_lib/ is redistributed third-party code that NOTICE
-# describes as unmodified; inference/gravityocr/mac/ocr/ is the Gravity app's engine, kept byte for
+# reconstituted); inference/gravityocr/mac/ocr/ is the Gravity app's engine, kept byte for
 # byte (its VENDORED.sha256 is checked by a test); LICENSE and the upstream licence/notice files are legal text.
-exclude: '(\.patch$|^inference/zoro-1/ifeval_lib/|^inference/gravityocr/mac/ocr/|^LICENSE$|LICENSE\..*$|NOTICE\..*$)'
+exclude: '(\.patch$|^inference/gravityocr/mac/ocr/|^LICENSE$|LICENSE\..*$|NOTICE\..*$)'
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
