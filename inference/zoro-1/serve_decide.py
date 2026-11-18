@@ -22,10 +22,11 @@ Usage:
 
 Needs stock SGLang >= 0.5.22 (Apache-2.0) plus fastapi and uvicorn in the same environment; see README "Decisions".
 A decision checkpoint is a Trida checkpoint with decision_head.pt or jev_head.pt (MODEL_CONTRACT.md); an optional temperature.json sets
-its serving temperatures. Generation here is causal decoding; the two-stream decode modes are serve.py's others.
+its serving temperatures. Generation is causal on the stock backend and self-spec on the optional patched backend.
 """
 import argparse
 import asyncio
+from contextlib import aclosing
 import json
 import os
 import re
@@ -154,7 +155,7 @@ def _num(body, key, default, cast):
 
 
 async def _while_connected(coro, request):
-    """Cancel nonstreaming work when its HTTP client disconnects."""
+    """Cancel nonstreaming inference work when its HTTP client disconnects."""
     from fastapi import HTTPException
 
     stop_watch = asyncio.Event()
@@ -170,7 +171,7 @@ async def _while_connected(coro, request):
         if work in done:
             return await work
         await watch
-        raise HTTPException(499, "client disconnected")
+        raise HTTPException(499, "request client disconnected")
     finally:
         # ASGI disconnect polling can swallow cancellation (notably on Python 3.10).
         # The explicit stop signal also lets the watcher exit cooperatively.
@@ -191,21 +192,37 @@ async def _while_connected(coro, request):
 
 
 def create_app(engine, cancel_disconnected_decisions=False):
+    cancel_disconnected_decisions = cancel_disconnected_decisions or getattr(engine, "cancel_disconnected_decisions", False)
     from fastapi import Body, FastAPI, HTTPException, Response, Request
-    from fastapi.responses import StreamingResponse
+    from fastapi.responses import JSONResponse, StreamingResponse
 
-    from decide_request import RequestError, systemone_request, systemone_response
+    from decide_request import RequestError, systemone_request, systemone_response, systemone_options
 
     name = os.path.basename(os.path.normpath(engine.ckpt))
     app = FastAPI(title="Trida decisions")
 
+    @app.exception_handler(RequestError)
+    async def request_error(_request, exc):
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    def capabilities():
+        return {"backend": getattr(engine, "backend_name", "causal"),
+                "images": getattr(engine, "backend_name", "causal") != "self-spec" and getattr(engine, "proc", None) is not None,
+                "auto_reasoning": getattr(engine, "supports_auto_reasoning", False),
+                "serial": getattr(engine, "backend_name", "causal") == "self-spec",
+                "reasoning_sampling": getattr(engine, "sampling", {
+                    "temperature": getattr(engine, "reasoning_temperature", 0.6), "top_p": 0.95, "top_k": 20})}
+
     @app.get("/health")
     def health():
-        return {"ok": True, "model": name}
+        if getattr(engine, "_failed", False):
+            return JSONResponse(status_code=503, content={"ok": False, "model": name,
+                                                         "error": "engine cleanup failed; restart required"})
+        return {"ok": True, "model": name, "capabilities": capabilities()}
 
     @app.get("/v1/models")
     def models():
-        return {"object": "list", "data": [{"id": name, "object": "model", "created": 0, "owned_by": "trida"}]}
+        return {"object": "list", "data": [{"id": name, "object": "model", "created": 0, "owned_by": "trida", "capabilities": capabilities()}]}
 
     @app.post("/v1/systemone")
     async def systemone(http_request: Request, body: dict = Body(...)):
@@ -213,10 +230,12 @@ def create_app(engine, cancel_disconnected_decisions=False):
             return HTTPException(422, [{"loc": ["body"], "msg": msg, "type": "value_error"}])
         try:
             request, opts = systemone_request(
-                body, reasoning_token_limit=getattr(engine, "reasoning_token_limit", 4096))
+                body, extensions=("threshold",),
+                auto_reasoning=getattr(engine, "supports_auto_reasoning", False),
+                reasoning_token_limit=getattr(engine, "reasoning_token_limit", 4096))
             # the image, if any, is in the request (base64 or a data URL): requests never name server files
-            work = engine.adecide(request, None, opts.get("temperature"), opts.get("reasoning", False),
-                                   max_reasoning_tokens=opts.get("max_reasoning_tokens"))
+            options = {key: opts[key] for key in ("max_reasoning_tokens", "threshold") if key in opts}
+            work = engine.adecide(request, None, opts.get("temperature"), opts.get("reasoning", False), **options)
             result = await _while_connected(work, http_request) if cancel_disconnected_decisions else await work
         except RequestError as e:
             raise invalid(str(e)) from e
@@ -229,10 +248,12 @@ def create_app(engine, cancel_disconnected_decisions=False):
         if "request" not in body:
             raise HTTPException(400, "body must be {\"request\": {...}, \"reasoning\"?: bool, \"temperature\"?: float, \"max_reasoning_tokens\"?: int (within server reasoning-token-limit; default server cap)}")
         try:
-            budget = _num(body, "max_reasoning_tokens", None, int)
-            # Images use the shared request contract; server file paths are not accepted.
-            work = engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
-                                   max_reasoning_tokens=budget)
+            opts = systemone_options(
+                {key: body[key] for key in ("reasoning", "temperature", "max_reasoning_tokens", "threshold") if key in body},
+                auto_reasoning=getattr(engine, "supports_auto_reasoning", False),
+                reasoning_token_limit=getattr(engine, "reasoning_token_limit", 4096))
+            options = {key: opts[key] for key in ("max_reasoning_tokens", "threshold") if key in opts}
+            work = engine.adecide(body["request"], None, opts.get("temperature"), opts.get("reasoning", False), **options)
             return await _while_connected(work, http_request) if cancel_disconnected_decisions else await work
         except RequestError as e:
             raise HTTPException(400, str(e)) from e
@@ -243,10 +264,13 @@ def create_app(engine, cancel_disconnected_decisions=False):
         if not isinstance(messages, list) or not messages:
             raise HTTPException(400, "messages must be a non-empty list")
         thinking = (body.get("chat_template_kwargs") or {}).get("enable_thinking")
+        sampling = getattr(engine, "sampling", {"temperature": 0.6, "top_p": 0.95, "top_k": 20})
         kw = dict(tools=body.get("tools"), max_new_tokens=_num(body, "max_tokens", 2048, int),
-                  temperature=_num(body, "temperature", 0.6, float), top_p=_num(body, "top_p", 0.95, float),
-                  top_k=_num(body, "top_k", 20, int), presence_penalty=_num(body, "presence_penalty", 0.0, float),
+                  temperature=_num(body, "temperature", sampling["temperature"], float), top_p=_num(body, "top_p", sampling["top_p"], float),
+                  top_k=_num(body, "top_k", sampling["top_k"], int), presence_penalty=_num(body, "presence_penalty", 0.0, float),
                   enable_thinking=thinking)
+        if hasattr(engine, "validate_chat"):
+            engine.validate_chat(messages, **kw)
         cid, created = f"chatcmpl-{uuid.uuid4().hex[:24]}", int(time.time())
         thinks = thinking is not False
 
@@ -260,12 +284,13 @@ def create_app(engine, cancel_disconnected_decisions=False):
                     return f"data: {json.dumps(c)}\n\n"
                 yield chunk({"role": "assistant"})
                 split, stats = TurnSplitter(thinks, kw["tools"]), {}
-                async for piece in engine.achat_stream(messages, **kw):
-                    if isinstance(piece, dict):
-                        stats = piece
-                        continue
-                    for field, text in split.feed(piece):
-                        yield chunk({field: text})
+                async with aclosing(engine.achat_stream(messages, **kw)) as stream:
+                    async for piece in stream:
+                        if isinstance(piece, dict):
+                            stats = piece
+                            continue
+                        for field, text in split.feed(piece):
+                            yield chunk({field: text})
                 rest, calls = split.finish(stats.get("finish_reason") == "length")
                 for field, text in rest:
                     yield chunk({field: text})
@@ -302,26 +327,42 @@ def main():
                     help="decision checkpoint directory (with decision_head.pt or jev_head.pt); default $TRIDA_DECIDE_MODEL")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=30001)
-    ap.add_argument("--mem-fraction", type=float, default=0.8)
+    ap.add_argument("--mem-fraction", type=float, default=None,
+                    help="static memory fraction (default 0.8 for causal, 0.5 for self-spec)")
     ap.add_argument("--context-length", type=int, default=16384)
-    ap.add_argument("--decision-max-state", type=int, default=7552,
-                    help="state token limit including delimiters; default 7552")
-    ap.add_argument("--decision-max-row", type=int, default=8192,
-                    help="complete decision-row token limit; default 8192")
+    ap.add_argument("--backend", choices=["causal", "self-spec"], default="causal",
+                    help="self-spec: experimental text-only server; parity is not yet accepted")
+    ap.add_argument("--self-spec-config", help="self-spec YAML; fixes sampling for every generation request")
+    ap.add_argument("--decision-max-state", type=int, default=7552)
+    ap.add_argument("--decision-max-row", type=int, default=8192)
     ap.add_argument("--reasoning-token-limit", type=int, default=4096,
-                    help="maximum requested reasoning budget, up to 8192; default 4096")
+                    help="shared reasoning budget cap (1..8192; default 4096)")
     a = ap.parse_args()
     if not a.model:
         ap.error("give a decision checkpoint (positional) or set TRIDA_DECIDE_MODEL")
+    if a.mem_fraction is None:
+        a.mem_fraction = 0.5 if a.backend == "self-spec" else 0.8
     import uvicorn
 
-    from decide_engine import DecideEngine
-    engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length,
-                          decision_max_state=a.decision_max_state, decision_max_row=a.decision_max_row,
-                          reasoning_token_limit=a.reasoning_token_limit)
+    if a.backend == "self-spec":
+        from self_spec_decide_engine import SelfSpecDecideEngine
+        engine = SelfSpecDecideEngine(a.model, mem_fraction_static=a.mem_fraction,
+                                      context_length=a.context_length, config=a.self_spec_config,
+                                      decision_max_state=a.decision_max_state, decision_max_row=a.decision_max_row,
+                                      reasoning_token_limit=a.reasoning_token_limit)
+    else:
+        if a.self_spec_config:
+            ap.error("--self-spec-config requires --backend self-spec")
+        from decide_engine import DecideEngine
+        engine = DecideEngine(a.model, mem_fraction_static=a.mem_fraction, context_length=a.context_length,
+                              decision_max_state=a.decision_max_state, decision_max_row=a.decision_max_row,
+                              reasoning_token_limit=a.reasoning_token_limit)
     # The HTTP server runs on the engine's own event loop, so concurrent requests batch in the engine.
     server = uvicorn.Server(uvicorn.Config(create_app(engine), host=a.host, port=a.port, loop="none"))
-    engine.loop.run_until_complete(server.serve())
+    try:
+        engine.loop.run_until_complete(server.serve())
+    finally:
+        engine.shutdown()
 
 
 if __name__ == "__main__":   # sglang.Engine spawns its workers, which re-import this file

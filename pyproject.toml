@@ -46,6 +46,8 @@ testpaths = [
   "inference/zoro-1/test_smoke.py",
   "inference/zoro-1/test_jev.py",
   "inference/zoro-1/test_decide_cpu.py",
+  "inference/zoro-1/test_self_spec_decide_cpu.py",
+  "inference/zoro-1/test_self_spec_review_cpu.py",
   "inference/zoro-1/test_vllm_decide_cpu.py",
   "inference/zoro-1/vllm/vllm_native_diffusion/test_two_stream_cpu.py",
   "inference/gravityocr/test_gravityocr_patch.py",

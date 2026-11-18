@@ -5,7 +5,7 @@
 직접개발,trillionlabs/Zoro (모델 가중치; 구 Trida2.0-4B),—,Apache-2.0,공개 체크포인트,https://huggingface.co/trillionlabs/Zoro,HF download,research team,2026-11-09,양호,저장소에 미포함. 공개·비게이트. trillionlabs/Trida2.0-4B는 여기로 리디렉트됨.
 외부유입,Qwen/Qwen3.5-4B (베이스 모델),—,Apache-2.0,파생 모델의 베이스,https://huggingface.co/Qwen/Qwen3.5-4B,HF download,research team,2026-10-01,양호,사용 제한 조항 없음. 파생물에 전파되는 제약 없음.
 수정포함,HybridDiffusion block_gated_delta_rule,6ca547a,PolyForm-NC-1.0.0,train/block_gated_delta_rule/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,build-time fetch,research team,2026-10-01,양호,저장소에 미포함. trillion_mods.patch 적용. 체크섬 tools/kernel-checksums.txt.
-수정포함,HybridDiffusion sglang backend,6ca547a,PolyForm-NC-1.0.0,inference/zoro-1/sglang/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,build-time fetch,research team,2026-10-01,양호,상위 SGLang은 Apache-2.0. two_stream_diffusion.patch 14개 파일.
+수정포함,HybridDiffusion sglang backend,6ca547a,PolyForm-NC-1.0.0,inference/zoro-1/sglang/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,build-time fetch,research team,2026-10-01,양호,상위 SGLang은 Apache-2.0. two_stream_diffusion.patch 14개 파일. 선택적 decision_readout.patch 4개 파일; 단일 모델 직렬 판단.
 수정포함,HybridDiffusion block_causal_readout,6ca547a,PolyForm-NC-1.0.0,inference/zoro-1/vllm/vllm_native_diffusion/,https://github.com/yuchen-zhu-zyc/HybridDiffusion,build-time fetch,research team,2026-10-01,양호,저장소에 미포함. KERNELS.md 레시피.
 외부유입,IFEval scorer,vendored snapshot,Apache-2.0,inference/zoro-1/ifeval_lib/,https://github.com/google-research/google-research,vendored,research team,2026-10-01,조치중,저장소에 포함된 유일한 3rd-party 소스. 버전 미고정.
 외부유입,torch,2.11.0,BSD-3-Clause,전체,https://github.com/pytorch/pytorch,pip,research team,2026-10-01,조치중,PYSEC-2025-194 — exceptions.md 참조.

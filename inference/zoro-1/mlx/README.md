@@ -130,11 +130,15 @@ curl -s localhost:8080/v1/systemone -H 'Content-Type: application/json' -d '{
   `--decision-image-temperature` and a per-request `temperature` override them. For CUDA
   parity comparisons, explicitly select the same temperature on both servers.
 - `reasoning` defaults to `false`; `true` generates self-spec reasoning before deciding, with
-  `max_reasoning_tokens` defaulting to the configured cap (4096). `"auto"` first decides directly, then reasons if
-  any question's top probability is below `threshold` (default 0.7). Auto reasoning uses
-  self-spec and the configured reasoning cap (4096 tokens by default). `trida_mode` can select `causal` or `self-spec`.
+  `max_reasoning_tokens` defaulting to the configured reasoning cap. `"auto"` first decides directly, then reasons if
+  any question's top probability is below `threshold` (default 0.7). Both modes use
+  self-spec and the shared 4096-token cap by default. `--reasoning-token-limit`
+  can raise that cap to 8192. `trida_mode` can select `causal` or `self-spec`.
   Completed reasoning is fitted to the state budget, keeping its conclusion. Incomplete
-  or looping reasoning keeps the direct answer and reports `cut`.
+  or looping reasoning keeps the direct answer and reports `cut` as `length`,
+  `empty`, or `state_limit`. `answers_source` identifies `direct` or `reasoned`;
+  `reasoning_trimmed` reports conclusion-preserving fitting. `usage` counts the
+  decision rows actually scored and generated reasoning tokens.
 - `stream: true` sends SSE data objects with `type: direct`, `type: reasoning` (text pieces),
   and `type: result`, followed by `[DONE]`. The `direct` event includes `reason` when
   reasoning will run, for progress displays. Auto results include `direct`, `escalated`, and,
@@ -298,3 +302,8 @@ compares answer keys, types, and numeric fields, and exits nonzero on mismatches
 Decision reasoning budgets are capped by `--reasoning-token-limit` (default 4096,
 configurable up to 8192). Auto reasoning uses that cap; explicit reasoning defaults
 to the configured cap (4096 by default). Requests above the cap return HTTP 422 on `/v1/systemone` (400 on the deprecated alias).
+
+Reasoning is complete only after a native `stop` plus `</think>` text or its stop
+token. `reasoning_stats.finish_reason` stays native; `reasoning_complete` records
+this separate check. Explicit budgets exceeding prompt/context space are rejected
+(422 on `/v1/systemone`), while an omitted budget fits the remaining context.

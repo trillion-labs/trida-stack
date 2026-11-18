@@ -67,6 +67,11 @@ glue, the HF/AR model code, benchmark wrappers) does not itself redistribute thi
 noncommercial code. The GravityOCR recipe in `inference/gravityocr/` does not use these
 kernels at all: it builds on upstream SGLang (§1, §2), which is Apache-2.0.
 
+The optional `inference/zoro-1/sglang/decision_readout.patch` is Trillion Labs'
+Apache-2.0 overlay (see its header and `sglang/NOTICE`). That covers our patch;
+it does not relicense the fetched HybridDiffusion backend or remove its
+noncommercial-use restriction.
+
 ## 2. Runtime dependencies (installed separately)
 
 | Component | Role | Upstream | License |

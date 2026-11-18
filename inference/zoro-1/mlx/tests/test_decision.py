@@ -133,7 +133,7 @@ def test_reasoning_and_temperature(decider, monkeypatch):
 
     def think(request, image, max_tokens, **kwargs):
         seen.append(max_tokens)
-        return {"text": "IT handles printers", "ended": "complete", "stats": {}}
+        return {"text": "IT handles printers", "ended": "complete", "stats": {"reasoning_complete": True}}
 
     monkeypatch.setattr(decider, "think", think)
     result = decider.decide(REQ, reasoning=True, max_reasoning_tokens=32)

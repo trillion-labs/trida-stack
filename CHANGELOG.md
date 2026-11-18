@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Shared reasoning completion now requires native `stop` plus `</think>` or its
+  matching stop token, including MLX and vLLM's stripped-token metadata. EOS without
+  closing thinking returns direct fallback. `reasoning_stats.finish_reason` keeps
+  the native reason; `reasoning_complete` reports the separate check. Explicit
+  budgets that do not fit the context are rejected; only defaults are fitted.
+- Self-spec streaming admission follows native generation rather than client
+  reading speed. Disconnected nonstreaming chats are cancelled. Readout failures
+  abort individual requests; version 2 of the readout overlay and a bounded wait
+  prevent scheduler failures or indefinite admission holds.
+- `/v1/decide` rejects non-boolean/non-auto reasoning values such as `"yes"` and `1`.
+  Models/health expose backend capabilities; reasoning stats include sampling.
+  Self-spec uses `SGLANG_PYTHON`; `DECIDE_PYTHON` remains the stock environment.
+
+- Decision reasoning: CUDA and MLX now use the configured reasoning cap for both
+  `reasoning: true` and `"auto"` when the budget is omitted or null (default 4096).
+  Boolean reasoning previously defaulted to 768; MLX auto previously used 8192.
+  Explicit budgets above the configured cap are rejected; the cap can be raised
+  with `--reasoning-token-limit` up to 8192.
+- MLX decision fallback: `cut` is now `length`, `empty` or `state_limit` instead of
+  free text. CUDA and MLX report `answers_source` and `reasoning_trimmed` so clients
+  can distinguish direct fallback from completed, possibly trimmed reasoning.
+- Causal `reasoning: true` computes direct answers first for fallback, adding a
+  direct pass and the `direct`, `escalated`, `threshold` and `usage` response fields.
+
 - `inference/gravityocr/serve_mac.py` no longer needs the Gravity app: it runs the MLX engine copied into
   `inference/gravityocr/mac/ocr`, in a venv `mac/setup.sh` builds. **Breaking** for the command from #86:
   `--gravity-app` is replaced by `--engine` (a directory holding the `ocr` package; pass
@@ -30,6 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prompt than earlier baselines.
 
 ### Added
+
+- Causal decision serving: `reasoning: "auto"` with a configurable `threshold`,
+  and logical token usage for scored decision rows and generated reasoning.
+- Decision server flags: `--decision-max-state`, `--decision-max-row` and
+  `--reasoning-token-limit`; experimental self-spec decisions via
+  `serve_decide.py --backend self-spec` or `serve.py --decision-backend self-spec`.
+  The self-spec backend is text-only and serial; probability parity is not yet accepted.
 
 - Experimental stock vLLM decision serving at `/v1/systemone`, with one model,
   request-indexed hidden-state capture, shared reasoning/usage and disconnect cleanup.
@@ -54,12 +85,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decisions in TypeSafe's System One API 0.2.0 shape (`{"state", "model", "questions"}` ->
   `{"model", "answers", "usage"}`, score `legend` as `{"0": level, ...}`, 422 validation errors), so
   System One clients such as the TypeSafe SDK work unchanged. `images`, `reasoning`,
-  `max_reasoning_tokens` and `temperature` are extensions (#92),
+  `max_reasoning_tokens`, `temperature` and CUDA/MLX auto `threshold` are extensions (#92),
   checked the same way on both servers (a bad value is a 422).
 - System One reasoning: `POST /v1/systemone` (and its deprecated `/v1/decide` alias) with `"reasoning": true` (CUDA `inference/zoro-1/serve_decide.py`
   and the MLX server): `max_reasoning_tokens` (default: the configured cap, 4,096) must be between 1 and the server's
-  `--reasoning-token-limit` (default 4,096, at most 8,192) and fit the context with the prompt, or the
-  request gets HTTP 422 (400 on the deprecated alias). Responses add `reasoning_stats` and `answers_source`. Reasoning that does not
+  `--reasoning-token-limit` (default 4,096, at most 8,192).
+  Invalid options and an explicit budget that does not fit the context get HTTP 422
+  (400 on the deprecated alias). The default budget is fitted to the context;
+  insufficient context for that default budget returns an explicit direct fallback.
+  Responses add `reasoning_stats` and `answers_source`. Reasoning that does not
   finish (`cut: "length"`, with the actual reason in `reasoning_stats.finish_reason`), that finishes empty (`"empty"`), or that
   has no room in the state (`"state_limit"`) returns the **direct** answers with `answers_source: "direct"` instead of
   deciding on partial reasoning; reasoning too long for the state keeps its end and reports

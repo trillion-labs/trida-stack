@@ -135,6 +135,10 @@ class Request:
             pixel_values, grid, n = image_input(self.image, image_processor, self.max_image_pixels, self.min_image_pixels)
         return Encoded(self.encode_rows(tokenizer, n, max_state=max_state, max_branch=max_branch), pixel_values, grid)
 
+    def state_token_count(self, tokenizer, image_tokens=0):
+        """State length before truncation, including escaped user text and delimiters."""
+        return 1 + (image_tokens + 2 if image_tokens else 0) + len(_user(tokenizer, self.state))
+
     def encode_rows(self, tokenizer, image_tokens=0, *, max_state=MAX_STATE, max_branch=MAX_BRANCH):
         """Torch-free serving rows, also used by MLX with its own image preprocessing."""
         image = []
@@ -327,6 +331,57 @@ def fit_reasoning(request, text, tokenizer, image_tokens=0, *, max_state=MAX_STA
     return "…" + tokenizer.decode(ids[-lo:]) if lo else ""
 
 
+def reasoning_budget(value, reasoning, limit=DEFAULT_REASONING_TOKEN_LIMIT):
+    """Shared request cap and default for boolean and auto reasoning."""
+    if type(limit) is not int or not 1 <= limit <= MAX_REASONING_TOKENS:
+        raise RequestError(f"reasoning_token_limit must be between 1 and {MAX_REASONING_TOKENS}")
+    value = limit if value is None else value
+    if type(value) is not int or not 1 <= value <= limit:
+        raise RequestError(f"max_reasoning_tokens must be between 1 and {limit}")
+    return value
+
+
+def rows_tokens(rows):
+    """Input tokens of the decision rows a request was scored on (usage.input_tokens)."""
+    return sum(len(row["ids"]) for row in rows)
+
+
+def top_probability(answer):
+    if answer["type"] == "noul":
+        return max(answer["noul"], 1 - answer["noul"])
+    return max(answer["probabilities"].values())
+
+
+def reasoning_complete(text, finish_reason, *, end_think_id=None, stop_reason=None):
+    """One completion rule across native runtimes, including stripped stop tokens."""
+    native = finish_reason.get("type") if isinstance(finish_reason, dict) else finish_reason
+    matched = finish_reason.get("matched") if isinstance(finish_reason, dict) else stop_reason
+    return native == "stop" and ("</think>" in text or matched == "</think>"
+                                or (end_think_id is not None and matched == end_think_id))
+
+
+def finish_reasoning(request, text, tokenizer, finish_reason, image_tokens=0,
+                     *, max_state=MAX_STATE, max_branch=MAX_BRANCH, complete=None):
+    """Backend-independent cut/source/trim contract; never change the original state."""
+    fields = {"answers_source": "direct"}
+    if finish_reason == "context_limit":
+        return None, {**fields, "cut": "state_limit", "cut_detail": "context_limit"}
+    if finish_reason != "stop" or not (reasoning_complete(text, finish_reason) if complete is None else complete):
+        return None, {**fields, "cut": "length"}
+    if not text.strip():
+        return None, {**fields, "cut": "empty"}
+    fitted = fit_reasoning(request, text, tokenizer, image_tokens, max_state=max_state, max_branch=max_branch)
+    fields["reasoning_trimmed"] = fitted != text
+    if not fitted:
+        return None, {**fields, "cut": "state_limit"}
+    augmented = with_reasoning(request, fitted)
+    try:
+        parse(augmented).encode_rows(tokenizer, image_tokens, max_state=max_state, max_branch=max_branch)
+    except RequestError:
+        return None, {**fields, "cut": "state_limit", "cut_detail": "row_limit"}
+    return augmented, {**fields, "answers_source": "reasoned"}
+
+
 # ---- response formatting (shared by SGLang and MLX) ------------------------------------------------
 
 def _confidence(qtype, p):
@@ -424,8 +479,3 @@ def systemone_response(result, model):
             "usage": {"input_tokens": int(usage.get("input_tokens", 0)),
                       "output_tokens": int(usage.get("output_tokens", 0))},
             **{k: v for k, v in result.items() if k not in ("answers", "usage", "model")}}
-
-
-def rows_tokens(rows):
-    """Input tokens of the decision rows a request was scored on (usage.input_tokens)."""
-    return sum(len(row["ids"]) for row in rows)

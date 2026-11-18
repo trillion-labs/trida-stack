@@ -20,6 +20,8 @@ def test_defaults_and_memory_report(checkpoint):
         with __import__("urllib.request").request.urlopen(base + "/models") as r:
             after = json.load(r)["data"][0]
     # 64K unless asked: every client (evals, Hermes) gets it, and 128K costs about 4 GB of KV on a small Mac
+    assert card["capabilities"]["backend"] == "mlx"
+    assert card["capabilities"]["auto_reasoning"] is True
     assert card["context_length"] == 65536
     assert card["mlx_cache_limit_mb"] == 64
     mem = after["memory_mb"]

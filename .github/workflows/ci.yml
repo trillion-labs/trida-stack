@@ -80,3 +80,21 @@ jobs:
         run: |
           benchmark/workflow_evals/.upstream/.venv/bin/python benchmark/workflow_evals/test_provider.py
           bash -n benchmark/workflow_evals/setup.sh benchmark/workflow_evals/run.sh
+
+  decision-patches:
+    name: Decision readout patches
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Apply both overlays to the pinned fork
+        run: |
+          pin=$(sed -n 's/.*HYBRIDDIFFUSION_COMMIT:-\([0-9a-f]*\).*/\1/p' train/block_gated_delta_rule/fetch_kernels.sh)
+          git clone --quiet --filter=blob:none --no-checkout https://github.com/yuchen-zhu-zyc/HybridDiffusion "$RUNNER_TEMP/decision-fork"
+          git -C "$RUNNER_TEMP/decision-fork" checkout --quiet "$pin"
+          for overlay in two_stream_diffusion.patch decision_readout.patch; do
+            git -C "$RUNNER_TEMP/decision-fork" apply --check "$GITHUB_WORKSPACE/inference/zoro-1/sglang/$overlay"
+            git -C "$RUNNER_TEMP/decision-fork" apply "$GITHUB_WORKSPACE/inference/zoro-1/sglang/$overlay"
+          done
+          python3 -m py_compile "$RUNNER_TEMP/decision-fork/eval/sglang/srt/layers/logits_processor.py" "$RUNNER_TEMP/decision-fork/eval/sglang/srt/dllm/mixin/scheduler.py"
