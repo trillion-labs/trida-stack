@@ -62,6 +62,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `serve_decide.py --backend self-spec` or `serve.py --decision-backend self-spec`.
   The self-spec backend is text-only and serial; probability parity is not yet accepted.
 
+- Experimental stock vLLM decision serving at `/v1/systemone`, with one model,
+  request-indexed hidden-state capture, shared reasoning/usage and disconnect cleanup.
+  `/v1/decide` remains a deprecated alias; existing parity and latency limits are documented.
+  The vLLM reader supports both head filenames, context validation follows the configured
+  row limit, and disconnected nonstreaming chats cancel and drain their native work.
+
 - `inference/gravityocr/mac/`: the Gravity app's MLX engine (0.3.4), copied unchanged into `mac/ocr` with
   `VENDORED.sha256` (checked by a test), contributed by Trillion Labs under Apache-2.0, and a hashed
   lock of the package versions the app bundles (Pillow raised to 13.0.0 for 42 advisories) that
@@ -84,10 +90,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - System One reasoning: `POST /v1/systemone` (and its deprecated `/v1/decide` alias) with `"reasoning": true` (CUDA `inference/zoro-1/serve_decide.py`
   and the MLX server): `max_reasoning_tokens` (default: the configured cap, 4,096) must be between 1 and the server's
   `--reasoning-token-limit` (default 4,096, at most 8,192).
-  Invalid options get HTTP 422 (400 on the deprecated alias); insufficient context
-  returns an explicit direct fallback. Responses add `reasoning_stats` and `answers_source`. Reasoning that does not
-  `--reasoning-token-limit` (default 4,096, at most 8,192) and fit the context with the prompt, or the
-  request gets HTTP 422 (400 on the deprecated alias). Responses add `reasoning_stats` and `answers_source`. Reasoning that does not
+  Invalid options and an explicit budget that does not fit the context get HTTP 422
+  (400 on the deprecated alias). The default budget is fitted to the context;
+  insufficient context for that default budget returns an explicit direct fallback.
+  Responses add `reasoning_stats` and `answers_source`. Reasoning that does not
   finish (`cut: "length"`, with the actual reason in `reasoning_stats.finish_reason`), that finishes empty (`"empty"`), or that
   has no room in the state (`"state_limit"`) returns the **direct** answers with `answers_source: "direct"` instead of
   deciding on partial reasoning; reasoning too long for the state keeps its end and reports

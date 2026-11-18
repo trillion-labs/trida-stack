@@ -24,7 +24,7 @@
 외부유입,immutabledict,unpinned,MIT,eval_ifeval.py,PyPI,pip,research team,2026-10-01,양호,
 외부유입,langdetect,unpinned,Apache-2.0,eval_ifeval.py,PyPI,pip,research team,2026-10-01,양호,
 외부유입,nltk,unpinned,Apache-2.0,eval_ifeval.py,PyPI,pip,research team,2026-10-01,양호,punkt 토크나이저 별도 다운로드.
-외부유입,vLLM,">=0.27,<0.28",Apache-2.0,inference/zoro-1/vllm/ (선택),https://github.com/vllm-project/vllm,pip,research team,2026-10-01,양호,stock wheel.
+외부유입,vLLM,"diffusion >=0.27,<0.28; decisions 0.32.0",Apache-2.0,inference/zoro-1/vllm/ (선택),https://github.com/vllm-project/vllm,pip,research team,2026-11-13,양호,stock wheels in separate environments; decision runner disables diffusion plugins.
 외부유입,setuptools,">=83",MIT,빌드 백엔드,https://github.com/pypa/setuptools,build,research team,2026-10-01,양호,PYSEC-2026-3447 대응으로 하한 상향.
 직접개발,gravityocr nano-inference,—,Apache-2.0,inference/gravityocr/,https://github.com/trillion-labs/trida-stack,first-party,research team,2026-10-30,양호,serve.sh 런처 + ocr_request.py 클라이언트 + CPU 테스트. 기본 127.0.0.1 바인드 — 비-loopback은 API_KEY 필수. §1b 커널 미사용.
 직접개발,trillionlabs/GravityOCR (모델 가중치),—,MIT,inference/gravityocr/ 기본 서빙 모델,https://huggingface.co/trillionlabs/GravityOCR,HF download,research team,2026-10-30,양호,저장소에 미포함. 공개·비게이트. 베이스 zai-org/GLM-OCR (MIT). model.safetensors만 — remote code 없음.

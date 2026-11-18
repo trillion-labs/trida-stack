@@ -20,9 +20,9 @@ finding into a decision that comes back around.
   `evidence`. It is not an assumption.
 - Expiry is a re-review date, not a deadline for the upstream fix. Renewing is fine;
   renewing without re-reading is not.
-- The gate passes a package once any one of its ids is excepted (it groups findings by
-  package, `tools/check_advisories.py`), so a new advisory on an excepted package is not
-  flagged until the gate matches per finding. An id excepted once is also excepted in every
+- The gate matches each advisory and its aliases separately (`tools/check_advisories.py`);
+  an exception for one finding does not cover other advisories on the same package.
+  An id excepted once is also excepted in every
   scanned file. An entry written for one environment therefore says which
   environments its evidence covers. The entries for `inference/gravityocr/` come from
   scanning that recipe's own lock (`inference/gravityocr/sglang/requirements-lock.txt`,
@@ -401,7 +401,9 @@ finding into a decision that comes back around.
     repository's own torch.load() calls read pointer-head weights (decision_head.pt, or
     jev_head.pt as the trainer writes it) (train/models/build.py:47,
     inference/zoro-1/decide_engine.py:127, scripts/export_decision_checkpoint.py:41,
-    train/tools/export_decision_checkpoint.py:37), and train/tools/decision_parity_trida.py:26
+    train/tools/export_decision_checkpoint.py:37,
+    inference/zoro-1/vllm/vllm_decide_engine.py — VllmDecideEngine.__init__),
+    and train/tools/decision_parity_trida.py:26
     a test head the same tool writes; none are pt2 archives.
   approver: Trillion Labs research team
   expires: 2026-12-31
@@ -473,4 +475,26 @@ finding into a decision that comes back around.
     directory unwritable by other users, and this entry has to be re-read.
   approver: Trillion Labs research team
   expires: 2026-12-31
+
+- id: GHSA-xmj3-9gf7-h52w
+  aliases: []
+  component: setuptools
+  status: not_affected
+  reason: >-
+    Windows drive-qualified path escape during legacy Wheel.install_as_egg installation.
+    This exception applies only to the locked Linux x86_64 / Python 3.12 vLLM decision
+    environment (setuptools 80.10.2). Windows deployment is not covered.
+  evidence: >-
+    The upstream advisory identifies Windows path handling in legacy wheel installation.
+    The H100 serving environment is Linux, installs through uv pip sync from
+    inference/zoro-1/vllm/requirements-decide-lock.txt, and never installs packages at runtime.
+    The serving code does not call install_as_egg. setuptools 84.1.0 fixes it but conflicts
+    with vLLM 0.32.0's setuptools>=78.1.1,<81 requirement on Python 3.12.
+    Approval: https://github.com/trillion-labs/trida-stack/pull/93#issuecomment-6906768396
+    Advisory: https://github.com/advisories/GHSA-xmj3-9gf7-h52w
+  follow_up: >-
+    Re-review by 2026-12-15, or earlier on platform, installation-path or lock changes.
+    Replace the pin with a fixed compatible release when vLLM permits it.
+  approver: usik-luke-trl
+  expires: 2026-12-15
 ```

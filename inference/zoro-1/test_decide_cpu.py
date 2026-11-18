@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from decide_engine import PointerHead, prefix_prompts, to_answer
-from decide_request import MAX_STATE, fit_reasoning, SPECIAL, VISION, RequestError, parse, prompt, with_reasoning
+from decide_request import MAX_STATE, SPECIAL, VISION, RequestError, fit_reasoning, parse, prompt, with_reasoning
 from serve_decide import TurnSplitter, split_turn
 
 
