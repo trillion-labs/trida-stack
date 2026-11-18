@@ -82,26 +82,24 @@ def load_exceptions() -> tuple[dict, list[str]]:
     return by_id, problems
 
 
-def findings_from_pip_audit(path: pathlib.Path) -> list[tuple[str, str]]:
+def findings_from_pip_audit(path: pathlib.Path) -> list[tuple[set[str], str]]:
     data = json.loads(path.read_text())
     out = []
     for dep in data.get("dependencies", []):
         for v in dep.get("vulns", []):
-            out.append((v["id"], dep.get("name", "?")))
-            for alias in v.get("aliases", []):
-                out.append((alias, dep.get("name", "?")))
+            out.append(({v["id"], *v.get("aliases", [])}, dep.get("name", "?")))
     return out
 
 
-def findings_from_grype(path: pathlib.Path) -> list[tuple[str, str]]:
+def findings_from_grype(path: pathlib.Path) -> list[tuple[set[str], str]]:
     data = json.loads(path.read_text())
     out = []
     for match in data.get("matches", []):
         vuln = match.get("vulnerability", {})
         name = match.get("artifact", {}).get("name", "?")
-        out.append((vuln.get("id", "?"), name))
-        for rel in match.get("relatedVulnerabilities", []):
-            out.append((rel.get("id", "?"), name))
+        ids = {vuln.get("id", "?")}
+        ids.update(rel.get("id", "?") for rel in match.get("relatedVulnerabilities", []))
+        out.append((ids, name))
     return out
 
 
@@ -113,7 +111,7 @@ def main() -> int:
 
     exceptions, problems = load_exceptions()
 
-    findings: list[tuple[str, str]] = []
+    findings: list[tuple[set[str], str]] = []
     if args.pip_audit and args.pip_audit.exists():
         findings += findings_from_pip_audit(args.pip_audit)
     if args.grype and args.grype.exists():
@@ -122,11 +120,10 @@ def main() -> int:
     # One finding can surface under several ids (PYSEC / GHSA / CVE aliases).
     # Treat it as covered if ANY of its ids is excepted.
     seen: dict[str, set[str]] = {}
-    for vid, comp in findings:
-        seen.setdefault(comp, set()).add(vid)
-
     uncovered = []
-    for comp, ids in sorted(seen.items()):
+    for ids, comp in findings:
+        seen.setdefault(comp, set()).update(ids)
+        # An exception for another advisory on this package must not cover this one.
         if not (ids & set(exceptions)):
             uncovered.append((comp, sorted(ids)))
 

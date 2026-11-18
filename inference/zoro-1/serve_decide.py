@@ -25,6 +25,7 @@ A decision checkpoint is a Trida checkpoint with decision_head.pt or jev_head.pt
 its serving temperatures. Generation here is causal decoding; the two-stream decode modes are serve.py's others.
 """
 import argparse
+import asyncio
 import json
 import os
 import re
@@ -152,8 +153,45 @@ def _num(body, key, default, cast):
     return cast(v)
 
 
-def create_app(engine):
-    from fastapi import Body, FastAPI, HTTPException, Response
+async def _while_connected(coro, request):
+    """Cancel nonstreaming work when its HTTP client disconnects."""
+    from fastapi import HTTPException
+
+    stop_watch = asyncio.Event()
+
+    async def disconnected():
+        while not stop_watch.is_set() and not await request.is_disconnected():
+            await asyncio.sleep(0.05)
+
+    work = asyncio.create_task(coro)
+    watch = asyncio.create_task(disconnected())
+    try:
+        done, _ = await asyncio.wait((work, watch), return_when=asyncio.FIRST_COMPLETED)
+        if work in done:
+            return await work
+        await watch
+        raise HTTPException(499, "client disconnected")
+    finally:
+        # ASGI disconnect polling can swallow cancellation (notably on Python 3.10).
+        # The explicit stop signal also lets the watcher exit cooperatively.
+        stop_watch.set()
+        watch.cancel()
+        if not work.done():
+            work.cancel()
+        cleanup = asyncio.gather(work, watch, return_exceptions=True)
+        cancelled = False
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                cancelled = True
+        cleanup.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+
+def create_app(engine, cancel_disconnected_decisions=False):
+    from fastapi import Body, FastAPI, HTTPException, Response, Request
     from fastapi.responses import StreamingResponse
 
     from decide_request import RequestError, systemone_request, systemone_response
@@ -170,21 +208,22 @@ def create_app(engine):
         return {"object": "list", "data": [{"id": name, "object": "model", "created": 0, "owned_by": "trida"}]}
 
     @app.post("/v1/systemone")
-    async def systemone(body: dict = Body(...)):
+    async def systemone(http_request: Request, body: dict = Body(...)):
         def invalid(msg):
             return HTTPException(422, [{"loc": ["body"], "msg": msg, "type": "value_error"}])
         try:
             request, opts = systemone_request(
                 body, reasoning_token_limit=getattr(engine, "reasoning_token_limit", 4096))
             # the image, if any, is in the request (base64 or a data URL): requests never name server files
-            result = await engine.adecide(request, None, opts.get("temperature"), opts.get("reasoning", False),
-                                          max_reasoning_tokens=opts.get("max_reasoning_tokens"))
+            work = engine.adecide(request, None, opts.get("temperature"), opts.get("reasoning", False),
+                                   max_reasoning_tokens=opts.get("max_reasoning_tokens"))
+            result = await _while_connected(work, http_request) if cancel_disconnected_decisions else await work
         except RequestError as e:
             raise invalid(str(e)) from e
         return systemone_response(result, name)
 
     @app.post("/v1/decide", deprecated=True)
-    async def decide(response: Response, body: dict = Body(...)):
+    async def decide(http_request: Request, response: Response, body: dict = Body(...)):
         response.headers["Deprecation"] = "true"
         response.headers["Link"] = '</v1/systemone>; rel="successor-version"'
         if "request" not in body:
@@ -192,13 +231,14 @@ def create_app(engine):
         try:
             budget = _num(body, "max_reasoning_tokens", None, int)
             # Images use the shared request contract; server file paths are not accepted.
-            return await engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
-                                        max_reasoning_tokens=budget)
+            work = engine.adecide(body["request"], None, body.get("temperature"), bool(body.get("reasoning")),
+                                   max_reasoning_tokens=budget)
+            return await _while_connected(work, http_request) if cancel_disconnected_decisions else await work
         except RequestError as e:
             raise HTTPException(400, str(e)) from e
 
     @app.post("/v1/chat/completions")
-    async def chat(body: dict = Body(...)):
+    async def chat(http_request: Request, body: dict = Body(...)):
         messages = body.get("messages")
         if not isinstance(messages, list) or not messages:
             raise HTTPException(400, "messages must be a non-empty list")
@@ -239,7 +279,8 @@ def create_app(engine):
                 yield "data: [DONE]\n\n"
             return StreamingResponse(events(), media_type="text/event-stream")
 
-        out = await engine.achat(messages, **kw)
+        work = engine.achat(messages, **kw)
+        out = await _while_connected(work, http_request) if cancel_disconnected_decisions else await work
         reasoning, text, calls = split_turn(out["text"], thinks, out["finish_reason"] == "length", kw["tools"])
         # content is a string (possibly empty) unless the turn is a tool call, as OpenAI's API returns it
         msg = {"role": "assistant", "content": (text or None) if calls else text, "reasoning_content": reasoning or None}

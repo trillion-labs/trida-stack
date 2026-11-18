@@ -31,6 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Experimental stock vLLM decision serving at `/v1/systemone`, with one model,
+  request-indexed hidden-state capture, shared reasoning/usage and disconnect cleanup.
+  `/v1/decide` remains a deprecated alias; existing parity and latency limits are documented.
+  The vLLM reader supports both head filenames, context validation follows the configured
+  row limit, and disconnected nonstreaming chats cancel and drain their native work.
+
 - `inference/gravityocr/mac/`: the Gravity app's MLX engine (0.3.4), copied unchanged into `mac/ocr` with
   `VENDORED.sha256` (checked by a test), contributed by Trillion Labs under Apache-2.0, and a hashed
   lock of the package versions the app bundles (Pillow raised to 13.0.0 for 42 advisories) that
