@@ -178,6 +178,19 @@ of the prompt came from the cache.
   probability is below 0.7: `decide_choice(question, options, context)`, `decide_yes_no(question,
   context)`, `pick_file(goal, path)` (over a folder's names), `locate_files(query, path)` and, with the
   UI agent, `ui_check(goal)` (is it done on screen?). They change nothing, so they never ask.
+- **Charts** (`plot_chart`). The model gives the numbers (x labels, one or more series) and the app draws a line or
+  bar chart with Swift Charts, shown in the reply under the tool call: hover for values; Copy, Save… and Open act on
+  the PNG, which is also saved in the chat's scratch folder (and shown to a vision model). A 4B model writing
+  matplotlib code failed on missing packages, wrong APIs and bad indexing; filling in a few arrays it gets right.
+- **Korean MCP servers** (Settings → Korean MCP, off until switched on). A starter set from
+  [awesome-mcp-korea](https://github.com/darjeeling/awesome-mcp-korea), run as stdio MCP servers (`MCPClient`):
+  표준국어대사전 (ko-stdict), 맞춤법 검사, HWP/HWPX/PDF documents (kordoc, asks before every call), 법령·판례
+  (korean-law-mcp, 국가법령정보 OC), 사업자등록 상태조회 and 기상청 날씨 (공공데이터포털 keys), 카카오맵 장소·주소
+  (Kakao REST key), KOSPI/KOSDAQ and stock prices (our own two-tool server on pykrx; KRX data login) and DART
+  disclosures (OpenDART key). They need Node.js (`npx`) or `uv`.
+  Versions are pinned, keys stay in the Keychain, and only a few tools per server reach the model; each server is a
+  tool-router group, so its tools are offered only when a message needs them. They are third-party programs that
+  run with your permissions and network access: read their code before switching them on.
 - **Knowledge graph** (Settings → *Learn from chats automatically*, on by default). Zoro-1 learns
   `subject —relation→ object` facts from your messages, grounded web answers and the documents it reads,
   each with its source, date, chat and history, and uses them in later chats (`recall`, `remember`,
