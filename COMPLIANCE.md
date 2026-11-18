@@ -60,11 +60,13 @@ in this repo. They are fetched/patched from upstream at setup time and are
 | sglang two-stream backend | `inference/zoro-1/sglang/two_stream_diffusion.patch` | same upstream @ `6ca547a` | **PolyForm-NC 1.0.0** |
 | vLLM diffusion readout | `inference/zoro-1/vllm/vllm_native_diffusion/KERNELS.md` | sglang `block_gdn` backend (above) | **PolyForm-NC 1.0.0** |
 
-Trillion Labs' patches/modifications against these kernels are derivative works and
-are likewise PolyForm-NC. **The two-stream training and diffusion-serving paths are
-therefore noncommercial-only.** The repo's own Apache-2.0 code (data/eval/serving
-glue, the HF/AR model code, benchmark wrappers) does not itself redistribute this
-noncommercial code. The GravityOCR recipe in `inference/gravityocr/` does not use these
+Trillion Labs' own patch files against these kernels (such as `trillion_mods.patch`
+and `two_stream_diffusion.patch`) are our code and are licensed Apache-2.0, like the
+rest of this repository. Applying them produces a modified copy of the PolyForm-NC
+upstream, and that patched result stays under PolyForm-NC 1.0.0. **The two-stream
+training and diffusion-serving paths are therefore noncommercial-only.** The repo's own
+Apache-2.0 code (data/eval/serving glue, the HF/AR model code, benchmark wrappers) does
+not itself redistribute this noncommercial code. The GravityOCR recipe in `inference/gravityocr/` does not use these
 kernels at all: it builds on upstream SGLang (§1, §2), which is Apache-2.0.
 
 ## 2. Runtime dependencies (installed separately)
