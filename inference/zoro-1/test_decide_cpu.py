@@ -19,6 +19,9 @@ class CharTok:
     def convert_tokens_to_ids(self, t):
         return self.ids[t]
 
+    def decode(self, ids):
+        return "".join(chr(i - 100) for i in ids)
+
     def __call__(self, text, add_special_tokens=False):
         return type("Out", (), {"input_ids": [ord(c) + 100 for c in text]})()
 
@@ -615,8 +618,9 @@ def test_reasoning_budget_reserves_prompt_space():
 
     engine = _reasoning_engine(context_length=10)
     client = TestClient(create_app(engine))
-    assert client.post("/v1/decide", json={"request": REQ, "reasoning": True,
-                                        "max_reasoning_tokens": 5}).status_code == 400
+    response = client.post("/v1/systemone", json={"model": "zoro-1", **REQ, "reasoning": True,
+                                                 "max_reasoning_tokens": 5})
+    assert response.status_code == 422
     assert engine.engine.calls == 0
     assert client.post("/v1/decide", json={"request": REQ, "reasoning": True,
                                         "max_reasoning_tokens": 4}).status_code == 200

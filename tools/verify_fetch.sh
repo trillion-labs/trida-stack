@@ -65,6 +65,14 @@ python3 -m py_compile "$TMP"/*.py || { echo "FAIL: patched sources do not compil
 echo
 echo "OK: fetch recipe verified end to end at $COMMIT (18 sources, patch applies, output parses)."
 
+# Verify the optional Zoro decision overlay against the very same pinned source.
+for OVERLAY in two_stream_diffusion.patch decision_readout.patch; do
+  git -C "$TMP/hd" apply --check "$ROOT/inference/zoro-1/sglang/$OVERLAY"
+  git -C "$TMP/hd" apply "$ROOT/inference/zoro-1/sglang/$OVERLAY"
+done
+python3 -m py_compile "$TMP/hd/eval/sglang/srt/layers/logits_processor.py" \
+  "$TMP/hd/eval/sglang/srt/dllm/mixin/scheduler.py"
+
 # ---- GravityOCR: upstream SGLang at BASE_COMMIT.txt + gravityocr_selfspec.patch ------------------
 # The same fetch and patch steps as inference/gravityocr/sglang/setup.sh, without the GPU build.
 GO="$ROOT/inference/gravityocr/sglang"

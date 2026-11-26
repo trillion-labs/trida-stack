@@ -321,7 +321,8 @@ def test_reasoning_fallback_keeps_original_state(text, finish, cut):
     seen = []
 
     async def stream(*args, **kw):
-        yield text, {"finish_reason": finish, "completion_tokens": 10}
+        yield text, {"finish_reason": finish, "completion_tokens": 10,
+                     "stop_reason": engine._stops[0] if finish == "stop" else None}
 
     async def logits(enc, image):
         seen.append(enc.rows[0]["ids"])
@@ -333,7 +334,11 @@ def test_reasoning_fallback_keeps_original_state(text, finish, cut):
     assert answer["answers_source"] == ("direct" if cut else "reasoned")
     assert answer["reasoning"] == text
     original = parse(REQUEST).encode(engine.tok).rows[0]["ids"]
-    assert (seen[0] == original) == bool(cut)
+    assert seen[0] == original  # Shared policy always scores the direct answer first.
+    if cut:
+        assert len(seen) == 1
+    else:
+        assert len(seen) == 2 and seen[1] != original
     if len(text) > 7552:
         assert answer["reasoning_trimmed"] is True
 
@@ -496,7 +501,8 @@ def test_vllm_long_question_reasoning_reserves_row_budget():
     engine = bare_engine()
     seen = []
     async def stream(*args, **kwargs):
-        yield "because " * 2000 + "therefore yes", {"finish_reason": "stop"}
+        yield "because " * 2000 + "therefore yes", {"finish_reason": "stop",
+                                                   "stop_reason": engine._stops[0]}
     async def logits(enc, image):
         seen.extend(enc.rows)
         return [torch.tensor([0.0, 1.0])]
@@ -515,7 +521,8 @@ def test_vllm_systemone_usage_and_reasoning(reasoning):
     engine = bare_engine()
     engine.ckpt = "zoro-1"
     async def stream(*args, **kwargs):
-        yield "Checked the invoice.", {"finish_reason": "stop", "completion_tokens": 10}
+        yield "Checked the invoice.", {"finish_reason": "stop", "completion_tokens": 10,
+                                      "stop_reason": engine._stops[0]}
     async def logits(enc, image):
         return [torch.tensor([0.0, 1.0])]
     engine._astream, engine.alogits = stream, logits

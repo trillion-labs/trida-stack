@@ -380,13 +380,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _capabilities(self):
+        return {"backend": "mlx", "images": ENGINE.supports_vision,
+                "auto_reasoning": DECIDER is not None, "serial": True,
+                "reasoning_sampling": {"temperature": 0.6, "top_p": 0.95, "top_k": 20}}
+
     def _model_card(self):
         ctx = DEFAULTS["context_length"]
         return {"id": DEFAULTS["served_name"], "object": "model", "owned_by": "trillionlabs", "created": 0,
                 "context_length": ctx, "max_model_len": ctx, "root": str(ENGINE.path),
                 "supports_vision": ENGINE.supports_vision,
                 "input_modalities": ["text", "image"] if ENGINE.supports_vision else ["text"],
-                "decision": DECIDER is not None,
+                "decision": DECIDER is not None, "capabilities": self._capabilities(),
                 # generation guards this server runs with (record them with eval / speedrun results)
                 "loop_guard": bool(DEFAULTS.get("loop_guard")), "tool_call_gate": DEFAULTS.get("tool_call_gate", 0.0),
                 "decision_cache": {"max_bytes": DECIDER.cache_bytes} if DECIDER else None,
@@ -401,7 +406,7 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith(("/v1/models/", "/models/")):
             return self._json(200, self._model_card())
         if path in ("/health", "/v1/health", ""):
-            return self._json(200, {"status": "ok", "mode": ENGINE.mode})
+            return self._json(200, {"status": "ok", "mode": ENGINE.mode, "capabilities": self._capabilities()})
         if path == "/stats":
             return self._json(200, {"last": ENGINE.last_stats, "cache_slots": ENGINE.cached_tokens()})
         self._json(404, {"error": {"message": f"no route {self.path}"}})
@@ -781,7 +786,8 @@ def main(argv=None):
     DEFAULTS.update(temperature=a.temperature, top_k=a.top_k, top_p=a.top_p, max_tokens=a.max_tokens,
                     enable_thinking=not a.no_think, context_length=a.context_length,
                     served_name=a.served_model_name, log_requests=a.log_requests,
-                    decision_cache_mb=a.decision_cache_mb, reasoning_token_limit=a.reasoning_token_limit,
+                    decision_cache_mb=a.decision_cache_mb,
+                    reasoning_token_limit=a.reasoning_token_limit,
                     decision_text_temperature=a.decision_text_temperature,
                     decision_image_temperature=a.decision_image_temperature,
                     tool_call_gate=a.tool_call_gate, loop_guard=a.loop_guard,

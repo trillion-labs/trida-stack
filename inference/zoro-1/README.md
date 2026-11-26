@@ -166,8 +166,7 @@ curl -s localhost:30001/v1/systemone -H 'content-type: application/json' -d '{
   - Validation errors return 422 with System One's `{"detail": [{"loc", "msg", "type"}]}` body.
   - Our extensions: `images` (one image: base64, a data URL, or `{"url": ...}`), `reasoning`,
     `max_reasoning_tokens` and `temperature`; the response then also carries the reasoning and timing fields.
-    Both servers check them the same way, and a bad value is a 422: `reasoning` is `true` / `false` (MLX also
-    takes `"auto"`), `max_reasoning_tokens` an integer from 1 to the configured cap (at most 8192), `temperature` a finite number above 0.
+    All decision servers check them the same way, and a bad value is a 422: `reasoning` is `true` / `false` / `"auto"`, `max_reasoning_tokens` an integer from 1 to the configured cap (at most 8192), `temperature` a finite number above 0.
     `null` means unset.
   - `POST /v1/decide`, the earlier `{"request": {...}, "reasoning", "temperature"}` envelope, still answers, with a
     `Deprecation` header, and goes away in the next release. Its score `legend` is a list and it has no `model`.
@@ -176,28 +175,7 @@ curl -s localhost:30001/v1/systemone -H 'content-type: application/json' -d '{
   - `noul`: yes/no; the answer is P(yes).
   - `choice`: `{key: description}`.
   - `score`: a list of levels, lowest first; the answer is the expected level.
-- **`"reasoning": true`:** the model first writes its reasoning (returned as `reasoning`), then decides with that reasoning added to the state.
-  `max_reasoning_tokens` defaults to the configured cap (4,096 by default) and must be between 1 and the server's
-  `--reasoning-token-limit` (default 4,096; configurable up to 8,192). The prompt
-  plus this budget must fit the configured context; invalid budgets return HTTP 422 on `/v1/systemone` (400 on the deprecated alias).
-  Responses include `reasoning_stats.finish_reason`. Both CUDA and MLX use this contract:
-  - `answers_source: "reasoned"` means the decision used reasoning. If only the
-    conclusion fits the state budget, `reasoning_trimmed: true` reports that trimming;
-    the full generated text is still returned as `reasoning`.
-  - `cut: "length"` (generation budget), `"empty"` (empty completed text), or
-    `"state_limit"` (no room for reasoning) means `answers` holds **direct answers**.
-    Every unfinished pass, including aborts or missing completion metadata, uses
-    `cut: "length"`; `reasoning_stats.finish_reason` preserves the actual reason.
-    `answers_source` is `"direct"`. MLX also retains its `direct` result object.
-    `cut: "state_limit"` also sets `reasoning_trimmed: true`: none of the generated
-    reasoning fits, so the returned direct answers use no reasoning.
-    Clients must check these fields before treating the answers as reasoned.
-  WorkflowEvals rejects every `cut` and any `reasoning_trimmed` response in reasoning mode.
-  CUDA's decision encoding defaults to `--decision-max-state 7552` and
-  `--decision-max-row 8192`. Experimental longer inputs can opt into larger limits,
-  with `1 <= state <= row - 640` and `row <= --context-length`. The 640-token
-  gap reserves question space; longer questions may need a wider gap. Reasoning
-  fitting reserves the longest question's actual encoded length, including delimiters. Existing defaults and strict completion checks are unchanged.
+- **Reasoning:** see the shared [reasoning contract](#reasoning-contract) below.
 - **Images:** add `"images": [...]` with one base64 string or data URL. Requests never name server files.
 - **`POST /v1/chat/completions`:** OpenAI-compatible, streaming (`"stream": true`) or not.
   - It takes `tools`; tool calls come back as `tool_calls`.
@@ -209,6 +187,71 @@ curl -s localhost:30001/v1/systemone -H 'content-type: application/json' -d '{
 - **From Python:** `DecideEngine(ckpt).decide(...)` / `.chat(...)` / `.chat_stream(...)`, or the `async` versions (`adecide`, `achat`, ...) on `eng.loop` ([`decide_engine.py`](decide_engine.py)).
 
 How it fits a stock engine: a request row is causal, so an option's hidden state is the last hidden state of the row cut off at that option. Each question with K options therefore becomes K+1 prefix prompts in one batched call with `return_hidden_states="last"`, and SGLang's prefix cache shares the work. The head then runs on those vectors. Checked against a transformers implementation of the same head on 200 held-out decision records, the outputs matched to within 0.1% mean probability difference.
+
+### Reasoning contract
+
+CUDA causal, CUDA self-spec and MLX share these `/v1/systemone` rules (also on the deprecated `/v1/decide` alias):
+
+- `reasoning: true` always reasons; `reasoning: "auto"` reasons when any
+  question's top probability is below `threshold` (default `0.7`). Both first
+  compute direct answers for fallback. This adds a direct pass even for `true`;
+  the observed stock AR warm cost was about 0.12 s before reasoning.
+- An omitted or null `max_reasoning_tokens` uses `--reasoning-token-limit`
+  (default **4096**, configurable from 1 to 8192) for both modes. An explicit
+  budget must be a positive integer no greater than that cap. Default budgets
+  fit the available context; explicit budgets that do not fit are rejected with
+  HTTP 422 (400 on the deprecated alias). Reasoning is off by default.
+- Completed reasoning keeps its conclusion when fitted to the state and row
+  limits, reporting `reasoning_trimmed` and `answers_source: "reasoned"`.
+  Fitting reserves the longest encoded question. CUDA's configurable caps require
+  `state <= row - 640` and `row <= context`; larger questions may need more room.
+- Incomplete, empty or unusable reasoning returns direct answers with
+  `answers_source: "direct"` and `cut: "length"`, `"empty"` or `"state_limit"`.
+  Optional `cut_detail` distinguishes context and row limits. Clients requiring
+  complete, untrimmed reasoning must reject cuts and trimming.
+  Completion requires both a native `stop` and a `</think>` marker or matching
+  stop token. EOS without closing thinking returns a cut on every backend.
+  `reasoning_stats.finish_reason` preserves the native value; `reasoning_complete`
+  records the separate completion check. Abort/missing finish remains unfinished.
+- Reasoning responses include `direct`, `escalated` and `threshold`. `usage`
+  counts all scored decision-row tokens and generated reasoning tokens, including
+  on fallback; it does not count the physical K+1 prefix executions.
+
+### Self-spec decisions (experimental)
+
+One diffusion engine can also serve `/v1/systemone` and self-spec chat. Install the
+[diffusion backend and decision readout patch](sglang/README.md#decision-readout), then run:
+
+```bash
+python serve.py --mode decide --decision-backend self-spec --mem-fraction 0.5
+# Uses $DECIDE_PYTHON, then $SGLANG_PYTHON, then the current Python.
+```
+
+The shared [reasoning contract](#reasoning-contract) also applies to this backend;
+reasoning is generated with self-spec.
+
+This backend is **text-only and serial**. Chat and decisions share one model;
+**Native chat and decisions do not overlap**. Generation holds admission until
+it finishes or cancellation is acknowledged; a client that stops reading does
+not keep the engine locked after generation finishes. Abandoned nonstreaming
+chats are cancelled too. Each K-option question requires
+K+1 serial eager prefills. Sampling is fixed by the server
+YAML (default temperature 1, top-p 0.95, top-k 20, no presence penalty).
+Conflicting chat options return HTTP 400. Use `serve_decide.py --backend self-spec
+--self-spec-config FILE` to choose a different YAML.
+
+H100 smoke measurement (5.5K-token state, three questions): self-spec direct
+judgment took 1.73 s on the first cold-cache call and 1.06–1.56 s warm. A
+completed reasoned judgment took 8.67 s with 344 generated tokens. Stock AR warm
+direct calls took 0.12–0.13 s. These are single-run observations, not a general
+speedup claim; [AR comparison and conditions](sglang/DECISION_PROBE.md#latency-and-ar-comparison).
+If abort cleanup fails, `/health` returns 503 until the server is restarted.
+
+**Parity is not yet accepted:** 38/40 independent synthetic cases passed the
+provisional probability tolerance of 0.02; two reached about 0.0205. A near-tied
+choice changed, and an auto-threshold boundary crossed. The common 0.005
+comparison is unchanged. See [validation and limits](sglang/DECISION_PROBE.md).
+This path uses the noncommercial backend described in `sglang/NOTICE`.
 
 ## Backends
 

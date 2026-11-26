@@ -73,6 +73,31 @@ Verify before applying with `git apply --check <patch>` (exit 0 = applies
 cleanly). The patch is a diff against this exact commit; apply it from the repo
 root.
 
+### Decision readout
+
+For experimental self-spec decisions, also apply this overlay **after** the
+two-stream patch, before installing:
+
+```bash
+git apply --check /path/to/inference/zoro-1/sglang/decision_readout.patch
+git apply /path/to/inference/zoro-1/sglang/decision_readout.patch
+```
+
+It exports normalized last-position states from pure causal prefill. The server
+requires overlay version **2** before loading weights and verifies prompt endpoint
+IDs and sequence lengths. `TRIDA_DECISION_READOUT_AUDIT=1` additionally checks
+the exact FP32 export. The server uses one eager worker and serial admission;
+each prefix generates and discards one token to retain existing KV cleanup.
+Readout mismatches abort only the affected request. A readout deadline drains
+the native request; failed abort cleanup makes the server unhealthy. Native
+generation holds admission, but client reading speed does not. Rebuild from the
+pinned base if the installed overlay is version 1.
+Images, zero-token completion, and concurrent readout are not supported.
+
+Run `serve.py --mode decide --decision-backend self-spec --mem-fraction 0.5`
+with this environment's Python (`SGLANG_PYTHON`; `DECIDE_PYTHON` selects the stock decision environment). Read
+[`DECISION_PROBE.md`](DECISION_PROBE.md) for the failed parity gates and H100 results.
+
 ### 3. Install per upstream's instructions
 
 Follow the upstream `eval/` install (validated on Linux / Python 3.10 / NVIDIA

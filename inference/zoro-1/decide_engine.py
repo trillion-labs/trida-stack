@@ -35,8 +35,10 @@ import time
 import torch
 import torch.nn as nn
 
-from decide_request import (RequestError, MAX_IMAGE_PIXELS, VISION, MAX_STATE, MAX_BRANCH, fit_reasoning,
-                            validate_decision_limits, image_input, parse, prompt, rows_tokens, with_reasoning, to_answer)
+from decide_request import (MAX_IMAGE_PIXELS, MAX_STATE, MAX_BRANCH, VISION, RequestError,
+                            DEFAULT_REASONING_TOKEN_LIMIT, finish_reasoning, image_input, parse,
+                            prompt, reasoning_budget, reasoning_complete, rows_tokens, to_answer, top_probability,
+                            validate_decision_limits)
 
 END_THINK = "</think>"
 # Serving temperatures: logits are divided by T before the softmax. Fit T per checkpoint on held-out calibration
@@ -117,9 +119,15 @@ class DecideEngine:
     methods are for scripts and notebooks: each runs its coroutine to completion under a lock, so they are thread-safe
     but serialised."""
 
+    supports_auto_reasoning = True
+
     def __init__(self, ckpt, mem_fraction_static=0.8, context_length=16384, reasoning_temperature=0.6,
-                 decision_max_state=MAX_STATE, decision_max_row=MAX_BRANCH, reasoning_token_limit=4096, **engine_kw):
+                 decision_max_state=MAX_STATE, decision_max_row=MAX_BRANCH,
+                 reasoning_token_limit=DEFAULT_REASONING_TOKEN_LIMIT, **engine_kw):
         validate_decision_limits(decision_max_state, decision_max_row, context_length, reasoning_token_limit)
+        self.context_length = context_length
+        self.decision_max_state, self.decision_max_row = decision_max_state, decision_max_row
+        self.reasoning_token_limit = reasoning_token_limit
         os.environ.setdefault("SGLANG_ENABLE_JIT_DEEPGEMM", "0")   # FP8 GEMMs: not needed for a bf16 model
         os.environ.setdefault("SGLANG_DEEPGEMM_PDL", "0")
         import sglang as sgl
@@ -130,17 +138,21 @@ class DecideEngine:
         self.reasoning_token_limit = reasoning_token_limit
         self.tok = AutoTokenizer.from_pretrained(ckpt)
         self.proc = load_image_processor(ckpt)
-        saved = torch.load(head_file(ckpt), map_location="cpu")
+        saved = torch.load(head_file(ckpt), map_location="cpu", weights_only=True)
         self.head = PointerHead(saved["head"]["q.weight"].shape[1], saved["head_dim"]).eval()
         self.head.load_state_dict(saved["head"])
         self.text_T, self.image_T = serving_temperatures(ckpt)
         self.image_pad = self.tok.convert_tokens_to_ids(VISION[1])
         self._stops = [self.tok.convert_tokens_to_ids(t) for t in (END_THINK, "<|im_end|>")]
         self._lock = threading.Lock()
-        engine_kw.setdefault("sampling_backend", "pytorch")
-        self.engine = sgl.Engine(model_path=ckpt, return_hidden_states_mode="last", mem_fraction_static=mem_fraction_static,
-                                 context_length=context_length, log_level="warning", **engine_kw)
+        self.engine = self._build_engine(ckpt, mem_fraction_static, context_length, engine_kw)
         self.loop = self.engine.loop
+
+    def _build_engine(self, ckpt, mem_fraction_static, context_length, engine_kw):
+        import sglang as sgl
+        engine_kw.setdefault("sampling_backend", "pytorch")
+        return sgl.Engine(model_path=ckpt, return_hidden_states_mode="last", mem_fraction_static=mem_fraction_static,
+                                 context_length=context_length, log_level="warning", **engine_kw)
 
     # ---- sync wrappers ------------------------------------------------------------------------------
 
@@ -157,8 +169,8 @@ class DecideEngine:
                     return
             yield item
 
-    def decide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=None):
-        return self._run(self.adecide(request, image, temperature, reasoning, max_reasoning_tokens))
+    def decide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=None, threshold=0.7):
+        return self._run(self.adecide(request, image, temperature, reasoning, max_reasoning_tokens, threshold))
 
     def logits(self, enc, image=None):
         return self._run(self.alogits(enc, image))
@@ -174,49 +186,71 @@ class DecideEngine:
 
     # ---- decisions ----------------------------------------------------------------------------------
 
-    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=None):
-        """-> {"answers": {qid: answer}, "usage", "timing_ms"} (+ "reasoning", "reasoning_ms" when reasoning=True).
-        usage: input_tokens = the decision rows scored, output_tokens = the reasoning generated."""
+    def _encode_decision(self, req):
+        return req.encode(self.tok, self.proc, max_state=self.decision_max_state, max_branch=self.decision_max_row)
+
+    async def _score_decision(self, req, enc, temperature):
+        T = temperature if temperature is not None else (self.image_T if enc.has_image else self.text_T)
+        z = await self.alogits(enc, self._sized(req.image, enc.grid) if enc.has_image else None)
+        return {"answers": {q.qid: to_answer(q, torch.softmax(zq / T, -1).tolist()) for q, zq in zip(req.questions, z)},
+                "usage": {"input_tokens": rows_tokens(enc.rows), "output_tokens": 0}}
+
+    async def adecide(self, request, image=None, temperature=None, reasoning=False, max_reasoning_tokens=None,
+                      threshold=0.7):
+        """Shared causal/self-spec reasoning, fallback, auto, and logical token usage."""
+        if not isinstance(reasoning, bool) and reasoning != "auto":
+            raise RequestError('reasoning must be a boolean or "auto"')
+        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
+            raise RequestError("threshold must be between 0 and 1")
         if temperature is not None and (isinstance(temperature, bool) or not isinstance(temperature, (int, float))
                                         or not math.isfinite(temperature) or temperature <= 0):
-            raise RequestError(f"temperature must be a finite number above 0, got {temperature!r}")
-        if max_reasoning_tokens is None:
-            max_reasoning_tokens = self.reasoning_token_limit
-        t0 = time.perf_counter()
-        extra = {}
+            raise RequestError("temperature must be finite and positive")
+        budget = reasoning_budget(max_reasoning_tokens, reasoning, self.reasoning_token_limit)
+        start = time.perf_counter()
         req = parse(request, image)
-        enc = req.encode(self.tok, self.proc, max_state=self.decision_max_state, max_branch=self.decision_max_row)
-        if reasoning:
+        enc = self._encode_decision(req)
+        direct = await self._score_decision(req, enc, temperature)
+        direct.update(answers_source="direct", timing_ms=round((time.perf_counter() - start) * 1000, 1))
+        if reasoning is False:
+            return direct
+        qid, top = min(((qid, top_probability(a)) for qid, a in direct["answers"].items()), key=lambda x: x[1])
+        result = {**direct, "direct": direct, "escalated": reasoning is True or top < threshold,
+                  "threshold": threshold, "usage": dict(direct["usage"])}
+        if reasoning == "auto":
+            result["lowest"] = {"question": qid, "top_probability": top}
+        if result["escalated"]:
+            result["reason"] = (f"reasoned because top probability was {top:.4g} (question {qid}), below {threshold}"
+                                if reasoning == "auto" else "reasoning requested")
+            thought_start = time.perf_counter()
             pieces, stats = [], {}
-            async for part in self._athink_events(request, max_reasoning_tokens, image=req.image):
-                if isinstance(part, dict):
-                    stats = part
+            async for piece in self._athink_events(request, budget, req.image,
+                                                    fit_context=max_reasoning_tokens is None):
+                if isinstance(piece, dict):
+                    stats = piece
                 else:
-                    pieces.append(part)
-            text = "".join(pieces).strip()
-            extra = {"reasoning": text, "reasoning_stats": stats,
-                     "reasoning_ms": round((time.perf_counter() - t0) * 1000, 1)}
-            if stats.get("finish_reason") != "stop":   # out of budget ("length"), aborted, or no finish reported
-                extra["cut"] = "length"
-            elif not text:
-                extra["cut"] = "empty"
-            else:
-                image_tokens = int(enc.grid.prod(-1)[0]) // self.proc.merge_size ** 2 if enc.has_image else 0
-                fitted = fit_reasoning(request, text, self.tok, image_tokens, max_state=self.decision_max_state,
-                                       max_branch=self.decision_max_row)
-                extra["reasoning_trimmed"] = fitted != text
-                if not fitted:
-                    extra["cut"] = "state_limit"
+                    pieces.append(piece)
+            text = "".join(pieces).split(END_THINK, 1)[0].replace("<think>", "").strip()
+            result.update(reasoning=text, reasoning_stats=stats,
+                          reasoning_ms=round((time.perf_counter() - thought_start) * 1000, 1))
+            result["usage"]["output_tokens"] = stats.get("completion_tokens", 0)
+            image_tokens = int(enc.grid.prod(-1)[0]) // self.proc.merge_size ** 2 if enc.has_image else 0
+            augmented, fields = finish_reasoning(request, text, self.tok, stats.get("finish_reason", "length"),
+                                                 image_tokens, max_state=self.decision_max_state,
+                                                 max_branch=self.decision_max_row,
+                                                 complete=stats.get("reasoning_complete", False))
+            result.update(fields)
+            if augmented is not None:
+                try:
+                    reasoned_req = parse(augmented, req.image)
+                    reasoned = await self._score_decision(reasoned_req, self._encode_decision(reasoned_req), temperature)
+                except RequestError:
+                    result.update(cut="state_limit", cut_detail="row_limit", answers_source="direct")
                 else:
-                    req = parse(with_reasoning(request, fitted), req.image)
-                    enc = req.encode(self.tok, self.proc, max_state=self.decision_max_state, max_branch=self.decision_max_row)
-            extra["answers_source"] = "direct" if "cut" in extra else "reasoned"
-        T = temperature or (self.image_T if enc.has_image else self.text_T)
-        z = await self.alogits(enc, self._sized(req.image, enc.grid) if enc.has_image else None)
-        answers = {q.qid: to_answer(q, torch.softmax(zq / T, -1).tolist()) for q, zq in zip(req.questions, z)}
-        usage = {"input_tokens": rows_tokens(enc.rows),
-                 "output_tokens": extra.get("reasoning_stats", {}).get("completion_tokens", 0)}
-        return {"answers": answers, "usage": usage, "timing_ms": round((time.perf_counter() - t0) * 1000, 1), **extra}
+                    result["reasoned"] = reasoned
+                    result["answers"] = reasoned["answers"]
+                    result["usage"]["input_tokens"] += reasoned["usage"]["input_tokens"]
+        result["timing_ms"] = round((time.perf_counter() - start) * 1000, 1)
+        return result
 
     def _sized(self, image, grid):
         """The image at exactly the size the processor encodes it at (grid = patches high x wide)."""
@@ -254,15 +288,24 @@ class DecideEngine:
             yield piece, chunk.get("meta_info", {})
 
     async def athink_stream(self, request, max_new_tokens=768, image=None):
-        """The model's reasoning text, streamed; stops at </think>."""
+        pending = ""
         async for part in self._athink_events(request, max_new_tokens, image):
             if isinstance(part, str):
-                yield part
+                pending = (pending + part).replace(END_THINK, "")
+                keep = len(END_THINK) - 1
+                if len(pending) > keep:
+                    yield pending[:-keep]
+                    pending = pending[-keep:]
+        if pending:
+            yield pending
 
-    async def _athink_events(self, request, max_new_tokens=768, image=None):
-        """Reasoning text followed by finish metadata; no shared per-request state."""
-        if type(max_new_tokens) is not int or not 1 <= max_new_tokens <= self.reasoning_token_limit:
-            raise RequestError(f"max_reasoning_tokens must be between 1 and {self.reasoning_token_limit}")
+    async def _reasoning_chunks(self, ids, params, **kw):
+        async for piece, meta in self._astream(ids, params, **kw):
+            yield piece, meta
+
+    async def _athink_events(self, request, max_new_tokens=768, image=None, *, fit_context=False):
+        """Reasoning text and native finish/usage metadata, shared by both engines."""
+        reasoning_budget(max_new_tokens, True, self.reasoning_token_limit)
         image_tokens = 0
         if image is None:
             text = self.tok.apply_chat_template([{"role": "user", "content": prompt(request)}], tokenize=False,
@@ -273,24 +316,29 @@ class DecideEngine:
             text = self.tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
             _, grid, image_tokens = image_input(image, self.proc, MAX_IMAGE_PIXELS, None)
             kw = {"image_data": self._sized(image, grid)}
-        params = {"max_new_tokens": max_new_tokens, "temperature": self.reasoning_temperature, "top_p": 0.95,
-                  "top_k": 20, "stop_token_ids": self._stops}
         ids = self.tok(text).input_ids
         prompt_tokens = len(ids) + max(0, image_tokens - 1)
-        if prompt_tokens + max_new_tokens > self.context_length:
+        available = self.context_length - prompt_tokens
+        if not fit_context and max_new_tokens > available:
             raise RequestError(f"reasoning prompt ({prompt_tokens} tokens) plus max_reasoning_tokens "
                                f"({max_new_tokens}) exceeds context length {self.context_length}")
-        meta = {}
-        async for piece, meta in self._astream(ids, params, **kw):
-            piece = piece.replace(END_THINK, "")
+        if available < 1:
+            yield {"finish_reason": "context_limit", "prompt_tokens": prompt_tokens, "completion_tokens": 0}
+            return
+        budget = min(max_new_tokens, available) if fit_context else max_new_tokens
+        sampling = getattr(self, "sampling", {"temperature": self.reasoning_temperature, "top_p": 0.95, "top_k": 20})
+        params = {**sampling, "max_new_tokens": budget, "skip_special_tokens": False, "stop_token_ids": self._stops}
+        meta, raw = {}, ""
+        async for piece, meta in self._reasoning_chunks(ids, params, **kw):
+            raw += piece
             if piece:
                 yield piece
-        # The raw finish type, not _finish() (which folds everything but "length" into "stop"): an "abort", or no
-        # finish reported at all, leaves the reasoning as unfinished as running out of budget.
-        f = meta.get("finish_reason") or {}
-        finish = (f.get("type") if isinstance(f, dict) else f) or "unknown"
-        yield {"finish_reason": finish, "prompt_tokens": prompt_tokens,
-               "completion_tokens": meta.get("completion_tokens", 0)}
+        finish = meta.get("finish_reason") or "unknown"
+        native = (finish.get("type") if isinstance(finish, dict) else finish) or "unknown"
+        complete = reasoning_complete(raw, finish, end_think_id=self._stops[0] if self._stops else None,
+                                      stop_reason=meta.get("stop_reason"))
+        yield {"finish_reason": native, "reasoning_complete": complete, "prompt_tokens": prompt_tokens,
+               "completion_tokens": meta.get("completion_tokens", 0), "sampling": dict(sampling)}
 
     def _chat_request(self, messages, tools, max_new_tokens, temperature, top_p, top_k, presence_penalty,
                       enable_thinking):
