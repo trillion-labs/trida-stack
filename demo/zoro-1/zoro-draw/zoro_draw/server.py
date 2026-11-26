@@ -2,8 +2,9 @@
 never gets its URL or its error messages (they go to this server's log).
 
   uv run zoro-draw --mock                                              # play without a model
-  uv run zoro-draw --model-url http://127.0.0.1:8080 --concurrency 1  # Zoro-1 on your Mac (MLX server)
-  uv run zoro-draw --model-url http://127.0.0.1:30001                  # Zoro-1 on a GPU (serve_decide.py, SGLang)
+  uv run zoro-draw --model-url http://127.0.0.1:8080                   # Zoro-1 on your Mac (MLX server)
+  uv run zoro-draw --model-url http://127.0.0.1:30001 --concurrency 8  # Zoro-1 on a GPU (serve_decide.py, SGLang)
+  uv run zoro-draw ... --host 0.0.0.0                                   # also let other machines on your network in
 """
 from __future__ import annotations
 
@@ -246,11 +247,14 @@ def main():
                     help="Zoro-1 server base URL (trida_mlx.server or serve_decide.py); or set ZORO_URL")
     ap.add_argument("--model", default=os.environ.get("ZORO_MODEL", "zoro-1"), help="'model' field sent to the server")
     ap.add_argument("--mock", action="store_true", help="fake the model (deterministic random guesses)")
-    ap.add_argument("--concurrency", type=int, default=8,
-                    help="max in-flight model calls (SGLang batches them; use 1 for the MLX server)")
+    ap.add_argument("--concurrency", type=int, default=1,
+                    help="max in-flight model calls: 1 suits the MLX server (one request at a time); SGLang batches, "
+                         "so use more there, e.g. 8")
     ap.add_argument("--timeout", type=float, default=90.0,
                     help="seconds a round waits for Zoro-1's verdicts before showing the rest as not judged")
-    ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="address to listen on: 127.0.0.1 (this machine; a cloudflared tunnel works with it) or "
+                         "0.0.0.0 to let other machines on your network join")
     ap.add_argument("--port", type=int, default=8765)
     a = ap.parse_args()
     if not a.mock and not a.model_url:

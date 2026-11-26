@@ -1,12 +1,13 @@
 # Zoro-1 demos
 
 Small, fun, runnable things built on **[Zoro-1](https://huggingface.co/trillionlabs/Zoro-1)**. Each folder here is
-one self-contained demo with its own README, dependencies and tests. Play with them, fork them, and add yours.
+one self-contained demo: an app people play, or simply a notebook that shows an idea. Play with them, fork them,
+and add yours.
 
-| demo | what it is | Zoro-1 features used |
-|---|---|---|
-| [zoro-draw](zoro-draw/) | Multiplayer drawing game: everyone draws, Zoro-1 guesses, the probability on the right answer is your score. Decks include 한국어 속담 and memes. | decision head: `choice` + `noul` on an image |
-| *yours* | [Add a demo](#add-a-demo) | |
+| demo | kind | what it is | Zoro-1 features used |
+|---|---|---|---|
+| [zoro-draw](zoro-draw/) | web app | Multiplayer drawing game: everyone draws, Zoro-1 guesses, the probability on the right answer is your score. Decks include 한국어 속담 and memes. | decision head: `choice` + `noul` on an image |
+| *yours* | notebook or app | [Add a demo](#add-a-demo) | |
 
 ## What Zoro-1 gives a demo
 
@@ -79,10 +80,14 @@ for details.
 
 The full guide is in **[CONTRIBUTING.md](CONTRIBUTING.md)** ([한국어](CONTRIBUTING.ko.md)). In short:
 
-1. Copy [`_template/`](_template/) to `demo/zoro-1/<your-demo>` and rename the package.
-2. Keep it self-contained, talking to Zoro-1 over HTTP (`--model-url` / `ZORO_URL`), with a `--mock` mode and tests
-   that pass without a model.
-3. Write the README with the template's sections (description, screenshot, how it uses Zoro-1, run, files, test).
+**A notebook is enough.** One `.ipynb` that shows an idea is a welcome demo; an app is for things people play.
+
+1. Copy a template to `demo/zoro-1/<your-demo>`:
+   - [`_template-notebook/`](_template-notebook/): one notebook and a short README (the quickest start).
+   - [`_template/`](_template/): an app with its own `pyproject.toml`, run with `uv run`.
+2. Keep it self-contained, talking to Zoro-1 over HTTP (`ZORO_URL`), with a mock mode so it runs without a model:
+   for an app, tests that pass in mock mode; for a notebook, it runs top to bottom in mock mode.
+3. Write a README with the template's sections.
 4. Add a row to the table at the top of this page and open a pull request with the
    [checklist](CONTRIBUTING.md#7-pull-request-checklist).
 

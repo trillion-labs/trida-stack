@@ -299,3 +299,64 @@ def test_pages_are_not_cached():
         assert tc.get("/draw").headers["cache-control"] == "no-store"
         assert tc.get("/static/app.js").headers["cache-control"] == "no-cache"
         assert 'id="deck"' in tc.get("/draw").text
+
+
+# ---- review follow-ups (PR #115) -------------------------------------------------------------------------------
+async def test_decoys_match_ignoring_case_spaces_and_punctuation():
+    from zoro_draw.game import match_key
+    assert match_key("Snow man!") == match_key("snowman") and match_key("우물 안  개구리") == match_key("우물안개구리")
+    r, (a, b, c) = room_with(3, DECOY)
+    for i, p in enumerate((a, b, c)):
+        r.submit_drawing(p.id, png(i))
+    r.end_drawing()
+    truth = r.topics[a.id]
+    spaced = " ".join(truth.replace(" ", "")).upper() + "!"         # same letters, different spacing, case, punctuation
+    r.submit_decoy(b.id, a.id, spaced)
+    r.end_decoys()
+    ja = next(j for j in r.jobs() if j["drawer"] == a.id)
+    assert ja["sharp"] == [b.id]                                     # counts as the real word
+    assert [o["word"] for o in ja["options"]].count(truth) == 1      # and is not added as a second option
+    card = next(o for o in ja["options"] if o["kind"] == "card")
+    r.decoys = {c.id: {a.id: card["word"].upper().replace(" ", "")}}
+    jc = next(j for j in r.jobs() if j["drawer"] == a.id)
+    assert c.id in next(o for o in jc["options"] if match_key(o["word"]) == match_key(card["word"]))["authors"]
+
+
+def test_full_proverb_fits_in_a_decoy():
+    from zoro_draw.cards import PROVERBS
+    from zoro_draw.game import clean_word
+    longest = max(PROVERBS, key=len)
+    assert clean_word(longest) == longest.lower()
+
+
+def test_player_decoys_get_no_card_description():
+    from zoro_draw.cards import PROVERBS
+    from zoro_draw.game import card_glosses
+    proverb = next(iter(PROVERBS))
+    options = [{"word": "lighthouse", "kind": "truth"}, {"word": proverb, "kind": "player"}]
+    assert proverb not in card_glosses(options)
+    assert card_glosses([{"word": proverb, "kind": "card"}]) == {proverb: PROVERBS[proverb]}
+
+
+async def test_play_again_is_a_new_game_for_the_page():
+    r, (a,) = room_with(1)
+    first = r.view(a.id)["game_no"]
+    for _ in range(2):
+        r.submit_drawing(a.id, PNG); r.end_drawing()
+        await r.run_judging(FixedJudge())
+        r.next(a.id)
+    r.start(a.id)
+    v = r.view(a.id)
+    assert v["round"] == 1 and v["game_no"] == first + 1    # the page keys its canvas on (game_no, round)
+
+
+def test_cli_defaults_are_safe(monkeypatch):
+    import zoro_draw.server as S
+    seen = {}
+    monkeypatch.setattr("sys.argv", ["zoro-draw", "--mock"])
+    monkeypatch.setattr(S, "create_app", lambda judge, *a, **k: seen.setdefault("judge", judge))
+    import uvicorn
+    monkeypatch.setattr(uvicorn, "run", lambda app, host, port, **k: seen.update(host=host, port=port))
+    S.main()
+    assert seen["host"] == "127.0.0.1"
+    assert seen["judge"].sem._value == 1

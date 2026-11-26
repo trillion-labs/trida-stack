@@ -41,6 +41,12 @@ MAX_OPTIONS = 12
 CLASSIC_DECOYS, DECOY_MODE_CARD_DECOYS = 6, 3
 
 
+def card_glosses(options: list[dict]) -> dict:
+    """English descriptions for the card options only. A player's decoy that happens to spell a card is still the
+    player's words: Zoro-1 judges it as written, without the card's description."""
+    return {o["word"]: gloss(o["word"]) for o in options if o["kind"] in ("truth", "card") and gloss(o["word"])}
+
+
 class GameError(Exception):
     pass
 
@@ -71,11 +77,20 @@ def clean_name(name) -> str:
     return name
 
 
+MAX_WORD = 40   # long enough for the longest 속담 card
+
+
 def clean_word(word) -> str:
-    word = re.sub(r"\s+", " ", str(word or "")).strip().lower()[:24]
+    word = re.sub(r"\s+", " ", str(word or "")).strip().lower()[:MAX_WORD]
     if not word:
         raise GameError("Write a word.")
     return word
+
+
+def match_key(word: str) -> str:
+    """What two answers must share to count as the same: case, spaces and punctuation are ignored, so "snow man",
+    "Snowman!" and "snowman" match, and a 속담 typed with different spacing still matches its card."""
+    return re.sub(r"[\W_]+", "", str(word or "").casefold())
 
 
 def clean_int(value, lo: int, hi: int) -> int:
@@ -116,6 +131,7 @@ class BaseRoom:
         self.host: str | None = None
         self.phase = LOBBY
         self.round = 0
+        self.game_no = 0    # counts games in this room, so pages can tell "round 1 of a new game" from the last one
         self.deadline: float | None = None
         self.last_active = time.time()
         self.notify = None  # async callable set by the server; background tasks call it after changing state
@@ -258,6 +274,7 @@ class Room(BaseRoom):
         for p in self.players.values():
             p.score = 0
         self.round = 0
+        self.game_no += 1
         self.start_round()
 
     def _pick(self, n: int) -> list[str]:
@@ -346,19 +363,20 @@ class Room(BaseRoom):
                 continue
             options = [{"word": truth, "kind": "truth", "authors": []}]
             options += [{"word": w, "kind": "card", "authors": []} for w in card_decoys(truth, DECOY_MODE_CARD_DECOYS, self.rng)]
-            by_word = {o["word"]: o for o in options}
+            by_key = {match_key(o["word"]): o for o in options}
             sharp = []
             for author, words in self.decoys.items():
                 w = words.get(drawer)
-                if not w:
+                if not w or not match_key(w):
                     continue
-                if w == truth:
+                k = match_key(w)
+                if k == match_key(truth):
                     sharp.append(author)
-                elif w in by_word:
-                    by_word[w]["authors"].append(author)
+                elif k in by_key:
+                    by_key[k]["authors"].append(author)
                 elif len(options) < MAX_OPTIONS:
-                    by_word[w] = {"word": w, "kind": "player", "authors": [author]}
-                    options.append(by_word[w])
+                    by_key[k] = {"word": w, "kind": "player", "authors": [author]}
+                    options.append(by_key[k])
             self.rng.shuffle(options)
             out.append({"drawer": drawer, "image": image, "truth": truth, "options": options, "sharp": sharp})
         return out
@@ -369,7 +387,7 @@ class Room(BaseRoom):
         jobs = self.jobs()
         tasks = [asyncio.ensure_future(judge.guess(
             j["image"], [o["word"] for o in j["options"]], truth=j["truth"],
-            glosses={o["word"]: gloss(o["word"]) for o in j["options"] if gloss(o["word"])})) for j in jobs]
+            glosses=card_glosses(j["options"]))) for j in jobs]
         if tasks:
             await asyncio.wait(tasks, timeout=getattr(judge, "timeout", None))
         verdicts = []
@@ -445,7 +463,8 @@ class Room(BaseRoom):
             return False
 
         v = {
-            "game": self.kind, "code": self.code, "phase": self.phase, "round": self.round, "me": pid, "host": self.host,
+            "game": self.kind, "code": self.code, "phase": self.phase, "round": self.round, "game_no": self.game_no,
+            "me": pid, "host": self.host,
             "deadline": self.deadline, "now": time.time(), "settings": asdict(self.settings),
             "decks": [{"id": k, "label": d["label"]} for k, d in DECKS.items()],
             "players": [{"id": q.id, "name": q.name, "score": q.score, "connected": q.connected,

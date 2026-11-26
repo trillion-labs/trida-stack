@@ -49,6 +49,8 @@ judges what the drawing shows rather than how well it reads Korean.
 - **Decoy.** Everyone draws a different secret word. Then everyone writes a fake answer for each of the others'
   drawings. Zoro-1 picks from the word, 3 card decoys and the players' decoys. The drawer scores 100 × P(word),
   each decoy author scores 100 × P(their decoy), and writing the real word earns a +30 "sharp eye" bonus.
+  Answers match ignoring case, spaces and punctuation ("snow man" = "snowman"), so a 속담 typed with different
+  spacing still counts.
 
 **Decks** (`zoro_draw/cards.py`)
 
@@ -68,14 +70,15 @@ You need [uv](https://docs.astral.sh/uv/). Start Zoro-1 first (see [Run Zoro-1](
 
 ```sh
 cd demo/zoro-1/zoro-draw
-uv run zoro-draw --model-url http://127.0.0.1:8080 --concurrency 1   # Zoro-1 on your Mac (MLX server)
-uv run zoro-draw --model-url http://127.0.0.1:30001                  # Zoro-1 on a GPU (serve_decide.py)
+uv run zoro-draw --model-url http://127.0.0.1:8080                   # Zoro-1 on your Mac (MLX server)
+uv run zoro-draw --model-url http://127.0.0.1:30001 --concurrency 8  # Zoro-1 on a GPU (serve_decide.py)
 uv run zoro-draw --mock                                              # no model: deterministic fake guesses
 ```
 
 Open http://localhost:8765. At startup it prints `Zoro-1 server OK` or a warning if it can't reach the model.
 
-- **Play with others on the same network:** share `http://<your IP>:8765/?room=CODE`.
+- **Play with others on the same network:** start it with `--host 0.0.0.0` (it listens only on this machine by
+  default) and share `http://<your IP>:8765/?room=CODE`.
 - **Play with anyone:** `cloudflared tunnel --url http://localhost:8765` and share the `https://….trycloudflare.com`
   link it prints, with `/?room=CODE` added.
 - Expose only this app, never the Zoro-1 port: run Zoro-1 on localhost (`--host 127.0.0.1`, see
@@ -84,8 +87,9 @@ Open http://localhost:8765. At startup it prints `Zoro-1 server OK` or a warning
   other's words before the reveal.
 - A round waits at most `--timeout` seconds (default 90) for Zoro-1; drawings it hasn't judged by then are shown
   as not judged, so a slow or stuck model can't hold a room.
-- On the MLX server drawings are judged one at a time (`--concurrency 1`); with many players or rooms, serve
-  Zoro-1 with SGLang (`serve_decide.py`), which batches them.
+- `--concurrency` (default 1) caps how many drawings are sent to Zoro-1 at once. 1 suits the MLX server, which
+  judges one at a time; with many players or rooms, serve Zoro-1 with SGLang (`serve_decide.py`), which batches,
+  and raise it (e.g. `--concurrency 8`).
 
 ## Files
 

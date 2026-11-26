@@ -217,7 +217,7 @@ $("submit").onclick = submitDrawing;
 
 function renderDraw() {
   show("draw");
-  const key = `${S.code}/${S.round}`;
+  const key = `${S.code}/${S.game_no}/${S.round}`;   // game_no: "Play again" starts round 1 on a clean canvas
   if (drawKey !== key) { drawKey = key; strokes = []; redraw(); }
   if (!("topic" in S)) {
     $("topic").textContent = "—"; $("cands").textContent = "";
@@ -243,7 +243,7 @@ let tasksKey = null;
 function renderDecoys() {
   show("decoys");
   const tasks = S.tasks || [];
-  const key = `${S.round}/` + tasks.map((t) => t.drawer).join(",");
+  const key = `${S.game_no}/${S.round}/` + tasks.map((t) => t.drawer).join(",");
   const box = $("tasks");
   if (tasksKey !== key) {
     tasksKey = key; box.textContent = "";
@@ -252,7 +252,7 @@ function renderDecoys() {
       const card = el("div", "task"); card.dataset.drawer = t.drawer;
       const img = el("img"); img.src = t.image; img.alt = "drawing by " + nameOf(t.drawer);
       const form = el("form", "row");
-      const inp = el("input"); inp.maxLength = 24; inp.placeholder = "a decoy word"; inp.value = t.word || "";
+      const inp = el("input"); inp.maxLength = 40; inp.placeholder = "a decoy word"; inp.value = t.word || "";
       const btn = el("button", "small", "Save");
       form.append(inp, btn);
       form.onsubmit = (e) => { e.preventDefault(); if (inp.value.trim()) send({ t: "decoy", drawer: t.drawer, word: inp.value }); };
@@ -319,7 +319,7 @@ setInterval(() => {
   const txt = `${Math.ceil(left)}s`;
   const t = S.phase === "drawing" ? $("drawtimer") : $("decoytimer");
   t.textContent = txt; t.classList.toggle("hurry", left < 10);
-  const key = `${S.phase}/${S.round}`;
+  const key = `${S.game_no}/${S.phase}/${S.round}`;
   if (left < 0.4 && autoSent !== key) {
     autoSent = key;
     if (S.phase === "drawing" && "topic" in S && strokes.length) send({ t: "drawing", image: exportPNG() });
