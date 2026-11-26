@@ -3,7 +3,7 @@ name = "my-demo"                 # rename: the folder name, e.g. "zoro-tarot"
 version = "0.1.0"
 license = {text = "Apache-2.0"}
 description = "Zoro-1 demo: <one line>"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = ["httpx>=0.27"]   # add what you need; keep it small
 
 [project.optional-dependencies]

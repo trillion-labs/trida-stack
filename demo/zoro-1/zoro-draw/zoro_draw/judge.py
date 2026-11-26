@@ -12,12 +12,20 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import math
 import random
 import time
 from dataclasses import dataclass, field
 
 import httpx
+
+log = logging.getLogger("zoro_draw")
+
+# What players see when a drawing isn't judged. The real reason (with the model server's URL and its error text)
+# goes to the server log only: players never learn where the model server is.
+NOT_JUDGED = "Zoro couldn't judge this one."
+TOO_SLOW = "Zoro took too long on this one."
 
 STATE = ("A drawing game. A player drew a picture of one word, with a pen, in a few seconds, without writing "
          "any letters. You are shown the drawing.")
@@ -70,16 +78,18 @@ class Judge:
     """Calls the model server, or fakes it with `mock=True` (for playing without a model)."""
 
     def __init__(self, url: str | None = None, model: str = "zoro-1", concurrency: int = 4,
-                 timeout: float = 120.0, mock: bool = False):
+                 timeout: float = 90.0, mock: bool = False):
         self.url = (url or "").rstrip("/")
         self.model = model
         self.mock = mock or not self.url
+        self.timeout = timeout  # also the longest a round waits for its verdicts (game.Room.run_judging)
         self.sem = asyncio.Semaphore(max(1, concurrency))
         self.client = None if self.mock else httpx.AsyncClient(timeout=timeout)
 
     @property
     def mode(self) -> str:
-        return "mock" if self.mock else self.url
+        """What the page may know about the model: "mock" or "zoro-1", never the URL."""
+        return "mock" if self.mock else "zoro-1"
 
     async def health(self) -> dict:
         if self.mock:
@@ -87,10 +97,10 @@ class Judge:
         try:
             r = await self.client.get(f"{self.url}/v1/models", timeout=5)
             r.raise_for_status()
-            ids = [m.get("id") for m in r.json().get("data", [])]
-            return {"ok": True, "mode": self.url, "models": ids}
-        except Exception as e:  # noqa: BLE001 - reported to the page as-is
-            return {"ok": False, "mode": self.url, "error": str(e)}
+            return {"ok": True, "mode": self.mode}
+        except Exception as e:  # noqa: BLE001 - logged here; the public health check only says ok or not
+            log.warning("Zoro-1 health check failed at %s: %s", self.url, e)
+            return {"ok": False, "mode": self.mode}
 
     async def guess(self, image: str, candidates: list[str], truth: str | None = None,
                     glosses: dict | None = None) -> Verdict:
@@ -108,7 +118,8 @@ class Judge:
                     raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
                 v = parse_response(r.json(), candidates)
         except Exception as e:  # noqa: BLE001 - one failed drawing must not end the round
-            v = Verdict(error=str(e) or type(e).__name__)
+            log.warning("Zoro-1 call to %s failed: %s", self.url, str(e) or type(e).__name__)
+            v = Verdict(error=NOT_JUDGED)
         v.ms = int((time.perf_counter() - t0) * 1000)
         return v
 
@@ -126,4 +137,3 @@ def _mock(image: str, candidates: list[str], truth: str | None) -> Verdict:
     exp = {w: math.exp(x - m) for w, x in logits.items()}
     z = sum(exp.values())
     return Verdict(probs={w: e / z for w, e in exp.items()}, text_p=rng.random() * 0.1)
-

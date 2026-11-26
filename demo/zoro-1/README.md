@@ -66,8 +66,11 @@ It handles one request at a time: fine for a demo with a few people.
 ```bash
 cd inference/zoro-1
 pip install "sglang>=0.5.22" fastapi uvicorn
-python serve.py --mode decide --port 30001
+python serve.py --mode decide --host 127.0.0.1 --port 30001
 ```
+
+This server has no API key, so keep it on localhost. If the GPU is another machine, reach it through an SSH
+tunnel (`ssh -N -L 30001:127.0.0.1:30001 GPU_HOST`) and point the demo at `http://127.0.0.1:30001`.
 
 Check it's up: `curl -s localhost:8080/v1/models` (or `:30001`). See [`inference/zoro-1`](../../inference/zoro-1/)
 for details.

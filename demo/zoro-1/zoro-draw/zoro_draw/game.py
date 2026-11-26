@@ -13,20 +13,27 @@ Modes
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import math
 import random
 import re
 import secrets
+import struct
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 from .cards import DECKS, decoys as card_decoys, gloss
-from .judge import Judge, Verdict
+from .judge import TOO_SLOW, Judge, Verdict
 
 CLASSIC, DECOY = "classic", "decoy"
 LOBBY, DRAWING, DECOYS, JUDGING, REVEAL, FINAL = "lobby", "drawing", "decoys", "judging", "reveal", "final"
 
 MAX_PLAYERS = 8
 MAX_IMAGE_CHARS = 600_000      # a 448x336 PNG data URL is far below this
+MAX_IMAGE_SIDE = 448           # the model's image cap is 448x448; the page sends 448x336
+PNG_PREFIX = "data:image/png;base64,"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 TEXT_VOID = 0.85               # P(the answer is written out) above this voids the drawer's points
 WIN_BONUS = 20
 SHARP_EYE = 30
@@ -40,10 +47,12 @@ class GameError(Exception):
 
 @dataclass
 class Player:
-    id: str
+    id: str      # public: every player in the room sees it
     name: str
     score: int = 0
     connected: bool = True
+    # secret: sent only to this player (in "welcome"); presenting it is the only way to take the seat back
+    token: str = field(default_factory=lambda: secrets.token_urlsafe(16), repr=False)
 
 
 @dataclass
@@ -69,6 +78,32 @@ def clean_word(word) -> str:
     return word
 
 
+def clean_int(value, lo: int, hi: int) -> int:
+    """A client number clamped to [lo, hi]. JSON allows NaN and Infinity, which int() can't take."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise GameError("Settings must be numbers.")
+    return max(lo, min(hi, int(value)))
+
+
+def check_png(image) -> None:
+    """A drawing must be a real PNG no bigger than the model's image cap. Checked from the header, without decoding
+    the pixels: a tiny file can declare huge dimensions, and the model server decodes before it resizes."""
+    if not isinstance(image, str) or not image.startswith(PNG_PREFIX):
+        raise GameError("The drawing must be a PNG data URL.")
+    if len(image) > MAX_IMAGE_CHARS:
+        raise GameError("The drawing is too large.")
+    try:
+        raw = base64.b64decode(image[len(PNG_PREFIX):], validate=True)
+    except (binascii.Error, ValueError):
+        raise GameError("The drawing must be a PNG data URL.") from None
+    # signature, then the IHDR chunk: length (4) + b"IHDR" (4) + width (4) + height (4)
+    if len(raw) < 24 or raw[:8] != PNG_SIGNATURE or raw[12:16] != b"IHDR":
+        raise GameError("The drawing must be a PNG data URL.")
+    width, height = struct.unpack(">II", raw[16:24])
+    if not (0 < width <= MAX_IMAGE_SIDE and 0 < height <= MAX_IMAGE_SIDE):
+        raise GameError(f"The drawing must be at most {MAX_IMAGE_SIDE}x{MAX_IMAGE_SIDE} pixels.")
+
+
 class BaseRoom:
     """What every game's room shares: players, host, timers. server.py talks to rooms only through:
     join / leave / handle(pid, msg) / advance() / expire() / grace() / needs_work() / run_work(zoro) / view(pid)."""
@@ -85,10 +120,12 @@ class BaseRoom:
         self.last_active = time.time()
         self.notify = None  # async callable set by the server; background tasks call it after changing state
 
-    def join(self, name, pid: str | None = None) -> Player:
+    def join(self, name, token: str | None = None) -> Player:
+        """A new player, or the player whose secret `token` this is (a reload or a reconnect). The public id is
+        never enough: every player sees every id."""
         name = clean_name(name)
-        if pid and pid in self.players:
-            p = self.players[pid]
+        p = self._by_token(token)
+        if p is not None:
             p.connected, p.name = True, name
         else:
             if len(self.players) >= MAX_PLAYERS:
@@ -99,6 +136,15 @@ class BaseRoom:
             self.host = p.id
         self.touch()
         return p
+
+    def _by_token(self, token) -> Player | None:
+        if not isinstance(token, str) or not token:
+            return None
+        return next((p for p in self.players.values() if secrets.compare_digest(p.token, token)), None)
+
+    def abandoned(self) -> bool:
+        """No one connected and no game ever started: the server can drop the room right away."""
+        return self.round == 0 and not any(p.connected for p in self.players.values())
 
     def leave(self, pid: str):
         if pid in self.players:
@@ -163,6 +209,8 @@ class Room(BaseRoom):
             self.submit_decoy(pid, msg.get("drawer"), msg.get("word"))
         elif t == "next":
             self.next(pid)
+        else:
+            raise GameError("Unknown message.")  # the server broadcasts only after a message changed something
 
     def advance(self):
         if self.phase == DRAWING and self.drawing_done():
@@ -193,11 +241,11 @@ class Room(BaseRoom):
                 raise GameError("Unknown mode.")
             s.mode = mode
         if rounds is not None:
-            s.rounds = max(1, min(10, int(rounds)))
+            s.rounds = clean_int(rounds, 1, 10)
         if draw_secs is not None:
-            s.draw_secs = max(15, min(180, int(draw_secs)))
+            s.draw_secs = clean_int(draw_secs, 15, 180)
         if decoy_secs is not None:
-            s.decoy_secs = max(15, min(120, int(decoy_secs)))
+            s.decoy_secs = clean_int(decoy_secs, 15, 120)
         if deck is not None:
             if deck != "mix" and deck not in DECKS:
                 raise GameError("Unknown deck.")
@@ -247,10 +295,7 @@ class Room(BaseRoom):
             raise GameError("Drawing time is over.")
         if pid not in self.participants:
             raise GameError("You join from the next round.")
-        if not isinstance(image, str) or not image.startswith("data:image/png;base64,"):
-            raise GameError("The drawing must be a PNG data URL.")
-        if len(image) > MAX_IMAGE_CHARS:
-            raise GameError("The drawing is too large.")
+        check_png(image)
         self.drawings[pid] = image
         self.touch()
 
@@ -319,10 +364,21 @@ class Room(BaseRoom):
         return out
 
     async def run_judging(self, judge: Judge):
+        """One model call per drawing. The round always reaches the reveal: drawings the model hasn't judged within
+        `judge.timeout` seconds (counting time queued behind other rooms) are shown as not judged."""
         jobs = self.jobs()
-        verdicts = await asyncio.gather(*(
-            judge.guess(j["image"], [o["word"] for o in j["options"]], truth=j["truth"],
-                        glosses={o["word"]: gloss(o["word"]) for o in j["options"] if gloss(o["word"])}) for j in jobs))
+        tasks = [asyncio.ensure_future(judge.guess(
+            j["image"], [o["word"] for o in j["options"]], truth=j["truth"],
+            glosses={o["word"]: gloss(o["word"]) for o in j["options"] if gloss(o["word"])})) for j in jobs]
+        if tasks:
+            await asyncio.wait(tasks, timeout=getattr(judge, "timeout", None))
+        verdicts = []
+        for t in tasks:
+            if t.done():
+                verdicts.append(t.result())
+            else:
+                t.cancel()
+                verdicts.append(Verdict(error=TOO_SLOW))
         self.apply(jobs, verdicts)
 
     def apply(self, jobs: list[dict], verdicts: list[Verdict]):

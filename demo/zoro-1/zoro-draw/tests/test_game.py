@@ -1,15 +1,34 @@
+import asyncio
 import base64
 import random
+import struct
+import zlib
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from zoro_draw import judge as J
 from zoro_draw.game import CLASSIC, DECOY, DECOYS, DRAWING, FINAL, JUDGING, REVEAL, SHARP_EYE, WIN_BONUS, GameError, Room
 from zoro_draw.judge import Judge, Verdict
-from zoro_draw.server import create_app
+from zoro_draw.server import RateLimit, create_app
 
-PNG = "data:image/png;base64," + base64.b64encode(b"\x89PNG fake").decode()
+
+def _chunk(kind: bytes, data: bytes) -> bytes:
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+
+def png(seed: int = 0, width: int = 448, height: int = 336, *, declared: tuple[int, int] | None = None) -> str:
+    """A real grayscale PNG data URL (the page sends 448x336). `seed` varies one pixel so drawings differ;
+    `declared` writes other dimensions into the header than the pixels have (a decompression bomb's trick)."""
+    rows = b"".join(b"\x00" + bytes([seed % 256 if y == 0 else 255]) + b"\xff" * (width - 1) for y in range(height))
+    w, h = declared or (width, height)
+    raw = (b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 0, 0, 0, 0))
+           + _chunk(b"IDAT", zlib.compress(rows)) + _chunk(b"IEND", b""))
+    return "data:image/png;base64," + base64.b64encode(raw).decode()
+
+
+PNG = png()
 
 
 def room_with(n, mode=CLASSIC):
@@ -48,6 +67,7 @@ def test_body_passes_server_validation():
     dr = pytest.importorskip("decide_request")
     req, opts = dr.systemone_request(J.systemone_body("zoro-1", PNG, ["cat", "dog"]))
     assert req["image"] == PNG and opts == {"reasoning": False}
+    dr.parse(req)   # systemone_request only maps the envelope; parse() checks the questions, criteria and image
 
 
 async def test_classic_round_scoring():
@@ -56,7 +76,7 @@ async def test_classic_round_scoring():
     assert r.topics[a.id] in r.candidates and len(r.candidates) == 7
     r.submit_drawing(a.id, PNG)
     assert not r.drawing_done()
-    r.submit_drawing(b.id, PNG + "x")
+    r.submit_drawing(b.id, png(1))
     assert r.drawing_done()
     r.end_drawing()
     assert r.phase == JUDGING
@@ -76,8 +96,8 @@ async def test_text_voids_points():
 async def test_decoy_round():
     r, (a, b, c) = room_with(3, DECOY)
     assert len(set(r.topics.values())) == 3 and r.candidates == []
-    for p in (a, b, c):
-        r.submit_drawing(p.id, PNG + p.id)
+    for i, p in enumerate((a, b, c)):
+        r.submit_drawing(p.id, png(i))
     r.end_drawing()
     assert r.phase == DECOYS
     with pytest.raises(GameError):
@@ -124,9 +144,9 @@ def test_websocket_game_flow():
         with tc.websocket_connect("/ws") as w1:
             w1.send_json({"t": "hello", "name": "Host"})
             hello = w1.receive_json()
-            assert hello["t"] == "welcome"
+            assert hello["t"] == "welcome" and hello["token"] and hello["token"] != hello["pid"]
             code = hello["room"]
-            w1.receive_json()
+            assert w1.receive_json()["state"]["model"] == "mock"
             with tc.websocket_connect("/ws") as w2:
                 w2.send_json({"t": "hello", "name": "Guest", "room": code})
                 assert w2.receive_json()["t"] == "welcome"
@@ -137,7 +157,7 @@ def test_websocket_game_flow():
                 s = w1.receive_json()["state"]; w2.receive_json()
                 assert s["phase"] == "drawing" and s["topic"] in s["candidates"]
                 w1.send_json({"t": "drawing", "image": PNG}); w1.receive_json(); w2.receive_json()
-                w2.send_json({"t": "drawing", "image": PNG + "y"})
+                w2.send_json({"t": "drawing", "image": png(2)})
                 # judging, then reveal
                 seen = []
                 while "reveal" not in seen:
@@ -193,6 +213,85 @@ def test_deck_body_passes_server_validation():
     cands = list(PROVERBS)[:7]
     req, _ = dr.systemone_request(J.systemone_body("zoro-1", PNG, cands, {c: PROVERBS[c] for c in cands}))
     assert req["questions"]["guess"]["criteria"][cands[0]] == PROVERBS[cands[0]]
+    dr.parse(req)
+
+
+# ---- review fixes: each test fails on the code before them -----------------------------------------------------
+
+def test_a_public_id_does_not_take_a_seat():
+    r = Room("TEST")
+    host = r.join("host")
+    thief = r.join("thief", host.id)           # every player sees host.id in the room state
+    assert thief.id != host.id and r.host == host.id
+    again = r.join("host", host.token)         # only the secret token takes the seat back
+    assert again is host
+
+
+def test_drawings_must_be_small_real_pngs():
+    r, (a,) = room_with(1)
+    r.submit_drawing(a.id, PNG)
+    for bad in ("data:image/png;base64,not base64!",                       # not base64
+                "data:image/png;base64," + base64.b64encode(b"GIF89a" + b"\0" * 30).decode(),   # not a PNG
+                png(declared=(20000, 20000)),                              # tiny file, huge declared image
+                png(width=449, height=10)):                                # over the model's cap
+        with pytest.raises(GameError):
+            r.submit_drawing(a.id, bad)
+
+
+def test_unknown_messages_and_bad_numbers_are_errors():
+    r, (a,) = room_with(1)
+    with pytest.raises(GameError):
+        r.handle(a.id, {"t": "x"})             # no broadcast for a message that changes nothing
+    r2 = Room("TEST")
+    h = r2.join("h")
+    for v in (float("inf"), float("nan"), "3", True):
+        with pytest.raises(GameError):
+            r2.configure(h.id, rounds=v)
+
+
+class SlowJudge(FixedJudge):
+    timeout = 0.05
+
+    async def guess(self, image, cands, truth=None, glosses=None):
+        await asyncio.sleep(5)
+
+
+async def test_a_slow_model_cannot_hold_a_round():
+    r, (a,) = room_with(1)
+    r.submit_drawing(a.id, PNG); r.end_drawing()
+    await asyncio.wait_for(r.run_judging(SlowJudge()), 2)
+    assert r.phase == REVEAL and r.results[0]["error"] == J.TOO_SLOW and a.score == 0
+
+
+async def test_the_model_url_and_errors_stay_on_the_server():
+    url = "http://10.9.8.7:30001"
+    judge = Judge(url)
+    judge.client = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda req: httpx.Response(500, text=f"internal error at {url}")))
+    v = await judge.guess(PNG, ["cat", "dog"])
+    assert judge.mode == "zoro-1" and v.error == J.NOT_JUDGED and url not in v.error
+    judge.client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(503)))
+    assert url not in str(await judge.health())
+    await judge.aclose()
+
+
+def test_a_failed_hello_leaves_no_room_and_bad_messages_keep_the_socket():
+    app = create_app(Judge(mock=True))
+    with TestClient(app) as tc, tc.websocket_connect("/ws") as w:
+        for _ in range(3):
+            w.send_json({"t": "hello", "name": "  "})
+            assert w.receive_json()["t"] == "error"
+        assert app.state.hub.rooms == {}
+        w.send_json({"t": "hello", "name": "Host"}); w.receive_json(); w.receive_json()
+        w.send_json({"t": "settings", "rounds": 1e400})   # json: Infinity
+        assert w.receive_json()["t"] == "error"
+        w.send_json({"t": "settings", "rounds": 2})       # still connected
+        assert w.receive_json()["state"]["settings"]["rounds"] == 2
+
+
+def test_rate_limit():
+    limit = RateLimit(rate=0.0, burst=2)
+    assert limit.allow() and limit.allow() and not limit.allow()
 
 
 def test_pages_are_not_cached():

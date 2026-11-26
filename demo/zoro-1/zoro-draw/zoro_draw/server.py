@@ -1,14 +1,16 @@
-"""Zoro Draw web server: one page + one websocket per player. The Zoro-1 server stays private behind this.
+"""Zoro Draw web server: one page + one websocket per player. The Zoro-1 server stays private behind this: the page
+never gets its URL or its error messages (they go to this server's log).
 
   uv run zoro-draw --mock                                              # play without a model
   uv run zoro-draw --model-url http://127.0.0.1:8080 --concurrency 1  # Zoro-1 on your Mac (MLX server)
-  uv run zoro-draw --model-url http://GPU_HOST:30001                   # Zoro-1 on a GPU (serve_decide.py, SGLang)
+  uv run zoro-draw --model-url http://127.0.0.1:30001                  # Zoro-1 on a GPU (serve_decide.py, SGLang)
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import contextlib
+import logging
 import os
 import pathlib
 import secrets
@@ -19,13 +21,33 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .game import GameError, Room
+from .game import GameError, Room, clean_name
 from .judge import Judge
+
+log = logging.getLogger("zoro_draw")
 
 STATIC = pathlib.Path(__file__).parent / "static"
 MAX_ROOMS = 500
 IDLE_ROOM_SECS = 15 * 60
 CODE_LETTERS = string.ascii_uppercase.replace("O", "").replace("I", "")
+MSG_RATE, MSG_BURST = 10.0, 30   # per socket: messages per second, and how many may arrive at once
+
+
+class RateLimit:
+    """A token bucket per socket. The page sends a few messages a second at most (settings, a drawing, decoys)."""
+
+    def __init__(self, rate: float = MSG_RATE, burst: int = MSG_BURST):
+        self.rate, self.burst = rate, burst
+        self.tokens, self.at = float(burst), time.monotonic()
+
+    def allow(self) -> bool:
+        now = time.monotonic()
+        self.tokens = min(self.burst, self.tokens + (now - self.at) * self.rate)
+        self.at = now
+        if self.tokens < 1:
+            return False
+        self.tokens -= 1
+        return True
 
 
 class Hub:
@@ -50,6 +72,13 @@ class Hub:
         self.rooms[code] = room
         self.sockets[code] = {}
         return room
+
+    def drop(self, code: str):
+        self.rooms.pop(code, None)
+        self.sockets.pop(code, None)
+        t = self.timers.pop(code, None)
+        if t:
+            t[1].cancel()
 
     async def send(self, ws: WebSocket, msg: dict):
         try:
@@ -103,11 +132,7 @@ class Hub:
             now = time.time()
             for code, room in list(self.rooms.items()):
                 if not self.sockets.get(code) and now - room.last_active > IDLE_ROOM_SECS:
-                    self.rooms.pop(code, None)
-                    self.sockets.pop(code, None)
-                    t = self.timers.pop(code, None)
-                    if t:
-                        t[1].cancel()
+                    self.drop(code)
 
 
 def create_app(judge: Judge) -> FastAPI:
@@ -154,9 +179,14 @@ def create_app(judge: Judge) -> FastAPI:
         await ws.accept()
         room: Room | None = None
         pid: str | None = None
+        limit = RateLimit()
         try:
             while True:
                 msg = await ws.receive_json()
+                if not limit.allow():
+                    await hub.send(ws, {"t": "error", "msg": "Too many messages."})
+                    await ws.close(code=1008)
+                    break
                 if not isinstance(msg, dict):
                     continue
                 try:
@@ -166,8 +196,14 @@ def create_app(judge: Judge) -> FastAPI:
                         code = str(msg.get("room") or "").strip().upper()
                         if code and code not in hub.rooms:
                             raise GameError(f"No room {code}.")
+                        clean_name(msg.get("name"))   # before creating a room, so a bad name leaves none behind
                         r = hub.rooms[code] if code else hub.new_room()
-                        p = r.join(msg.get("name"), msg.get("pid"))
+                        try:
+                            p = r.join(msg.get("name"), msg.get("token"))
+                        except GameError:
+                            if r.abandoned():
+                                hub.drop(r.code)
+                            raise
                         room, pid = r, p.id
                         old = hub.sockets[room.code].get(pid)
                         hub.sockets[room.code][pid] = ws
@@ -175,13 +211,19 @@ def create_app(judge: Judge) -> FastAPI:
                             await hub.send(old, {"t": "error", "msg": "Opened in another tab."})
                             with contextlib.suppress(Exception):
                                 await old.close()
-                        await hub.send(ws, {"t": "welcome", "pid": pid, "room": room.code, "game": "draw"})
+                        # the token is this player's alone: it is how a reload takes the seat back
+                        await hub.send(ws, {"t": "welcome", "pid": pid, "token": p.token, "room": room.code,
+                                            "game": "draw"})
                     elif room is None:
                         raise GameError("Join a room first.")
                     else:
                         room.handle(pid, msg)
-                except (GameError, ValueError, TypeError) as e:
+                except GameError as e:
                     await hub.send(ws, {"t": "error", "msg": str(e)})
+                    continue
+                except Exception:  # noqa: BLE001 - a bad message must not end this player's connection
+                    log.exception("message from %s in room %s failed", pid, room.code if room else None)
+                    await hub.send(ws, {"t": "error", "msg": "That didn't work."})
                     continue
                 await hub.drive(room)
         except WebSocketDisconnect:
@@ -190,7 +232,10 @@ def create_app(judge: Judge) -> FastAPI:
             if room is not None and pid is not None and hub.sockets.get(room.code, {}).get(pid) is ws:
                 hub.sockets[room.code].pop(pid, None)
                 room.leave(pid)
-                await hub.drive(room)
+                if room.abandoned():
+                    hub.drop(room.code)
+                else:
+                    await hub.drive(room)
 
     return app
 
@@ -203,6 +248,8 @@ def main():
     ap.add_argument("--mock", action="store_true", help="fake the model (deterministic random guesses)")
     ap.add_argument("--concurrency", type=int, default=8,
                     help="max in-flight model calls (SGLang batches them; use 1 for the MLX server)")
+    ap.add_argument("--timeout", type=float, default=90.0,
+                    help="seconds a round waits for Zoro-1's verdicts before showing the rest as not judged")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8765)
     a = ap.parse_args()
@@ -210,7 +257,8 @@ def main():
         ap.error("give --model-url (or ZORO_URL), or --mock")
     import httpx
     import uvicorn
-    judge = Judge(a.model_url, a.model, a.concurrency, mock=a.mock)
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    judge = Judge(a.model_url, a.model, a.concurrency, timeout=a.timeout, mock=a.mock)
     if not judge.mock:
         try:
             r = httpx.get(f"{judge.url}/v1/models", timeout=5)
@@ -218,7 +266,7 @@ def main():
             print(f"Zoro-1 server OK: {[m.get('id') for m in r.json().get('data', [])]}")
         except Exception as e:  # noqa: BLE001
             print(f"WARNING: no Zoro-1 server at {judge.url} ({e}). See ../README.md, 'Run Zoro-1'.")
-    print(f"Zoro Draw on http://{a.host}:{a.port}  (model: {judge.mode})")
+    print(f"Zoro Draw on http://{a.host}:{a.port}  (model: {'mock' if judge.mock else judge.url})")
     uvicorn.run(create_app(judge), host=a.host, port=a.port, ws_max_size=1 << 20, log_level="info")
 
 

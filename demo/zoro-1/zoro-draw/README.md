@@ -69,7 +69,7 @@ You need [uv](https://docs.astral.sh/uv/). Start Zoro-1 first (see [Run Zoro-1](
 ```sh
 cd demo/zoro-1/zoro-draw
 uv run zoro-draw --model-url http://127.0.0.1:8080 --concurrency 1   # Zoro-1 on your Mac (MLX server)
-uv run zoro-draw --model-url http://GPU_HOST:30001                   # Zoro-1 on a GPU (serve_decide.py)
+uv run zoro-draw --model-url http://127.0.0.1:30001                  # Zoro-1 on a GPU (serve_decide.py)
 uv run zoro-draw --mock                                              # no model: deterministic fake guesses
 ```
 
@@ -78,8 +78,12 @@ Open http://localhost:8765. At startup it prints `Zoro-1 server OK` or a warning
 - **Play with others on the same network:** share `http://<your IP>:8765/?room=CODE`.
 - **Play with anyone:** `cloudflared tunnel --url http://localhost:8765` and share the `https://….trycloudflare.com`
   link it prints, with `/?room=CODE` added.
-- The Zoro-1 server only listens on localhost; only this app is exposed. Players never see the model server,
-  and in Decoy mode they never see each other's words before the reveal.
+- Expose only this app, never the Zoro-1 port: run Zoro-1 on localhost (`--host 127.0.0.1`, see
+  [Run Zoro-1](../README.md#run-zoro-1)), or reach a GPU machine through an SSH tunnel. The page never gets the model
+  server's URL or its error messages (those go to this app's log), and in Decoy mode players never see each
+  other's words before the reveal.
+- A round waits at most `--timeout` seconds (default 90) for Zoro-1; drawings it hasn't judged by then are shown
+  as not judged, so a slow or stuck model can't hold a room.
 - On the MLX server drawings are judged one at a time (`--concurrency 1`); with many players or rooms, serve
   Zoro-1 with SGLang (`serve_decide.py`), which batches them.
 

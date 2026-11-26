@@ -24,13 +24,14 @@ function connect(room) {
   $("status").textContent = "connecting…";
   ws.onopen = () => {
     $("status").textContent = "";
-    send({ t: "hello", game: "draw", name: $("name").value || store.get("name"), room: wantRoom, pid: store.get("pid") });
+    send({ t: "hello", game: "draw", name: $("name").value || store.get("name"), room: wantRoom, token: store.get("token") });
   };
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.t === "welcome") {
       joined = true; retry = 0;
-      store.set("pid", m.pid); store.set("room", m.room); wantRoom = m.room;
+      // the token is secret (it takes this seat back after a reload); the pid is public, everyone sees it
+      store.set("token", m.token); store.set("room", m.room); wantRoom = m.room;
       history.replaceState(null, "", "/?room=" + m.room);
     } else if (m.t === "state") {
       S = m.state; offset = S.now - Date.now() / 1000; render();
@@ -61,7 +62,7 @@ function go(room) {
   const name = $("name").value.trim();
   if (!name) { toast("Pick a name first."); $("name").focus(); return; }
   store.set("name", name);
-  if (store.get("room") !== room) store.set("pid", null);
+  if (store.get("room") !== room) store.set("token", null);
   joined = false; connect(room);
 }
 $("create").onclick = () => go(null);
