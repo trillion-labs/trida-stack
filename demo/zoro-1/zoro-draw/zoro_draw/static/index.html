@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zoro Draw</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">Zoro <span>Draw</span></a>
+  <div class="status" id="status"></div>
+</header>
+
+<main>
+  <!-- home -->
+  <section id="home" class="screen card narrow">
+    <h1>Draw it so Zoro guesses it.</h1>
+    <p class="sub">Zoro-1 is a 4B model. It looks at your drawing and picks the word it thinks you meant.
+      The higher its probability on the right word, the more points you get.</p>
+    <label>Your name <input id="name" maxlength="16" autocomplete="nickname" placeholder="e.g. Hyungguk"></label>
+    <div class="row">
+      <button id="create" class="primary">Create a room</button>
+    </div>
+    <div class="or">or join one</div>
+    <div class="row">
+      <input id="code" maxlength="4" placeholder="CODE" class="code-input">
+      <button id="join">Join</button>
+    </div>
+  </section>
+
+  <!-- in a room -->
+  <div id="room" class="screen hidden">
+    <div class="layout">
+      <aside class="card side">
+        <div class="roomcode">Room <b id="roomcode"></b> <button id="copy" class="small">Copy link</button></div>
+        <div class="roundinfo" id="roundinfo"></div>
+        <ol id="players" class="players"></ol>
+        <div class="model" id="model"></div>
+      </aside>
+
+      <section class="stage">
+        <!-- lobby / final settings -->
+        <div id="lobby" class="phase card hidden">
+          <h2 id="lobbytitle">Waiting for players</h2>
+          <div id="final" class="hidden"></div>
+          <div id="settings">
+            <div class="modes">
+              <label class="mode"><input type="radio" name="mode" value="classic" checked>
+                <b>Classic</b><span>Everyone draws the same word. Zoro picks from the word and 6 lookalikes you can see.
+                Highest probability wins the round.</span></label>
+              <label class="mode"><input type="radio" name="mode" value="decoy">
+                <b>Decoy</b><span>Everyone draws a different secret word. Then you write fake answers for the others'
+                drawings. You score when Zoro falls for your decoy.</span></label>
+            </div>
+            <div class="row settings-row">
+              <label>Deck <select id="deck"></select></label>
+              <label>Rounds <select id="rounds"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
+              <label>Draw time <select id="draw_secs"><option value="30">30 s</option><option value="45">45 s</option><option value="60" selected>60 s</option><option value="90">90 s</option></select></label>
+              <label>Decoy time <select id="decoy_secs"><option value="30">30 s</option><option value="45" selected>45 s</option><option value="60">60 s</option></select></label>
+            </div>
+          </div>
+          <div class="row"><button id="start" class="primary">Start</button><span id="hostnote" class="muted"></span></div>
+        </div>
+
+        <!-- drawing -->
+        <div id="draw" class="phase card hidden">
+          <div class="phasehead">
+            <div>Draw: <span class="topic" id="topic"></span><div class="muted gloss" id="gloss"></div></div>
+            <div class="timer" id="drawtimer"></div>
+          </div>
+          <div id="cands" class="cands"></div>
+          <div class="canvaswrap"><canvas id="canvas" width="640" height="480"></canvas></div>
+          <div class="tools">
+            <div class="swatches" id="swatches"></div>
+            <div class="sizes" id="sizes"></div>
+            <button id="eraser" class="small">Eraser</button>
+            <button id="undo" class="small">Undo</button>
+            <button id="clear" class="small">Clear</button>
+            <span class="grow"></span>
+            <button id="submit" class="primary">Done</button>
+          </div>
+          <p class="muted rule">Don't write the answer: Zoro checks, and spelling it out voids your points. Symbols like $ ? ! ♥ are fine.</p>
+          <p class="muted" id="drawnote"></p>
+        </div>
+
+        <!-- decoys -->
+        <div id="decoys" class="phase card hidden">
+          <div class="phasehead">
+            <div>Write a decoy for each drawing</div>
+            <div class="timer" id="decoytimer"></div>
+          </div>
+          <p class="muted">Guess what it is, then write something else Zoro could believe it is. If you write the real
+            word you get a small "sharp eye" bonus instead.</p>
+          <div id="tasks" class="tasks"></div>
+        </div>
+
+        <!-- judging -->
+        <div id="judging" class="phase card hidden center">
+          <div class="eye"><div class="pupil"></div></div>
+          <h2 id="judgingtext">Zoro is looking…</h2>
+        </div>
+
+        <!-- reveal -->
+        <div id="reveal" class="phase hidden">
+          <div class="phasehead card"><div id="revealtitle">Round results</div>
+            <button id="next" class="primary">Next round</button></div>
+          <div id="results" class="results"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

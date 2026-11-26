@@ -79,6 +79,26 @@ jobs:
             echo "pip-audit wrote no report for inference/gravityocr/mac/requirements-lock.txt"
             exit 1
           }
+      # Community demos (demo/zoro-1/*) are not in the release tarball (.gitattributes export-ignore), so
+      # this is the only scan their locks get. Every pinned version is audited whatever its Python marker:
+      # a pin used only on an older Python is still a pin someone installs (Pillow 12.3.0 hid that way).
+      - name: Scan the demo locks
+        run: |
+          set -euo pipefail
+          python -m pip install uv==0.13.7
+          for lock in demo/zoro-1/*/uv.lock; do
+            name=$(basename "$(dirname "$lock")")
+            uv export --frozen --all-extras --no-hashes --no-emit-project --directory "$(dirname "$lock")" \
+              | sed -E 's/ ;.*$//' | grep -E '^[A-Za-z0-9_.-]+==' | sort -u > "demo-$name.txt"
+            split=$(cut -d= -f1 "demo-$name.txt" | tr 'A-Z_.' 'a-z--' | sort | uniq -d)
+            if [ -n "$split" ]; then
+              echo "::error::$lock pins more than one version of: $split (one per Python version)." \
+                   "Raise requires-python in its pyproject.toml so one version is locked, then uv lock."
+              exit 1
+            fi
+            pip-audit -r "demo-$name.txt" --no-deps --disable-pip -f json -o "audit-demo-$name.json" || true
+            test -s "audit-demo-$name.json" || { echo "pip-audit wrote no report for $lock"; exit 1; }
+          done
       - name: Enforce the exception policy
         run: |
           python tools/check_advisories.py --pip-audit audit-core.json
@@ -87,6 +107,7 @@ jobs:
           python tools/check_advisories.py --pip-audit audit-vllm-decide.json
           python tools/check_advisories.py --pip-audit audit-gravityocr-server.json
           python tools/check_advisories.py --pip-audit audit-gravityocr-mac.json
+          for report in audit-demo-*.json; do python tools/check_advisories.py --pip-audit "$report"; done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: always()
         with:
