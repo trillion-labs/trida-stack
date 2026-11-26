@@ -1,0 +1,4 @@
+# Community demos are showcase code, not part of the released stack: keep them out of the release tarball
+# (`git archive`) and so out of its SBOM. Their locks are scanned on every PR instead (supply-chain.yml,
+# "Scan the demo locks").
+/demo/ export-ignore
