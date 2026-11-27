@@ -7,6 +7,7 @@ and add yours.
 | demo | kind | what it is | Zoro-1 features used |
 |---|---|---|---|
 | [zoro-draw](zoro-draw/) | web app | Multiplayer drawing game: everyone draws, Zoro-1 guesses, the probability on the right answer is your score. Decks include 한국어 속담 and memes. | decision head: `choice` + `noul` on an image |
+| [second-thought](second-thought/) | notebook | A toy self-driving car that takes a second look only when unsure, and learns from its own second looks to need fewer. | decision head: `choice` + six `noul` on one prefill; a tiny head trained on the answers |
 | *yours* | notebook or app | [Add a demo](#add-a-demo) | |
 
 ## What Zoro-1 gives a demo
