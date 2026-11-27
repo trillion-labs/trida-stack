@@ -15,6 +15,10 @@ head agrees with the second look 62% of the time (raw reflex 42%), would need a 
 55% of the time (raw 88%), and picks an unsafe move first 18% of the time (raw 35%).
 A small sample: expect a few points of difference from run to run.</sub>
 
+**Who it's for:** people new to Zoro-1 who want to see what calibrated probabilities are good for beyond picking an
+answer: deciding *when* to think harder, and turning those moments into training data. Useful if you are building
+an agent that mixes a fast decision with a slow check (a System 1 / System 2 split).
+
 It grew out of a TRILLION AGENT AI HACKATHON 2026 project, cut down to one idea you can run on a laptop.
 
 ## How it uses Zoro-1
@@ -78,7 +82,8 @@ cd demo/zoro-1/second-thought
 uv run --no-project --with jupyter --with httpx --with matplotlib jupyter lab second_thought.ipynb
 ```
 
-- **Speed:** the notebook makes about 240 decision calls. Against a GPU (SGLang batches) set `ZORO_CONCURRENCY=4`
+- **Speed:** the first cells show one scene, its reflex probabilities and its second look within seconds. The
+  whole notebook makes about 240 decision calls. Against a GPU (SGLang batches) set `ZORO_CONCURRENCY=4`
   or more; keep 1 for the Mac MLX server. On a Colab T4 it took about 8.5 minutes; for a quicker look, lower
   `SCENES_PER_ROUND` and `TEST_SCENES` in the setup cell.
 - **Colab:** a Colab notebook can't reach a Zoro-1 server on your own computer. Either run the server in the same
@@ -89,14 +94,26 @@ uv run --no-project --with jupyter --with httpx --with matplotlib jupyter lab se
 
 ## Test
 
-The notebook must run top to bottom in mock mode; its last cell checks the results:
+`test_second_thought.py` runs the notebook's own code in mock mode (no model, no network): the physics checks, the
+learned head starting as an exact copy of the reflex, second-look labels always being safe, every request body
+passing Zoro-1's parser, and the whole notebook with its check cell.
+
+```sh
+cd demo/zoro-1/second-thought
+PYTHONPATH=../../../inference/zoro-1 uv run --no-project --with pytest --with httpx --with matplotlib pytest -q
+```
+
+The notebook must also run top to bottom in mock mode; its last cell checks the results:
 
 ```sh
 ZORO_MOCK=1 uv run --no-project --with jupyter --with httpx --with matplotlib jupyter nbconvert --to notebook --execute second_thought.ipynb --output /tmp/out.ipynb
 ```
 
-Every request body it sends was checked against Zoro-1's own parser
-(`inference/zoro-1/decide_request.systemone_request` and `parse`).
+| file | what |
+|---|---|
+| `second_thought.ipynb` | the demo (outputs from one real run) |
+| `test_second_thought.py` | mock-mode tests, including Zoro-1's request parser |
+| `docs/result.png` | the chart above |
 
 ---
 
@@ -114,6 +131,10 @@ Every request body it sends was checked against Zoro-1's own parser
   둘을 어떻게 섞을지 배웁니다.
 - **실제 결과 (Colab T4, 새 장면 40개):** 다시 생각과 일치 42% → 62%, 다시 생각 필요
   88% → 55%, 첫 선택이 위험 35% → 18%. 표본이 작아서 실행마다 몇 %p씩 달라집니다.
+- **대상:** Zoro-1을 처음 보는 사람 중, 보정된 확률을 "답 고르기" 너머로 쓰고 싶은 사람. 빠른 판단과 느린 확인을 섞는
+  에이전트(System 1 / System 2)를 만드는 사람에게 특히 맞습니다.
+- **테스트:** `test_second_thought.py`가 mock 모드로 노트북 코드를 그대로 실행해 물리 검사, 요청 형식(Zoro-1 파서),
+  노트북 전체 실행을 확인합니다.
 - **실행:** Zoro-1 서버를 띄우고 노트북을 위에서부터 실행합니다. 모델이 없으면 `ZORO_MOCK=1`로 가짜 답을 씁니다.
   GPU 서버라면 `ZORO_CONCURRENCY=4`를 권합니다.
 
